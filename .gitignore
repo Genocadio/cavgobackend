@@ -1,0 +1,56 @@
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+
+# Docker volumes
+postgres_data/
+postgres_data_prod/
+
+# Logs
+*.log
+logs/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts
+build/
+target/
+dist/
+
+# Node modules (if any frontend components)
+node_modules/
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Java build artifacts
+*.jar
+*.war
+*.ear
+*.class
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3 

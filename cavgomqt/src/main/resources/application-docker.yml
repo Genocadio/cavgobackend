@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: cavgomqt
+  integration:
+    mqtt:
+      default-qos: 1
+      default-retained: false
+      completion-timeout: 5000
+  datasource:
+    url: jdbc:postgresql://cavgo-postgres:5432/cavgomqt
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    hibernate:
+      ddl-auto: update
+  rabbitmq:
+    host: rabbitmq
+    port: 5672
+    username: admin
+    password: admin
+mqtt:
+  client:
+    id: cavgomqt
+  username: genoyves
+  password: Cadio*11.
+  broker:
+    url: ssl://73d5ec93cbe843ab83b8f29e68f6979e.s1.eu.hivemq.cloud
+  topic: hello
+logging:
+  level:
+    org:
+      springframework:
+        mqtt: DEBUG
+    com:
+      genoyves: DEBUG
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eurekacavgo:8761/eureka/
+    register-with-eureka: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${random.uuid}
+
+
+app:
+  heartbeat:
+    interval: 30000
+    timeout: 60000
+  max-concurrent-trips: 2000
+  max-cars: 3000
+  max-bookings-per-trip: 60
+server:
+  port: 6090
+vehicle:
+  backend:
+    url: http://cavgomain:6060

@@ -1,0 +1,130 @@
+spring:
+  application:
+    name: cavgogateway
+  cloud:
+    gateway:
+      # Add request/response logging filter globally
+      default-filters:
+        - name: RequestResponse
+          args:
+            includeRequestBody: true
+            includeResponseBody: true
+            includeHeaders: true
+      server:
+        webflux:
+          routes:
+            # SSE specific route - MUST come before general route
+            - id: cavgotrips-sse
+              uri: lb://cavgotrips
+              predicates:
+                - Path=/api/navig/events/**
+                - Header=Accept, text/event-stream
+              filters:
+                - StripPrefix=2
+                - name: DedupeResponseHeader
+                  args:
+                    name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                    strategy: RETAIN_FIRST
+              metadata:
+                response-timeout: 300000  # 5 minutes for SSE
+                connect-timeout: 10000
+
+            # Alternative SSE route without Accept header requirement
+            - id: cavgotrips-sse-fallback
+              uri: lb://cavgotrips
+              predicates:
+                - Path=/api/navig/events/**
+              filters:
+                - StripPrefix=2
+                - name: DedupeResponseHeader
+                  args:
+                    name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                    strategy: RETAIN_FIRST
+              metadata:
+                response-timeout: 300000
+                connect-timeout: 10000
+
+            - id: cavgomain
+              uri: lb://cavgomain
+              predicates:
+                - Path=/api/main/**
+              filters:
+                - StripPrefix=1
+                - name: DedupeResponseHeader
+                  args:
+                    name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                    strategy: RETAIN_FIRST
+
+            # General cavgotrips route - MUST come after SSE routes
+            - id: cavgotrips
+              uri: lb://cavgotrips
+              predicates:
+                - Path=/api/navig/**
+              filters:
+                - StripPrefix=2
+                - name: DedupeResponseHeader
+                  args:
+                    name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                    strategy: RETAIN_FIRST
+
+            - id: cavgobooking
+              uri: lb://cavgobooking
+              predicates:
+                - Path=/api/book/**
+              filters:
+                - StripPrefix=2
+                - name: DedupeResponseHeader
+                  args:
+                    name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                    strategy: RETAIN_FIRST
+          globalcors:
+            cors-configurations:
+                '[/**]':
+                    allowedOrigins:
+                    - "http://localhost:3000"
+                    - "http://localhost:8080"
+                    - "https://your-frontend-domain.com"
+                    allowedMethods:
+                    - GET
+                    - POST
+                    - PUT
+                    - DELETE
+                    - OPTIONS
+                    allowedHeaders: "*"
+                    allowCredentials: true
+                    maxAge: 3600
+
+server:
+  port: 8070
+
+# Enhanced Logging Configuration
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.cloud.gateway.filter: DEBUG
+    org.springframework.cloud.gateway.route: DEBUG
+    org.springframework.cloud.gateway.handler: DEBUG
+    org.springframework.security: DEBUG
+    com.nexxserve.gateway: DEBUG
+    com.nexxserve.cavgogateway: DEBUG
+    reactor.netty: DEBUG
+    org.springframework.web.reactive: DEBUG
+    org.springframework.web.cors: DEBUG
+    org.springframework.http.server.reactive: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId},%X{spanId}] %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId},%X{spanId}] %logger{36} - %msg%n"
+  file:
+    name: logs/gateway.log
+
+# Management endpoints for monitoring
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway
+  endpoint:
+    health:
+      show-details: always
+    gateway:
+      access: unrestricted

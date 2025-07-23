@@ -1,0 +1,32 @@
+spring:
+  application:
+   name: cavgomain
+  datasource:
+    url: jdbc:postgresql://localhost:5432/cavgomain
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+  web:
+    resources:
+      add-mappings: false
+
+  jpa:
+   hibernate:
+     ddl-auto: update
+
+jwt:
+ secret: "u8F3v1Q2w4E6r8T9y2B5n7M0p3L6s9V1x"
+ expiration: 3600 # in seconds, e.g., 1 hour
+ access-token-expiration: 3600
+ refresh-token-expiration: 86400
+
+eureka:
+ client:
+  register-with-eureka: true
+ instance:
+  prefer-ip-address: true
+  instance-id: ${spring.application.name}:${random.uuid}
+server:
+  port: 8060

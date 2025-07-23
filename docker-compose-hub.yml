@@ -1,0 +1,273 @@
+version: "3.8"
+
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+    # volumes:
+    #   - /opt/cavgo-data/rabbitmq:/var/lib/rabbitmq
+    networks:
+      - cavgo-network
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: cavgo-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - /opt/cavgo-data/postgres:/var/lib/postgresql/data
+      - ./init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cavgo-network
+    restart: unless-stopped
+
+  # Eureka Service Discovery
+  eurekacavgo:
+    image: genoyves/cavgo-system:eureka
+    container_name: cavgo-eureka
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "8761:8761"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cavgo-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8761/actuator/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # Main Service (Java)
+  cavgomain:
+    image: genoyves/cavgo-system:main
+    container_name: cavgo-main
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/cavgomain
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_SHOW_SQL: false
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
+    ports:
+      - "6060:6060"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eurekacavgo:
+        condition: service_healthy
+    networks:
+      - cavgo-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:6060/actuator/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # Gateway Service (Java)
+  cavgogateway:
+    image: genoyves/cavgo-system:gateway
+    container_name: cavgo-gateway
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
+    ports:
+      - "8080:8080"
+    depends_on:
+      eurekacavgo:
+        condition: service_healthy
+      cavgomain:
+        condition: service_healthy
+    networks:
+      - cavgo-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8080/actuator/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # Trips Service (Go)
+  cavgotrips:
+    image: genoyves/cavgo-system:trips
+    container_name: cavgo-trips
+    environment:
+      DATABASE_URL: host=postgres user=postgres password=postgres dbname=cavgotrips port=5432 sslmode=disable
+      PORT: 6080
+      EUREKA_SERVER_URL: http://eurekacavgo:8761
+      EUREKA_APP_NAME: CAVGOTRIPS
+      VEHICLE_SERVICE_URL: http://cavgomain:6060/main/vehicles/
+      EUREKA_REGISTER: true
+      EUREKA_PREFER_IP: true
+      RABBITMQ_HOST: rabbitmq:5672
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin
+      RABBITMQ_QUEUE: trips.queue
+      RABBITMQ_EXCHANGE: bookings.fanout
+    ports:
+      - "6080:6080"
+    depends_on:
+      cavgomain:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      eurekacavgo:
+        condition: service_healthy
+    networks:
+      - cavgo-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:6080/health",
+        ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Booking Service (Go)
+  cavgobooking:
+    image: genoyves/cavgo-system:booking
+    container_name: cavgo-booking
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/cavgobooks?sslmode=disable
+      SERVER_ADDRESS: :6030
+      PORT: 6030
+      ENVIRONMENT: docker
+      TRIP_SERVICE_URL: http://cavgotrips:6080
+      EUREKA_SERVER_URL: http://eurekacavgo:8761
+      EUREKA_APP_NAME: cavgobooking
+      EUREKA_REGISTER: true
+      EUREKA_PREFER_IP: true
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin
+      RABBITMQ_EXCHANGE: bookings.fanout
+    ports:
+      - "6030:6030"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eurekacavgo:
+        condition: service_healthy
+      cavgotrips:
+        condition: service_healthy
+    networks:
+      - cavgo-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:6030/health",
+        ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  cavgomqt:
+    image: genoyves/cavgo-system:cavgomqt
+    container_name: cavgo-maqtt
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/cavgomqt
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_SHOW_SQL: false
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin
+    ports:
+      - "6090:6090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eurekacavgo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    networks:
+      - cavgo-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:6090/actuator/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+networks:
+  cavgo-network:
+    driver: bridge

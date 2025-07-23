@@ -1,0 +1,581 @@
+package repository
+
+import (
+	"cavgotrips/internal/models"
+	"sort"
+	"strings"
+
+	"gorm.io/gorm"
+)
+
+type tripRepository struct {
+	db *gorm.DB
+}
+
+func NewTripRepository(db *gorm.DB) TripRepository {
+	return &tripRepository{db: db}
+}
+
+func (r *tripRepository) Create(trip *models.Trip) error {
+	return r.db.Create(trip).Error
+}
+
+func (r *tripRepository) CreateWaypoint(waypoint *models.TripWaypoint) error {
+	return r.db.Create(waypoint).Error
+}
+
+func (r *tripRepository) GetAll() ([]models.Trip, error) {
+	var trips []models.Trip
+	err := r.db.Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		Order("created_at DESC").
+		Find(&trips).Error
+	return trips, err
+}
+
+func (r *tripRepository) GetByID(id int64) (*models.Trip, error) {
+	var trip models.Trip
+	err := r.db.First(&trip, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &trip, nil
+}
+
+func (r *tripRepository) GetByIDWithRelations(id int64) (*models.Trip, error) {
+	var trip models.Trip
+	err := r.db.Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		First(&trip, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &trip, nil
+}
+
+func (r *tripRepository) UpdateProgress(id int64, updates map[string]interface{}) error {
+	return r.db.Model(&models.Trip{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func (r *tripRepository) UpdateWaypointProgress(waypointID int64, updates map[string]interface{}) error {
+	return r.db.Model(&models.TripWaypoint{}).Where("id = ?", waypointID).Updates(updates).Error
+}
+
+func (r *tripRepository) MarkWaypointPassed(waypointID int64, timestamp int64) error {
+	return r.db.Model(&models.TripWaypoint{}).Where("id = ?", waypointID).Updates(map[string]interface{}{
+		"is_passed":        true,
+		"passed_timestamp": timestamp,
+	}).Error
+}
+
+func (r *tripRepository) GetTripsByStatus(status string) ([]models.Trip, error) {
+	var trips []models.Trip
+	err := r.db.Where("status = ?", status).
+		Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		Order("created_at DESC").
+		Find(&trips).Error
+	return trips, err
+}
+
+func (r *tripRepository) GetTripsByCarPlate(carPlate string) ([]models.Trip, error) {
+	var trips []models.Trip
+	err := r.db.Where("car_plate = ?", carPlate).
+		Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		Order("created_at DESC").
+		Find(&trips).Error
+	return trips, err
+}
+
+func (r *tripRepository) GetTripsByFilters(origin, destination, company string) ([]models.Trip, error) {
+	var trips []models.Trip
+	db := r.db.Preload("Route.Origin").Preload("Route.Destination").Preload("Waypoints.Location").Order("created_at DESC")
+
+	if company != "" {
+		db = db.Where("LOWER(trips.vehicle->>'company_name') LIKE ?", "%"+strings.ToLower(company)+"%")
+	}
+
+	err := db.Find(&trips).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Remove waypoints where is_passed is true from each trip
+	for i := range trips {
+		filteredWaypoints := make([]models.TripWaypoint, 0, len(trips[i].Waypoints))
+		for _, wp := range trips[i].Waypoints {
+			if !wp.IsPassed {
+				filteredWaypoints = append(filteredWaypoints, wp)
+			}
+		}
+		trips[i].Waypoints = filteredWaypoints
+	}
+
+	// Filter by origin/destination in Go (route or any non-passed waypoint)
+	filteredTrips := make([]models.Trip, 0, len(trips))
+	for _, trip := range trips {
+		matchOrigin := false
+		matchDestination := false
+
+		// Track waypoint order if both are found as waypoints
+		originWaypointOrder := -1
+		destinationWaypointOrder := -1
+
+		if origin == "" {
+			matchOrigin = true
+		} else {
+			// Check route origin
+			if (trip.Route.Origin.CustomName != nil && containsIgnoreCase(*trip.Route.Origin.CustomName, origin)) ||
+				(trip.Route.Origin.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Origin.GooglePlaceName, origin)) {
+				matchOrigin = true
+			}
+			// Check waypoints
+			if !matchOrigin {
+				for _, wp := range trip.Waypoints {
+					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, origin) {
+						matchOrigin = true
+						originWaypointOrder = wp.Order
+						break
+					}
+					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, origin) {
+						matchOrigin = true
+						originWaypointOrder = wp.Order
+						break
+					}
+				}
+			}
+		}
+
+		if destination == "" {
+			matchDestination = true
+		} else {
+			// Check route destination
+			if (trip.Route.Destination.CustomName != nil && containsIgnoreCase(*trip.Route.Destination.CustomName, destination)) ||
+				(trip.Route.Destination.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Destination.GooglePlaceName, destination)) {
+				matchDestination = true
+			}
+			// Check waypoints
+			if !matchDestination {
+				for _, wp := range trip.Waypoints {
+					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, destination) {
+						matchDestination = true
+						destinationWaypointOrder = wp.Order
+						break
+					}
+					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, destination) {
+						matchDestination = true
+						destinationWaypointOrder = wp.Order
+						break
+					}
+				}
+			}
+		}
+
+		// If both origin and destination are found as waypoints, check order
+		if matchOrigin && matchDestination {
+			if originWaypointOrder != -1 && destinationWaypointOrder != -1 {
+				if originWaypointOrder < destinationWaypointOrder {
+					filteredTrips = append(filteredTrips, trip)
+				}
+			} else {
+				// If not both are waypoints, keep current logic
+				filteredTrips = append(filteredTrips, trip)
+			}
+		}
+	}
+
+	filteredTrips = sortTripsByMatchScore(filteredTrips, origin, destination, company)
+
+	return filteredTrips, nil
+}
+
+func (r *tripRepository) GetTripsByFiltersPaginated(origin, destination, company string, limit, offset int) ([]models.Trip, int64, error) {
+	var trips []models.Trip
+	db := r.db.Preload("Route.Origin").Preload("Route.Destination").Preload("Waypoints.Location").Order("created_at DESC")
+
+	if company != "" {
+		db = db.Where("LOWER(trips.vehicle->>'company_name') LIKE ?", "%"+strings.ToLower(company)+"%")
+	}
+
+	var total int64
+	db.Model(&models.Trip{}).Count(&total)
+
+	if limit > 0 {
+		db = db.Limit(limit)
+	}
+	if offset > 0 {
+		db = db.Offset(offset)
+	}
+
+	err := db.Find(&trips).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Remove waypoints where is_passed is true from each trip
+	for i := range trips {
+		filteredWaypoints := make([]models.TripWaypoint, 0, len(trips[i].Waypoints))
+		for _, wp := range trips[i].Waypoints {
+			if !wp.IsPassed {
+				filteredWaypoints = append(filteredWaypoints, wp)
+			}
+		}
+		trips[i].Waypoints = filteredWaypoints
+	}
+
+	// Filter by origin/destination in Go (route or any non-passed waypoint)
+	filteredTrips := make([]models.Trip, 0, len(trips))
+	for _, trip := range trips {
+		matchOrigin := false
+		matchDestination := false
+
+		// Track waypoint order if both are found as waypoints
+		originWaypointOrder := -1
+		destinationWaypointOrder := -1
+
+		if origin == "" {
+			matchOrigin = true
+		} else {
+			// Check route origin
+			if (trip.Route.Origin.CustomName != nil && containsIgnoreCase(*trip.Route.Origin.CustomName, origin)) ||
+				(trip.Route.Origin.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Origin.GooglePlaceName, origin)) {
+				matchOrigin = true
+			}
+			// Check waypoints
+			if !matchOrigin {
+				for _, wp := range trip.Waypoints {
+					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, origin) {
+						matchOrigin = true
+						originWaypointOrder = wp.Order
+						break
+					}
+					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, origin) {
+						matchOrigin = true
+						originWaypointOrder = wp.Order
+						break
+					}
+				}
+			}
+		}
+
+		if destination == "" {
+			matchDestination = true
+		} else {
+			// Check route destination
+			if (trip.Route.Destination.CustomName != nil && containsIgnoreCase(*trip.Route.Destination.CustomName, destination)) ||
+				(trip.Route.Destination.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Destination.GooglePlaceName, destination)) {
+				matchDestination = true
+			}
+			// Check waypoints
+			if !matchDestination {
+				for _, wp := range trip.Waypoints {
+					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, destination) {
+						matchDestination = true
+						destinationWaypointOrder = wp.Order
+						break
+					}
+					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, destination) {
+						matchDestination = true
+						destinationWaypointOrder = wp.Order
+						break
+					}
+				}
+			}
+		}
+
+		// If both origin and destination are found as waypoints, check order
+		if matchOrigin && matchDestination {
+			if originWaypointOrder != -1 && destinationWaypointOrder != -1 {
+				if originWaypointOrder < destinationWaypointOrder {
+					filteredTrips = append(filteredTrips, trip)
+				}
+			} else {
+				// If not both are waypoints, keep current logic
+				filteredTrips = append(filteredTrips, trip)
+			}
+		}
+	}
+
+	filteredTrips = sortTripsByMatchScore(filteredTrips, origin, destination, company)
+
+	return filteredTrips, total, nil
+}
+
+func (r *tripRepository) GetTripsByVehicleID(vehicleID int64) ([]models.Trip, error) {
+	var trips []models.Trip
+	err := r.db.Preload("Route").Preload("Waypoints").Where("vehicle_id = ?", vehicleID).Find(&trips).Error
+	if err != nil {
+		return nil, err
+	}
+	return trips, nil
+}
+
+func (r *tripRepository) GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error) {
+	var trips []models.Trip
+	err := r.db.Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		Joins("JOIN routes ON trips.route_id = routes.id").
+		Where("routes.city_route = ?", cityRoute).
+		Order("trips.created_at DESC").
+		Find(&trips).Error
+	if err != nil {
+		return nil, err
+	}
+	return trips, nil
+}
+
+// GetTripsByFiltersWithCityRoute filters by origin, destination, company, and cityRoute (routes.city_route)
+func (r *tripRepository) GetTripsByFiltersWithCityRoute(origin, destination, company string, cityRoute bool, limit, offset int) ([]models.Trip, int64, error) {
+	var trips []models.Trip
+	db := r.db.Preload("Route.Origin").Preload("Route.Destination").Preload("Waypoints.Location").
+		Joins("JOIN routes ON trips.route_id = routes.id").
+		Where("routes.city_route = ?", cityRoute).
+		Order("trips.created_at DESC")
+
+	if company != "" {
+		db = db.Where("LOWER(trips.vehicle->>'company_name') LIKE ?", "%"+strings.ToLower(company)+"%")
+	}
+
+	var total int64
+	db.Model(&models.Trip{}).Count(&total)
+
+	if limit > 0 {
+		db = db.Limit(limit)
+	}
+	if offset > 0 {
+		db = db.Offset(offset)
+	}
+
+	err := db.Find(&trips).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Remove waypoints where is_passed is true from each trip
+	for i := range trips {
+		filteredWaypoints := make([]models.TripWaypoint, 0, len(trips[i].Waypoints))
+		for _, wp := range trips[i].Waypoints {
+			if !wp.IsPassed {
+				filteredWaypoints = append(filteredWaypoints, wp)
+			}
+		}
+		trips[i].Waypoints = filteredWaypoints
+	}
+
+	// Filter by origin/destination in Go (route or any non-passed waypoint)
+	filteredTrips := make([]models.Trip, 0, len(trips))
+	for _, trip := range trips {
+		matchOrigin := false
+		matchDestination := false
+
+		// Track waypoint order if both are found as waypoints
+		originWaypointOrder := -1
+		destinationWaypointOrder := -1
+
+		if origin == "" {
+			matchOrigin = true
+		} else {
+			// Check route origin
+			if (trip.Route.Origin.CustomName != nil && containsIgnoreCase(*trip.Route.Origin.CustomName, origin)) ||
+				(trip.Route.Origin.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Origin.GooglePlaceName, origin)) {
+				matchOrigin = true
+			}
+			// Check waypoints
+			if !matchOrigin {
+				for _, wp := range trip.Waypoints {
+					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, origin) {
+						matchOrigin = true
+						originWaypointOrder = wp.Order
+						break
+					}
+					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, origin) {
+						matchOrigin = true
+						originWaypointOrder = wp.Order
+						break
+					}
+				}
+			}
+		}
+
+		if destination == "" {
+			matchDestination = true
+		} else {
+			// Check route destination
+			if (trip.Route.Destination.CustomName != nil && containsIgnoreCase(*trip.Route.Destination.CustomName, destination)) ||
+				(trip.Route.Destination.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Destination.GooglePlaceName, destination)) {
+				matchDestination = true
+			}
+			// Check waypoints
+			if !matchDestination {
+				for _, wp := range trip.Waypoints {
+					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, destination) {
+						matchDestination = true
+						destinationWaypointOrder = wp.Order
+						break
+					}
+					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, destination) {
+						matchDestination = true
+						destinationWaypointOrder = wp.Order
+						break
+					}
+				}
+			}
+		}
+
+		// If both origin and destination are found as waypoints, check order
+		if matchOrigin && matchDestination {
+			if originWaypointOrder != -1 && destinationWaypointOrder != -1 {
+				if originWaypointOrder < destinationWaypointOrder {
+					filteredTrips = append(filteredTrips, trip)
+				}
+			} else {
+				// If not both are waypoints, keep current logic
+				filteredTrips = append(filteredTrips, trip)
+			}
+		}
+	}
+
+	filteredTrips = sortTripsByMatchScore(filteredTrips, origin, destination, company)
+
+	return filteredTrips, int64(len(filteredTrips)), nil
+}
+
+// containsIgnoreCase checks if substr is in s, case-insensitive
+func containsIgnoreCase(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+// matchScore returns (score, position):
+// score 3: whole field starts with query
+// score 2: any word starts with query (position = word index)
+// score 1: field contains query (position = index in field)
+// score 0: no match
+func matchScore(field, query string) (int, int) {
+	fieldLower := strings.ToLower(field)
+	queryLower := strings.ToLower(query)
+	if strings.HasPrefix(fieldLower, queryLower) {
+		return 3, 0
+	}
+	words := strings.Fields(fieldLower)
+	for i, word := range words {
+		if strings.HasPrefix(word, queryLower) {
+			return 2, i
+		}
+	}
+	if idx := strings.Index(fieldLower, queryLower); idx != -1 {
+		return 1, idx
+	}
+	return 0, -1
+}
+
+// sortTripsByMatchScore sorts trips by the highest match score for origin, destination, or company, then by position, then stable
+func sortTripsByMatchScore(trips []models.Trip, origin, destination, company string) []models.Trip {
+	type scoredTrip struct {
+		trip    models.Trip
+		score   int
+		pos     int
+		origIdx int
+	}
+	var scored []scoredTrip
+	for idx, trip := range trips {
+		maxScore := 0
+		minPos := 9999 // large number for min position
+		// Company (from vehicle)
+		if company != "" && trip.Vehicle.CompanyName != "" {
+			s, p := matchScore(trip.Vehicle.CompanyName, company)
+			if s > maxScore || (s == maxScore && p < minPos) {
+				maxScore = s
+				minPos = p
+			}
+		}
+		// Origin
+		if origin != "" {
+			if trip.Route.Origin.CustomName != nil {
+				s, p := matchScore(*trip.Route.Origin.CustomName, origin)
+				if s > maxScore || (s == maxScore && p < minPos) {
+					maxScore = s
+					minPos = p
+				}
+			}
+			if trip.Route.Origin.GooglePlaceName != nil {
+				s, p := matchScore(*trip.Route.Origin.GooglePlaceName, origin)
+				if s > maxScore || (s == maxScore && p < minPos) {
+					maxScore = s
+					minPos = p
+				}
+			}
+			for _, wp := range trip.Waypoints {
+				if wp.Location.CustomName != nil {
+					s, p := matchScore(*wp.Location.CustomName, origin)
+					if s > maxScore || (s == maxScore && p < minPos) {
+						maxScore = s
+						minPos = p
+					}
+				}
+				if wp.Location.GooglePlaceName != nil {
+					s, p := matchScore(*wp.Location.GooglePlaceName, origin)
+					if s > maxScore || (s == maxScore && p < minPos) {
+						maxScore = s
+						minPos = p
+					}
+				}
+			}
+		}
+		// Destination
+		if destination != "" {
+			if trip.Route.Destination.CustomName != nil {
+				s, p := matchScore(*trip.Route.Destination.CustomName, destination)
+				if s > maxScore || (s == maxScore && p < minPos) {
+					maxScore = s
+					minPos = p
+				}
+			}
+			if trip.Route.Destination.GooglePlaceName != nil {
+				s, p := matchScore(*trip.Route.Destination.GooglePlaceName, destination)
+				if s > maxScore || (s == maxScore && p < minPos) {
+					maxScore = s
+					minPos = p
+				}
+			}
+			for _, wp := range trip.Waypoints {
+				if wp.Location.CustomName != nil {
+					s, p := matchScore(*wp.Location.CustomName, destination)
+					if s > maxScore || (s == maxScore && p < minPos) {
+						maxScore = s
+						minPos = p
+					}
+				}
+				if wp.Location.GooglePlaceName != nil {
+					s, p := matchScore(*wp.Location.GooglePlaceName, destination)
+					if s > maxScore || (s == maxScore && p < minPos) {
+						maxScore = s
+						minPos = p
+					}
+				}
+			}
+		}
+		scored = append(scored, scoredTrip{trip, maxScore, minPos, idx})
+	}
+	// Sort by score descending, then position ascending, then original order
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		if scored[i].pos != scored[j].pos {
+			return scored[i].pos < scored[j].pos
+		}
+		return scored[i].origIdx < scored[j].origIdx
+	})
+	// Extract sorted trips
+	result := make([]models.Trip, len(scored))
+	for i, st := range scored {
+		result[i] = st.trip
+	}
+	return result
+}

@@ -1,0 +1,723 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+
+	"cavgoBooking/models"
+	"cavgoBooking/repository"
+
+	"github.com/google/uuid"
+)
+
+type BookingService interface {
+	CreateBooking(ctx context.Context, req *models.BookingRequest) (*models.BookingResponse, error)
+	GetBookingByID(ctx context.Context, id string) (*models.Booking, error)
+	GetBookingByReference(ctx context.Context, reference string) (*models.Booking, error)
+	GetBookingsByTripID(ctx context.Context, tripID int) ([]models.Booking, error)
+	GetBookingsByUserID(ctx context.Context, userID string) ([]models.Booking, error)
+	CancelBooking(ctx context.Context, id string) error
+
+	ValidateTicket(ctx context.Context, req *models.TicketValidationRequest) (*models.Ticket, error)
+	GetTicketsByBookingID(ctx context.Context, bookingID string) ([]models.Ticket, error)
+
+	ProcessPayment(ctx context.Context, bookingID string, paymentData *string) (*models.BookingResponse, error)
+	RefundPayment(ctx context.Context, bookingID string) error
+}
+
+type bookingService struct {
+	bookingRepo     repository.BookingRepository
+	tripService     TripService        // Interface to trip service
+	rabbitPublisher *RabbitMQPublisher // Add publisher
+}
+
+// TripService interface for trip service integration (now HTTP-based)
+type TripService interface {
+	GetTripByID(ctx context.Context, tripID int) (*models.Trip, error)
+	ValidateTripBooking(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int) error
+}
+
+// Remove UserService interface and struct
+// type UserService interface {
+// 	GetUserByID(ctx context.Context, userID string) (*User, error)
+// 	ValidateUser(ctx context.Context, userID string) error
+// }
+
+// Remove User struct
+// type User struct { ... }
+
+func NewBookingService(bookingRepo repository.BookingRepository, tripService TripService, publisher *RabbitMQPublisher) BookingService {
+	return &bookingService{
+		bookingRepo:     bookingRepo,
+		tripService:     tripService,
+		rabbitPublisher: publisher,
+	}
+}
+
+func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingRequest) (*models.BookingResponse, error) {
+	// Validate request (user_name and user_phone required)
+	if err := s.validateBookingRequest(ctx, req); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+
+	// Validate trip availability and get trip
+	trip, err := s.tripService.GetTripByID(ctx, req.TripID)
+	if err != nil {
+		return nil, fmt.Errorf("trip validation failed: %w", err)
+	}
+	if trip.Status != "SCHEDULED" && trip.Status != "IN_PROGRESS" {
+		return nil, fmt.Errorf("trip is not available: status is %s", trip.Status)
+	}
+
+	// Ensure requested tickets do not exceed or equal available seats
+	if req.NumberOfTickets >= trip.Seats {
+		return nil, fmt.Errorf("requested number of tickets (%d) must be less than available seats (%d)", req.NumberOfTickets, trip.Seats)
+	}
+
+	// Calculate price based on pickup and dropoff
+	pickupOrder := -1
+	pickupPrice := 0.0
+	if fmt.Sprintf("%d", trip.Route.OriginID) == req.PickupLocationID {
+		pickupOrder = -1
+		pickupPrice = 0.0
+	} else {
+		for _, wp := range trip.Waypoints {
+			if fmt.Sprintf("%d", wp.LocationID) == req.PickupLocationID {
+				pickupOrder = wp.Order
+				pickupPrice = wp.Price
+				break
+			}
+		}
+	}
+
+	dropoffOrder := -1
+	dropoffPrice := 0.0
+	if fmt.Sprintf("%d", trip.Route.DestinationID) == req.DropoffLocationID {
+		dropoffOrder = 999999
+		dropoffPrice = trip.Route.RoutePrice
+	} else {
+		for _, wp := range trip.Waypoints {
+			if fmt.Sprintf("%d", wp.LocationID) == req.DropoffLocationID {
+				dropoffOrder = wp.Order
+				dropoffPrice = wp.Price
+				break
+			}
+		}
+	}
+
+	if pickupOrder == -1 && dropoffOrder == 999999 {
+		// Origin to destination, use route price
+		dropoffPrice = trip.Route.RoutePrice
+		pickupPrice = 0.0
+	}
+
+	if pickupOrder >= dropoffOrder {
+		return nil, fmt.Errorf("incorrect location: pickup must be before dropoff")
+	}
+
+	pricePerTicket := dropoffPrice - pickupPrice
+	if pricePerTicket < 0 {
+		pricePerTicket = 0
+	}
+	totalAmount := pricePerTicket * float64(req.NumberOfTickets)
+
+	// Create booking
+	booking := &models.Booking{
+		ID:                uuid.New().String(),
+		TripID:            req.TripID,
+		PickupLocationID:  req.PickupLocationID,
+		DropoffLocationID: req.DropoffLocationID,
+		NumberOfTickets:   req.NumberOfTickets,
+		TotalAmount:       totalAmount,
+		Status:            models.BookingStatusPending,
+		BookingReference:  s.generateBookingReference(),
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+		UserID:            req.UserID,
+		UserEmail:         req.UserEmail,
+		UserPhone:         req.UserPhone,
+		UserName:          req.UserName,
+	}
+
+	// Save booking
+	if err := s.bookingRepo.CreateBooking(ctx, booking); err != nil {
+		return nil, fmt.Errorf("failed to create booking: %w", err)
+	}
+
+	// Create tickets
+	tickets := s.generateTickets(booking.ID, req.NumberOfTickets, trip, req.PickupLocationID, req.DropoffLocationID)
+	if err := s.bookingRepo.CreateTickets(ctx, tickets); err != nil {
+		return nil, fmt.Errorf("failed to create tickets: %w", err)
+	}
+
+	// Create payment record
+	payment := &models.Payment{
+		ID:            uuid.New().String(),
+		BookingID:     booking.ID,
+		Amount:        totalAmount,
+		PaymentMethod: req.PaymentMethod,
+		Status:        models.PaymentStatusPending,
+		PaymentData:   req.PaymentData,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	if err := s.bookingRepo.CreatePayment(ctx, payment); err != nil {
+		return nil, fmt.Errorf("failed to create payment: %w", err)
+	}
+
+	// Load full booking with relations
+	booking.Tickets = tickets
+	booking.Payment = payment
+
+	resp := &models.BookingResponse{
+		Booking:          booking,
+		Message:          "Booking created successfully",
+		PaymentReference: &payment.ID,
+	}
+
+	// Publish to RabbitMQ (ignore error, but log)
+	if s.rabbitPublisher != nil {
+		err := s.rabbitPublisher.PublishBookingEvent("created", resp)
+		if err != nil {
+			fmt.Println("[RabbitMQ] Failed to publish booking created event:", err)
+		}
+	}
+
+	return resp, nil
+}
+
+func (s *bookingService) GetBookingByID(ctx context.Context, id string) (*models.Booking, error) {
+	booking, err := s.bookingRepo.GetBookingByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get booking: %w", err)
+	}
+
+	// Load tickets
+	tickets, err := s.bookingRepo.GetTicketsByBookingID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tickets: %w", err)
+	}
+	booking.Tickets = tickets
+
+	// Load payment
+	payment, err := s.bookingRepo.GetPaymentByBookingID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get payment: %w", err)
+	}
+	booking.Payment = payment
+
+	// If booking is canceled and payment is failed, set tickets to nil
+	if booking.Status == models.BookingStatusCanceled && payment.Status == models.PaymentStatusFailed {
+		booking.Tickets = nil
+	}
+
+	return booking, nil
+}
+
+func (s *bookingService) GetBookingByReference(ctx context.Context, reference string) (*models.Booking, error) {
+	booking, err := s.bookingRepo.GetBookingByReference(ctx, reference)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get booking: %w", err)
+	}
+
+	// Load tickets
+	tickets, err := s.bookingRepo.GetTicketsByBookingID(ctx, booking.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tickets: %w", err)
+	}
+	booking.Tickets = tickets
+
+	// Load payment
+	payment, err := s.bookingRepo.GetPaymentByBookingID(ctx, booking.ID)
+	if err == nil {
+		booking.Payment = payment
+		if booking.Status == models.BookingStatusCanceled && payment.Status == models.PaymentStatusFailed {
+			booking.Tickets = nil
+		}
+	}
+
+	return booking, nil
+}
+
+func (s *bookingService) GetBookingsByTripID(ctx context.Context, tripID int) ([]models.Booking, error) {
+	return s.bookingRepo.GetBookingsByTripID(ctx, tripID)
+}
+
+func (s *bookingService) GetBookingsByUserID(ctx context.Context, userID string) ([]models.Booking, error) {
+	bookings, err := s.bookingRepo.GetBookingsByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range bookings {
+		// Load tickets
+		tickets, err := s.bookingRepo.GetTicketsByBookingID(ctx, bookings[i].ID)
+		if err == nil {
+			bookings[i].Tickets = tickets
+		}
+		// Load payment
+		payment, err := s.bookingRepo.GetPaymentByBookingID(ctx, bookings[i].ID)
+		if err == nil {
+			bookings[i].Payment = payment
+			if bookings[i].Status == models.BookingStatusCanceled && payment.Status == models.PaymentStatusFailed {
+				bookings[i].Tickets = nil
+			}
+		}
+	}
+
+	return bookings, nil
+}
+
+func (s *bookingService) CancelBooking(ctx context.Context, id string) error {
+	booking, err := s.bookingRepo.GetBookingByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to get booking: %w", err)
+	}
+
+	if booking.Status != models.BookingStatusPending && booking.Status != models.BookingStatusConfirmed {
+		return fmt.Errorf("booking cannot be canceled in current status: %s", booking.Status)
+	}
+
+	// Update booking status
+	if err := s.bookingRepo.UpdateBookingStatus(ctx, id, models.BookingStatusCanceled); err != nil {
+		return fmt.Errorf("failed to cancel booking: %w", err)
+	}
+
+	// Process refund if payment was completed
+	payment, err := s.bookingRepo.GetPaymentByBookingID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to get payment: %w", err)
+	}
+
+	if payment.Status == models.PaymentStatusCompleted {
+		return s.RefundPayment(ctx, id)
+	}
+
+	return nil
+}
+
+func (s *bookingService) ValidateTicket(ctx context.Context, req *models.TicketValidationRequest) (*models.Ticket, error) {
+	// Get ticket by QR code
+	ticket, err := s.bookingRepo.GetTicketByQRCode(ctx, req.QRCode)
+	if err != nil {
+		return nil, fmt.Errorf("ticket not found: %w", err)
+	}
+
+	// Verify ticket number matches
+	if ticket.TicketNumber != req.TicketNumber {
+		return nil, fmt.Errorf("ticket number mismatch")
+	}
+
+	// Check if ticket is already used
+	if ticket.IsUsed {
+		return nil, fmt.Errorf("ticket already used")
+	}
+
+	// Get booking to check status
+	booking, err := s.bookingRepo.GetBookingByID(ctx, ticket.BookingID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get booking: %w", err)
+	}
+
+	if booking.Status != models.BookingStatusConfirmed {
+		return nil, fmt.Errorf("booking not confirmed")
+	}
+
+	// Validate ticket
+	if err := s.bookingRepo.ValidateTicket(ctx, ticket.ID, req.ValidatedBy); err != nil {
+		return nil, fmt.Errorf("failed to validate ticket: %w", err)
+	}
+
+	// Update ticket status
+	ticket.IsUsed = true
+	now := time.Now()
+	ticket.UsedAt = &now
+	ticket.ValidatedBy = &req.ValidatedBy
+	ticket.UpdatedAt = now
+
+	return ticket, nil
+}
+
+func (s *bookingService) GetTicketsByBookingID(ctx context.Context, bookingID string) ([]models.Ticket, error) {
+	return s.bookingRepo.GetTicketsByBookingID(ctx, bookingID)
+}
+
+func (s *bookingService) ProcessPayment(ctx context.Context, bookingID string, paymentData *string) (*models.BookingResponse, error) {
+	payment, err := s.bookingRepo.GetPaymentByBookingID(ctx, bookingID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get payment: %w", err)
+	}
+
+	// Mock payment processing - just mark as completed
+	transactionID := s.generateTransactionID()
+
+	// Update payment status
+	if err := s.bookingRepo.UpdatePaymentStatus(ctx, payment.ID, models.PaymentStatusCompleted, &transactionID); err != nil {
+		return nil, fmt.Errorf("failed to update payment status: %w", err)
+	}
+
+	// Update booking status
+	if err := s.bookingRepo.UpdateBookingStatus(ctx, bookingID, models.BookingStatusConfirmed); err != nil {
+		return nil, fmt.Errorf("failed to update booking status: %w", err)
+	}
+
+	// Load full booking with relations
+	booking, err := s.bookingRepo.GetBookingByID(ctx, bookingID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get booking for response: %w", err)
+	}
+	tickets, err := s.bookingRepo.GetTicketsByBookingID(ctx, bookingID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tickets for response: %w", err)
+	}
+	payment, err = s.bookingRepo.GetPaymentByBookingID(ctx, bookingID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get payment for response: %w", err)
+	}
+	booking.Tickets = tickets
+	booking.Payment = payment
+
+	resp := &models.BookingResponse{
+		Booking:          booking,
+		Message:          "Payment processed successfully",
+		PaymentReference: &payment.ID,
+	}
+
+	// Publish to RabbitMQ (ignore error, but log)
+	if s.rabbitPublisher != nil {
+		err := s.rabbitPublisher.PublishBookingEvent("paid", resp)
+		if err != nil {
+			fmt.Println("[RabbitMQ] Failed to publish booking paid event:", err)
+		}
+	}
+
+	return resp, nil
+}
+
+func (s *bookingService) RefundPayment(ctx context.Context, bookingID string) error {
+	payment, err := s.bookingRepo.GetPaymentByBookingID(ctx, bookingID)
+	if err != nil {
+		return fmt.Errorf("failed to get payment: %w", err)
+	}
+
+	if payment.Status != models.PaymentStatusCompleted {
+		return fmt.Errorf("payment not completed, cannot refund")
+	}
+
+	// Simulate refund processing logic here
+	// In real implementation, integrate with payment gateway
+
+	refundTransactionID := s.generateTransactionID()
+
+	// Update payment status
+	if err := s.bookingRepo.UpdatePaymentStatus(ctx, payment.ID, models.PaymentStatusRefunded, &refundTransactionID); err != nil {
+		return fmt.Errorf("failed to update payment status: %w", err)
+	}
+
+	return nil
+}
+
+// Helper methods
+
+func (s *bookingService) validateBookingRequest(ctx context.Context, req *models.BookingRequest) error {
+	// Require user_name and user_phone
+	if req.UserName == "" {
+		return fmt.Errorf("user_name is required")
+	}
+	if req.UserPhone == "" {
+		return fmt.Errorf("user_phone is required")
+	}
+	// Validate pickup and dropoff locations are different
+	if req.PickupLocationID == req.DropoffLocationID {
+		return fmt.Errorf("pickup and dropoff locations cannot be the same")
+	}
+
+	// Validate trip availability and get trip
+	trip, err := s.tripService.GetTripByID(ctx, req.TripID)
+	if err != nil {
+		return fmt.Errorf("trip validation failed: %w", err)
+	}
+	if trip.Status != "SCHEDULED" && trip.Status != "IN_PROGRESS" {
+		return fmt.Errorf("trip is not available: status is %s", trip.Status)
+	}
+
+	// Additional pickup/dropoff validation
+	if req.PickupLocationID == fmt.Sprintf("%d", trip.Route.DestinationID) {
+		return fmt.Errorf("pickup location cannot be the route destination")
+	}
+	if req.DropoffLocationID == fmt.Sprintf("%d", trip.Route.OriginID) {
+		return fmt.Errorf("dropoff location cannot be the route origin")
+	}
+
+	pickupIsWaypoint := false
+	var pickupWaypoint, dropoffWaypoint *models.TripWaypoint
+	if req.PickupLocationID != fmt.Sprintf("%d", trip.Route.OriginID) {
+		for i, wp := range trip.Waypoints {
+			if fmt.Sprintf("%d", wp.LocationID) == req.PickupLocationID {
+				pickupIsWaypoint = true
+				pickupWaypoint = &trip.Waypoints[i]
+				break
+			}
+		}
+	}
+	dropoffIsWaypoint := false
+	if req.DropoffLocationID != fmt.Sprintf("%d", trip.Route.DestinationID) {
+		for i, wp := range trip.Waypoints {
+			if fmt.Sprintf("%d", wp.LocationID) == req.DropoffLocationID {
+				dropoffIsWaypoint = true
+				dropoffWaypoint = &trip.Waypoints[i]
+				break
+			}
+		}
+	}
+	if pickupIsWaypoint && dropoffIsWaypoint {
+		if pickupWaypoint.Order >= dropoffWaypoint.Order {
+			return fmt.Errorf("incorrect location: pickup must be before dropoff")
+		}
+		if pickupWaypoint.IsPassed || dropoffWaypoint.IsPassed {
+			return fmt.Errorf("incorrect location: pickup or dropoff waypoint already passed")
+		}
+	}
+
+	// CityRoute-specific pickup validation
+	if !trip.Route.CityRoute {
+		if trip.Status == "SCHEDULED" {
+			// Only origin can be pickup
+			if req.PickupLocationID != fmt.Sprintf("%d", trip.Route.OriginID) {
+				return fmt.Errorf("for non-city routes in SCHEDULED status, only the origin can be the pickup location")
+			}
+		} else if trip.Status == "IN_PROGRESS" {
+			// Origin cannot be pickup, only the next waypoint
+			if req.PickupLocationID == fmt.Sprintf("%d", trip.Route.OriginID) {
+				return fmt.Errorf("for non-city routes in IN_PROGRESS status, origin cannot be the pickup location")
+			}
+			isNextWaypoint := false
+			for _, wp := range trip.Waypoints {
+				if fmt.Sprintf("%d", wp.LocationID) == req.PickupLocationID && wp.IsNext {
+					isNextWaypoint = true
+					break
+				}
+			}
+			if !isNextWaypoint {
+				return fmt.Errorf("for non-city routes in IN_PROGRESS status, only the next waypoint can be the pickup location")
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s *bookingService) generateBookingReference() string {
+	return fmt.Sprintf("BK-%d", time.Now().Unix())
+}
+
+func (s *bookingService) generateTickets(bookingID string, count int, trip *models.Trip, pickupLocationID, dropoffLocationID string) []models.Ticket {
+	now := time.Now()
+
+	// Helper to get location name
+	getLocationName := func(loc *models.Location) string {
+		if loc == nil {
+			return ""
+		}
+		if loc.CustomName != nil && *loc.CustomName != "" {
+			return *loc.CustomName
+		}
+		if loc.GooglePlaceName != nil && *loc.GooglePlaceName != "" {
+			return *loc.GooglePlaceName
+		}
+		return ""
+	}
+
+	// Find pickup location name
+	var pickupName string
+	var pickupWaypoint *models.TripWaypoint
+	if fmt.Sprintf("%d", trip.Route.OriginID) == pickupLocationID {
+		pickupName = getLocationName(&trip.Route.Origin)
+	} else {
+		for _, wp := range trip.Waypoints {
+			if fmt.Sprintf("%d", wp.LocationID) == pickupLocationID {
+				pickupName = getLocationName(&wp.Location)
+				pickupWaypoint = &wp
+				break
+			}
+		}
+	}
+
+	// Find dropoff location name
+	var dropoffName string
+	if fmt.Sprintf("%d", trip.Route.DestinationID) == dropoffLocationID {
+		dropoffName = getLocationName(&trip.Route.Destination)
+	} else {
+		for _, wp := range trip.Waypoints {
+			if fmt.Sprintf("%d", wp.LocationID) == dropoffLocationID {
+				dropoffName = getLocationName(&wp.Location)
+				break
+			}
+		}
+	}
+
+	// Determine pickup time
+	var pickupTime time.Time
+	if trip.Status == "SCHEDULED" {
+		pickupTime = time.Unix(trip.DepartureTime, 0)
+	} else if pickupWaypoint != nil && pickupWaypoint.RemainingTime != nil {
+		pickupTime = now.Add(time.Duration(*pickupWaypoint.RemainingTime) * time.Second)
+	} else {
+		pickupTime = now
+	}
+
+	tickets := make([]models.Ticket, count)
+	for i := 0; i < count; i++ {
+		ticketID := uuid.New().String()
+		tickets[i] = models.Ticket{
+			ID:                  ticketID,
+			BookingID:           bookingID,
+			TicketNumber:        fmt.Sprintf("TK-%d-%d", now.Unix(), i+1),
+			QRCode:              s.generateQRCode(ticketID),
+			IsUsed:              false,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+			PickupLocationName:  pickupName,
+			DropoffLocationName: dropoffName,
+			CarPlate:            trip.CarPlate,
+			CarCompany:          trip.CarCompany,
+			PickupTime:          pickupTime,
+		}
+	}
+
+	return tickets
+}
+
+func (s *bookingService) generateQRCode(ticketID string) string {
+	// In real implementation, generate actual QR code
+	return fmt.Sprintf("QR-%s", ticketID)
+}
+
+func (s *bookingService) generateTransactionID() string {
+	return fmt.Sprintf("TXN-%s", uuid.New().String())
+}
+
+// HTTPTripService implements TripService by fetching from external HTTP API
+
+type HTTPTripService struct {
+	BaseURL string
+}
+
+func NewHTTPTripService(baseURL string) TripService {
+	return &HTTPTripService{BaseURL: baseURL}
+}
+
+func (s *HTTPTripService) GetTripByID(ctx context.Context, tripID int) (*models.Trip, error) {
+	url := fmt.Sprintf("%s/trips/%d", s.BaseURL, tripID)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch trip: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var trip models.Trip
+	if err := json.NewDecoder(resp.Body).Decode(&trip); err != nil {
+		return nil, fmt.Errorf("failed to decode trip: %w", err)
+	}
+	return &trip, nil
+}
+
+func (s *HTTPTripService) ValidateTripBooking(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int) error {
+	trip, err := s.GetTripByID(ctx, tripID)
+	if err != nil {
+		if err.Error() == "unexpected status code: 404" || (err != nil && contains404(err.Error())) {
+			return fmt.Errorf("trip not found")
+		}
+		return fmt.Errorf("failed to fetch trip: %w", err)
+	}
+
+	if trip.Status != "SCHEDULED" && trip.Status != "IN_PROGRESS" {
+		return fmt.Errorf("trip is not available: status is %s", trip.Status)
+	}
+
+	// --- Pickup Location Validation ---
+	pickupOrder := -1
+	pickupIDFound := false
+	if pickupLocationID != "" {
+		// Check against origin
+		if fmt.Sprintf("%d", trip.Route.OriginID) == pickupLocationID {
+			pickupOrder = -1 // Origin is before all waypoints
+			pickupIDFound = true
+		} else {
+			// Check waypoints
+			for _, wp := range trip.Waypoints {
+				if fmt.Sprintf("%d", wp.LocationID) == pickupLocationID {
+					pickupOrder = wp.Order
+					pickupIDFound = true
+					break
+				}
+			}
+		}
+		if !pickupIDFound {
+			return fmt.Errorf("incorrect location: pickup location not found in trip")
+		}
+	}
+
+	// --- Dropoff Location Validation ---
+	dropoffOrder := -1
+	dropoffIDFound := false
+	if dropoffLocationID != "" {
+		// Check against destination
+		if fmt.Sprintf("%d", trip.Route.DestinationID) == dropoffLocationID {
+			dropoffOrder = 999999 // Destination is after all waypoints
+			dropoffIDFound = true
+		} else {
+			// Check waypoints
+			for _, wp := range trip.Waypoints {
+				if fmt.Sprintf("%d", wp.LocationID) == dropoffLocationID {
+					dropoffOrder = wp.Order
+					dropoffIDFound = true
+					break
+				}
+			}
+		}
+		if !dropoffIDFound {
+			return fmt.Errorf("incorrect location: dropoff location not found in trip")
+		}
+	}
+
+	// --- Order Validation ---
+	if pickupIDFound && dropoffIDFound {
+		if pickupOrder >= dropoffOrder {
+			return fmt.Errorf("incorrect location: pickup must be before dropoff")
+		}
+	}
+
+	return nil
+}
+
+// contains404 checks if the error string contains '404'.
+func contains404(s string) bool {
+	return (len(s) >= 3 && (s == "404" || (len(s) > 3 && (s[:3] == "404" || s[len(s)-3:] == "404")))) || (len(s) > 0 && (stringContains(s, "404")))
+}
+
+func stringContains(s, substr string) bool {
+	return len(substr) > 0 && len(s) >= len(substr) && (s == substr || (len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || (len(s) > len(substr)+1 && contains(s, substr)))))
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
