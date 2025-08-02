@@ -5,20 +5,42 @@ import "cavgotrips/internal/models"
 type LocationRepository interface {
 	Create(location *models.Location) error
 	GetAll() ([]models.Location, error)
+	GetAllPaginated(limit, offset int) ([]models.Location, int64, error)
 	GetByID(id int64) (*models.Location, error)
+	Search(searchTerm string) ([]models.Location, error)
+	SearchPaginated(searchTerm string, limit, offset int) ([]models.Location, int64, error)
 	ExistsByCustomName(customName string) (bool, error)
 	ExistsByPlaceID(placeID string) (bool, error)
 	ExistsByCode(code string) (bool, error)
 	ExistsByLatLng(lat, lng float64) (bool, error)
 	ValidateExists(id int64) error
+	GenerateLocationCode(province, district string) (string, error)
+	Update(location *models.Location) error
+	Delete(id int64) error
 }
 
 type RouteRepository interface {
 	Create(route *models.Route) error
 	GetAll() ([]models.Route, error)
+	GetAllPaginated(limit, offset int) ([]models.Route, int64, error)
 	GetByID(id int64) (*models.Route, error)
 	GetByIDWithWaypoints(id int64) (*models.Route, error)
+	Update(route *models.Route) error
+	Delete(id int64) error
 	CheckUniqueness(route *models.Route) error
+	SearchByOriginDestination(origin, destination string) ([]models.Route, error)
+	SearchByOriginDestinationPaginated(origin, destination string, limit, offset int) ([]models.Route, int64, error)
+	FilterByCityRoute(cityRoute *bool) ([]models.Route, error)
+	FilterByCityRoutePaginated(cityRoute *bool, limit, offset int) ([]models.Route, int64, error)
+	FilterByProvinces(originProvince, destinationProvince string) ([]models.Route, error)
+	FilterByProvincesPaginated(originProvince, destinationProvince string, limit, offset int) ([]models.Route, int64, error)
+	SearchAndFilter(origin, destination string, cityRoute *bool, originProvince, destinationProvince string) ([]models.Route, error)
+	SearchAndFilterPaginated(origin, destination string, cityRoute *bool, originProvince, destinationProvince string, limit, offset int) ([]models.Route, int64, error)
+	GetRoutesByPriceRange(minPrice, maxPrice float64) ([]models.Route, error)
+	GetRoutesByPriceRangePaginated(minPrice, maxPrice float64, limit, offset int) ([]models.Route, int64, error)
+	GetRoutesByDistanceRange(minDistance, maxDistance int) ([]models.Route, error)
+	GetRoutesByDistanceRangePaginated(minDistance, maxDistance int, limit, offset int) ([]models.Route, int64, error)
+	GetRouteStatistics() (map[string]interface{}, error)
 }
 
 type TripRepository interface {

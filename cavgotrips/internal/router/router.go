@@ -29,11 +29,19 @@ func Setup(
 	// Location endpoints
 	r.HandleFunc("/locations", locationHandler.CreateLocation).Methods("POST")
 	r.HandleFunc("/locations", locationHandler.GetLocations).Methods("GET")
+	r.HandleFunc("/locations/{id}", locationHandler.GetLocation).Methods("GET")
+	r.HandleFunc("/locations/{id}", locationHandler.UpdateLocation).Methods("PUT")
+	r.HandleFunc("/locations/{id}", locationHandler.DeleteLocation).Methods("DELETE")
 
 	// Route endpoints
 	r.HandleFunc("/routes", routeHandler.CreateRoute).Methods("POST")
 	r.HandleFunc("/routes", routeHandler.GetRoutes).Methods("GET")
 	r.HandleFunc("/routes/{id}", routeHandler.GetRoute).Methods("GET")
+	r.HandleFunc("/routes/{id}", routeHandler.UpdateRoute).Methods("PUT")
+	r.HandleFunc("/routes/{id}", routeHandler.DeleteRoute).Methods("DELETE")
+	r.HandleFunc("/routes/price-range", routeHandler.GetRoutesByPriceRange).Methods("GET")
+	r.HandleFunc("/routes/distance-range", routeHandler.GetRoutesByDistanceRange).Methods("GET")
+	r.HandleFunc("/routes/statistics", routeHandler.GetRouteStatistics).Methods("GET")
 
 	// Trip endpoints
 	r.HandleFunc("/trips", tripHandler.CreateTrip).Methods("POST")

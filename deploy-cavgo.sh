@@ -5,9 +5,28 @@
 
 set -e  # Exit on any error
 
+# Parse -c flag for clean mode
+CLEAN_MODE=false
+while getopts "c" opt; do
+  case $opt in
+    c)
+      CLEAN_MODE=true
+      ;;
+  esac
+done
+
+if $CLEAN_MODE; then
+  echo -e "\033[0;31m[WARNING]\033[0m Clean mode enabled: All containers, volumes, and persistent data will be deleted!"
+  read -p "Are you sure you want to continue? (y/N): " confirm
+  if [[ ! $confirm =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+  fi
+fi
+
 # Configuration
 DATA_DIR="/opt/cavgo-data"
-DROPLET_IP="159.203.85.152"
+DROPLET_IP="143.198.110.227"
 REMOTE_DIR="/opt/cavgo-system"
 LOCAL_COMPOSE_FILE="docker-compose-hub.yml"
 
@@ -43,19 +62,21 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Helper function for sshpass SSH command
+# SSH command using key-based auth
 function ssh_cmd() {
-  sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$DROPLET_IP" "$1"
+  ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$DROPLET_IP" "$1"
 }
 
-# Helper function for sshpass SSH command with sudo
+
+# SSH with sudo, passing password
 function ssh_sudo_cmd() {
-  sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$DROPLET_IP" "echo '$SSH_PASSWORD' | sudo -S bash -c '$1'"
+  ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$DROPLET_IP" "echo '$SSH_PASSWORD' | sudo -S bash -c '$1'"
 }
 
-# Helper function for sshpass SCP command
+
+# SCP using SSH key
 function scp_cmd() {
-  sshpass -p "$SSH_PASSWORD" scp -o StrictHostKeyChecking=no "$@"
+  scp -o StrictHostKeyChecking=no "$@"
 }
 
 # Function to setup data directories
@@ -139,6 +160,7 @@ fi
 setup_data_directories
 
 # Clean up existing deployment
+
 print_status "🧹 Cleaning up existing deployment..."
 if ssh_sudo_cmd "test -d $REMOTE_DIR"; then
     ssh_cmd "cd $REMOTE_DIR 2>/dev/null && (docker compose down || docker-compose down) 2>/dev/null || true"
@@ -146,6 +168,21 @@ if ssh_sudo_cmd "test -d $REMOTE_DIR"; then
     ssh_sudo_cmd "mv $REMOTE_DIR $BACKUP_DIR"
     print_success "✅ Existing deployment backed up to $BACKUP_DIR"
 fi
+
+# If clean mode, remove all related volumes, prune, and delete data dirs
+if $CLEAN_MODE; then
+  print_status "🧹 Removing Docker volumes and persistent data (CLEAN MODE)..."
+  ssh_cmd "docker volume rm portainer_data cavgo-system_postgres_data cavgo-system_portainer_data 2>/dev/null || true"
+  ssh_cmd "docker system prune -af --volumes || true"
+  ssh_cmd "docker volume prune -f || true"
+  ssh_sudo_cmd "rm -rf $DATA_DIR"
+  print_success "✅ All Docker volumes and persistent data removed"
+fi
+
+# Force remove any existing containers with conflicting names
+print_status "🧹 Removing any existing containers with conflicting names..."
+ssh_cmd "docker rm -f cavgo-postgres cavgo-main cavgo-gateway cavgo-trips cavgo-booking cavgo-maqtt rabbitmq portainer 2>/dev/null || true"
+print_success "✅ Conflicting containers removed"
 
 # Create directories
 ssh_sudo_cmd "mkdir -p $REMOTE_DIR && chown -R $REMOTE_USER:$REMOTE_USER $REMOTE_DIR"

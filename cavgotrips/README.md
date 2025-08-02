@@ -99,13 +99,28 @@ The Eureka client will:
 ### Locations
 
 - `POST /locations` - Create a new location
-- `GET /locations` - Get all locations
+- `GET /locations` - Get all locations (paginated)
+- `GET /locations?search={term}` - Search locations by custom name, Google place name, or location code (paginated)
+- `GET /locations?page={page}&limit={limit}` - Get paginated locations
+- `GET /locations?search={term}&page={page}&limit={limit}` - Search with pagination
+- `GET /locations/{id}` - Get a specific location by ID
+- `PUT /locations/{id}` - Update a location
+- `DELETE /locations/{id}` - Delete a location
 
 ### Routes
 
 - `POST /routes` - Create a new route
-- `GET /routes` - Get all routes
+- `GET /routes` - Get all routes (with search and filtering)
+- `GET /routes?origin={term}&destination={term}` - Search routes by origin/destination
+- `GET /routes?city_route={true|false}` - Filter routes by city route status
+- `GET /routes?origin_province={province}&destination_province={province}` - Filter by provinces
+- `GET /routes?page={page}&limit={limit}` - Get paginated routes
 - `GET /routes/{id}` - Get a specific route
+- `PUT /routes/{id}` - Update a route
+- `DELETE /routes/{id}` - Delete a route
+- `GET /routes/price-range?min_price={price}&max_price={price}` - Get routes by price range
+- `GET /routes/distance-range?min_distance={meters}&max_distance={meters}` - Get routes by distance range
+- `GET /routes/statistics` - Get route statistics
 
 ### Trips
 
@@ -129,6 +144,82 @@ POST /locations
 }
 ```
 
+### Search Locations
+
+```bash
+# Search by custom name or Google place name
+GET /locations?search=NYC
+
+# Search by location code (numeric)
+GET /locations?search=11001
+
+# Pagination examples
+GET /locations?page=1&limit=20
+GET /locations?search=NYC&page=2&limit=10
+
+# Get a specific location
+GET /locations/1
+
+# Update a location
+PUT /locations/1
+{
+  "latitude": 40.7128,
+  "longitude": -74.0060,
+  "google_place_name": "Updated New York City",
+  "custom_name": "Updated NYC Office",
+  "province": "kigali",
+  "district": "gasabo"
+}
+
+# Update location with province/district change (generates new code)
+PUT /locations/1
+{
+  "latitude": 40.7128,
+  "longitude": -74.0060,
+  "google_place_name": "Updated New York City",
+  "custom_name": "Updated NYC Office",
+  "province": "north",
+  "district": "musanze"
+}
+
+# Delete a location
+DELETE /locations/1
+```
+
+### Search and Filter Routes
+
+```bash
+# Search by origin and destination
+GET /routes?origin=kigali&destination=musanze
+
+# Filter by city route status
+GET /routes?city_route=true
+
+# Filter by provinces
+GET /routes?origin_province=kigali&destination_province=north
+
+# Combine search and filters
+GET /routes?origin=kigali&city_route=true&origin_province=kigali
+
+# Pagination with search
+GET /routes?origin=kigali&page=1&limit=20
+
+# Basic pagination (all routes)
+GET /routes?page=1&limit=10
+
+# Complex search with pagination
+GET /routes?origin=kigali&city_route=true&page=2&limit=15
+
+# Get routes by price range
+GET /routes/price-range?min_price=10&max_price=50
+
+# Get routes by distance range
+GET /routes/distance-range?min_distance=10000&max_distance=100000
+
+# Get route statistics
+GET /routes/statistics
+```
+
 ### Create a Route
 
 ```json
@@ -137,7 +228,10 @@ POST /routes
   "name": "NYC to Boston",
   "origin_id": 1,
   "destination_id": 2,
-  "total_price": 45.50,
+  "route_price": 45.50,
+  "distance_meters": 85000,
+  "estimated_duration_seconds": 7200,
+  "city_route": false,
   "waypoints": [
     {
       "location_id": 3,
@@ -145,6 +239,18 @@ POST /routes
       "price": 15.00
     }
   ]
+}
+```
+
+### Update a Route
+
+```json
+PUT /routes/1
+{
+  "name": "Updated Route Name",
+  "route_price": 50.00,
+  "distance_meters": 90000,
+  "estimated_duration_seconds": 7800
 }
 ```
 
@@ -174,6 +280,48 @@ PUT /trips/{"id"}/progress
   "remaining_distance_to_destination": 85.5,
   "current_speed": 65.0,
   "passed_waypoint_id": 1
+}
+```
+
+## Pagination
+
+The API supports pagination for location and route endpoints to handle large datasets efficiently. All paginated responses include pagination metadata.
+
+For detailed information about route search and filtering, see [ROUTE_SEARCH_GUIDE.md](ROUTE_SEARCH_GUIDE.md).
+
+### Pagination Parameters
+
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Number of items per page (default: 20, max: 100)
+- `search` (optional): Search term for filtering
+
+### Paginated Response Format
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "latitude": 40.7128,
+      "longitude": -74.0060,
+      "code": "11001",
+      "google_place_name": "New York City",
+      "custom_name": "NYC Office",
+      "province": "New York",
+      "district": "Manhattan",
+      "place_id": "ChIJOwg_06VPwokRYv534QaPC8g",
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 150,
+    "total_pages": 8,
+    "has_next": true,
+    "has_prev": false
+  }
 }
 ```
 
