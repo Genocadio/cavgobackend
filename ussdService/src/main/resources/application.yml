@@ -1,0 +1,6 @@
+spring:
+  application:
+   name: ussdService
+app:
+  backend:
+    base-url: ${BACKEND_BASE_URL:https://api.gocavgo.com/api}

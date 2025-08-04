@@ -129,20 +129,14 @@ func (r *tripRepository) GetTripsByFilters(origin, destination, company string) 
 		if origin == "" {
 			matchOrigin = true
 		} else {
-			// Check route origin
-			if (trip.Route.Origin.CustomName != nil && containsIgnoreCase(*trip.Route.Origin.CustomName, origin)) ||
-				(trip.Route.Origin.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Origin.GooglePlaceName, origin)) {
+			// Check route origin using enhanced search (name or code)
+			if checkLocationMatch(&trip.Route.Origin, origin) {
 				matchOrigin = true
 			}
-			// Check waypoints
+			// Check waypoints using enhanced search
 			if !matchOrigin {
 				for _, wp := range trip.Waypoints {
-					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, origin) {
-						matchOrigin = true
-						originWaypointOrder = wp.Order
-						break
-					}
-					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, origin) {
+					if checkLocationMatch(&wp.Location, origin) {
 						matchOrigin = true
 						originWaypointOrder = wp.Order
 						break
@@ -154,20 +148,14 @@ func (r *tripRepository) GetTripsByFilters(origin, destination, company string) 
 		if destination == "" {
 			matchDestination = true
 		} else {
-			// Check route destination
-			if (trip.Route.Destination.CustomName != nil && containsIgnoreCase(*trip.Route.Destination.CustomName, destination)) ||
-				(trip.Route.Destination.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Destination.GooglePlaceName, destination)) {
+			// Check route destination using enhanced search (name or code)
+			if checkLocationMatch(&trip.Route.Destination, destination) {
 				matchDestination = true
 			}
-			// Check waypoints
+			// Check waypoints using enhanced search
 			if !matchDestination {
 				for _, wp := range trip.Waypoints {
-					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, destination) {
-						matchDestination = true
-						destinationWaypointOrder = wp.Order
-						break
-					}
-					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, destination) {
+					if checkLocationMatch(&wp.Location, destination) {
 						matchDestination = true
 						destinationWaypointOrder = wp.Order
 						break
@@ -241,20 +229,14 @@ func (r *tripRepository) GetTripsByFiltersPaginated(origin, destination, company
 		if origin == "" {
 			matchOrigin = true
 		} else {
-			// Check route origin
-			if (trip.Route.Origin.CustomName != nil && containsIgnoreCase(*trip.Route.Origin.CustomName, origin)) ||
-				(trip.Route.Origin.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Origin.GooglePlaceName, origin)) {
+			// Check route origin using enhanced search (name or code)
+			if checkLocationMatch(&trip.Route.Origin, origin) {
 				matchOrigin = true
 			}
-			// Check waypoints
+			// Check waypoints using enhanced search
 			if !matchOrigin {
 				for _, wp := range trip.Waypoints {
-					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, origin) {
-						matchOrigin = true
-						originWaypointOrder = wp.Order
-						break
-					}
-					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, origin) {
+					if checkLocationMatch(&wp.Location, origin) {
 						matchOrigin = true
 						originWaypointOrder = wp.Order
 						break
@@ -266,20 +248,14 @@ func (r *tripRepository) GetTripsByFiltersPaginated(origin, destination, company
 		if destination == "" {
 			matchDestination = true
 		} else {
-			// Check route destination
-			if (trip.Route.Destination.CustomName != nil && containsIgnoreCase(*trip.Route.Destination.CustomName, destination)) ||
-				(trip.Route.Destination.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Destination.GooglePlaceName, destination)) {
+			// Check route destination using enhanced search (name or code)
+			if checkLocationMatch(&trip.Route.Destination, destination) {
 				matchDestination = true
 			}
-			// Check waypoints
+			// Check waypoints using enhanced search
 			if !matchDestination {
 				for _, wp := range trip.Waypoints {
-					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, destination) {
-						matchDestination = true
-						destinationWaypointOrder = wp.Order
-						break
-					}
-					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, destination) {
+					if checkLocationMatch(&wp.Location, destination) {
 						matchDestination = true
 						destinationWaypointOrder = wp.Order
 						break
@@ -381,20 +357,14 @@ func (r *tripRepository) GetTripsByFiltersWithCityRoute(origin, destination, com
 		if origin == "" {
 			matchOrigin = true
 		} else {
-			// Check route origin
-			if (trip.Route.Origin.CustomName != nil && containsIgnoreCase(*trip.Route.Origin.CustomName, origin)) ||
-				(trip.Route.Origin.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Origin.GooglePlaceName, origin)) {
+			// Check route origin using enhanced search (name or code)
+			if checkLocationMatch(&trip.Route.Origin, origin) {
 				matchOrigin = true
 			}
-			// Check waypoints
+			// Check waypoints using enhanced search
 			if !matchOrigin {
 				for _, wp := range trip.Waypoints {
-					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, origin) {
-						matchOrigin = true
-						originWaypointOrder = wp.Order
-						break
-					}
-					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, origin) {
+					if checkLocationMatch(&wp.Location, origin) {
 						matchOrigin = true
 						originWaypointOrder = wp.Order
 						break
@@ -406,20 +376,14 @@ func (r *tripRepository) GetTripsByFiltersWithCityRoute(origin, destination, com
 		if destination == "" {
 			matchDestination = true
 		} else {
-			// Check route destination
-			if (trip.Route.Destination.CustomName != nil && containsIgnoreCase(*trip.Route.Destination.CustomName, destination)) ||
-				(trip.Route.Destination.GooglePlaceName != nil && containsIgnoreCase(*trip.Route.Destination.GooglePlaceName, destination)) {
+			// Check route destination using enhanced search (name or code)
+			if checkLocationMatch(&trip.Route.Destination, destination) {
 				matchDestination = true
 			}
-			// Check waypoints
+			// Check waypoints using enhanced search
 			if !matchDestination {
 				for _, wp := range trip.Waypoints {
-					if wp.Location.CustomName != nil && containsIgnoreCase(*wp.Location.CustomName, destination) {
-						matchDestination = true
-						destinationWaypointOrder = wp.Order
-						break
-					}
-					if wp.Location.GooglePlaceName != nil && containsIgnoreCase(*wp.Location.GooglePlaceName, destination) {
+					if checkLocationMatch(&wp.Location, destination) {
 						matchDestination = true
 						destinationWaypointOrder = wp.Order
 						break
@@ -449,6 +413,40 @@ func (r *tripRepository) GetTripsByFiltersWithCityRoute(origin, destination, com
 // containsIgnoreCase checks if substr is in s, case-insensitive
 func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+// isNumericString checks if a string contains only numeric characters
+func isNumericString(s string) bool {
+	for _, char := range s {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+// matchesLocationCode checks if a location code matches the search term
+func matchesLocationCode(locationCode *string, searchTerm string) bool {
+	if locationCode == nil {
+		return false
+	}
+	return strings.HasPrefix(*locationCode, searchTerm)
+}
+
+// checkLocationMatch checks if a location matches the search term (by name or code)
+func checkLocationMatch(location *models.Location, searchTerm string) bool {
+	if location == nil {
+		return false
+	}
+
+	// If search term is numeric, check by location code
+	if isNumericString(searchTerm) {
+		return matchesLocationCode(location.Code, searchTerm)
+	}
+
+	// Otherwise check by name
+	return (location.CustomName != nil && containsIgnoreCase(*location.CustomName, searchTerm)) ||
+		(location.GooglePlaceName != nil && containsIgnoreCase(*location.GooglePlaceName, searchTerm))
 }
 
 // matchScore returns (score, position):

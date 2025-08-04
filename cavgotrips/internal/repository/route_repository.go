@@ -23,7 +23,7 @@ func (r *routeRepository) ValidateLocationExists(locationID int64) error {
 		return err
 	}
 	if count == 0 {
-		return fmt.Errorf("location with ID %d does not exist", locationID)
+		return models.NewValidationError(fmt.Sprintf("location with ID %d does not exist", locationID))
 	}
 	return nil
 }
@@ -32,18 +32,18 @@ func (r *routeRepository) ValidateLocationExists(locationID int64) error {
 func (r *routeRepository) ValidateAllLocationsExist(route *models.Route) error {
 	// Validate origin location exists
 	if err := r.ValidateLocationExists(route.OriginID); err != nil {
-		return fmt.Errorf("origin location validation failed: %w", err)
+		return models.NewValidationError(fmt.Sprintf("origin location validation failed: %w", err))
 	}
 
 	// Validate destination location exists
 	if err := r.ValidateLocationExists(route.DestinationID); err != nil {
-		return fmt.Errorf("destination location validation failed: %w", err)
+		return models.NewValidationError(fmt.Sprintf("destination location validation failed: %w", err))
 	}
 
 	// Validate all waypoint locations exist
 	for i, waypoint := range route.Waypoints {
 		if err := r.ValidateLocationExists(waypoint.LocationID); err != nil {
-			return fmt.Errorf("waypoint %d location validation failed: %w", i+1, err)
+			return models.NewValidationError(fmt.Sprintf("waypoint %d location validation failed: %w", i+1, err))
 		}
 	}
 

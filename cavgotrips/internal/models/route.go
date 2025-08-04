@@ -1,7 +1,6 @@
 package models
 
 import (
-	"errors"
 	"fmt"
 	"time"
 )
@@ -29,15 +28,15 @@ type Route struct {
 func (r *Route) Validate() error {
 	// Check required fields
 	if r.RoutePrice <= 0 {
-		return errors.New("route price must be greater than zero")
+		return NewValidationError("route price must be greater than zero")
 	}
 	if r.DistanceMeters == nil || *r.DistanceMeters <= 0 {
-		return errors.New("distance is required and must be greater than zero")
+		return NewValidationError("distance is required and must be greater than zero")
 	}
 
 	// Origin and destination can't be the same (only check if both are non-zero)
 	if r.OriginID != 0 && r.DestinationID != 0 && r.OriginID == r.DestinationID {
-		return errors.New("origin and destination cannot be the same location")
+		return NewValidationError("origin and destination cannot be the same location")
 	}
 
 	// Track used location IDs to prevent duplicates
@@ -60,24 +59,24 @@ func (r *Route) Validate() error {
 		// Check if orders start from 0 or 1 and are sequential
 		expectedStart := orders[0]
 		if expectedStart != 0 && expectedStart != 1 {
-			return errors.New("waypoint order must start from 0 or 1")
+			return NewValidationError("waypoint order must start from 0 or 1")
 		}
 
 		// Validate sequential ordering
 		for i, waypoint := range r.Waypoints {
 			expectedOrder := expectedStart + i
 			if waypoint.Order != expectedOrder {
-				return fmt.Errorf("waypoint orders must be sequential starting from %d, expected %d but got %d", expectedStart, expectedOrder, waypoint.Order)
+				return NewValidationError(fmt.Sprintf("waypoint orders must be sequential starting from %d, expected %d but got %d", expectedStart, expectedOrder, waypoint.Order))
 			}
 
 			if waypoint.Price <= 0 {
-				return fmt.Errorf("waypoint %d must have a valid price", i+1)
+				return NewValidationError(fmt.Sprintf("waypoint %d must have a valid price", i+1))
 			}
 
 			// Check for duplicate locations (only if location ID is non-zero)
 			if waypoint.LocationID != 0 {
 				if usedLocations[waypoint.LocationID] {
-					return fmt.Errorf("waypoint %d has duplicate location ID", i+1)
+					return NewValidationError(fmt.Sprintf("waypoint %d has duplicate location ID", i+1))
 				}
 				usedLocations[waypoint.LocationID] = true
 			}

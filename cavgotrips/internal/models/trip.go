@@ -1,7 +1,6 @@
 package models
 
 import (
-	"errors"
 	"fmt"
 	"time"
 )
@@ -104,17 +103,17 @@ type CreateTripRequest struct {
 
 // Validate checks for required fields and valid values in CreateTripRequest
 func (r *CreateTripRequest) Validate() error {
-	if r.RouteID == 0 {
-		return errors.New("route_id is required and must be greater than 0")
+	if r.RouteID <= 0 {
+		return NewValidationError("route_id is required and must be greater than 0")
 	}
-	if r.VehicleID == 0 {
-		return errors.New("vehicle_id is required and must be greater than 0")
+	if r.VehicleID <= 0 {
+		return NewValidationError("vehicle_id is required and must be greater than 0")
 	}
 	if r.DepartureTime <= 0 {
-		return errors.New("departure_time is required and must be a valid timestamp")
+		return NewValidationError("departure_time is required and must be greater than 0")
 	}
 	if r.ConnectionMode == "" {
-		return errors.New("connection_mode is required")
+		return NewValidationError("connection_mode is required")
 	}
 	// No seats check here, seats will be set from vehicle
 
@@ -127,27 +126,27 @@ func (r *CreateTripRequest) Validate() error {
 		}
 	}
 	if !connectionValid {
-		return errors.New("invalid connection_mode; must be ONLINE, OFFLINE, or HYBRID")
+		return NewValidationError("invalid connection_mode; must be ONLINE, OFFLINE, or HYBRID")
 	}
 
 	for i, wp := range r.CustomWaypoints {
-		if wp.LocationID == 0 {
-			return fmt.Errorf("custom_waypoints[%d]: location_id is required and must be greater than 0", i)
+		if wp.LocationID <= 0 {
+			return NewValidationError(fmt.Sprintf("custom_waypoints[%d]: location_id is required and must be greater than 0", i))
 		}
 		// Order is allowed to be 0, but not negative
 		if wp.Order < 0 {
-			return fmt.Errorf("custom_waypoints[%d]: order must be 0 or greater", i)
+			return NewValidationError(fmt.Sprintf("custom_waypoints[%d]: order must be 0 or greater", i))
 		}
 		// Price is optional, but if provided, must be > 0
 		if wp.Price != nil && *wp.Price <= 0 {
-			return fmt.Errorf("custom_waypoints[%d]: price, if provided, must be greater than 0", i)
+			return NewValidationError(fmt.Sprintf("custom_waypoints[%d]: price, if provided, must be greater than 0", i))
 		}
 		// RemainingTime and RemainingDistance are optional, but if provided, must be >= 0
 		if wp.RemainingTime != nil && *wp.RemainingTime < 0 {
-			return fmt.Errorf("custom_waypoints[%d]: remaining_time, if provided, must be >= 0", i)
+			return NewValidationError(fmt.Sprintf("custom_waypoints[%d]: remaining_time, if provided, must be >= 0", i))
 		}
 		if wp.RemainingDistance != nil && *wp.RemainingDistance < 0 {
-			return fmt.Errorf("custom_waypoints[%d]: remaining_distance, if provided, must be >= 0", i)
+			return NewValidationError(fmt.Sprintf("custom_waypoints[%d]: remaining_distance, if provided, must be >= 0", i))
 		}
 	}
 
@@ -166,11 +165,11 @@ type CreateCustomWaypoint struct {
 // Validate validates the trip data
 func (t *Trip) Validate() error {
 	if t.Seats <= 0 {
-		return errors.New("seats must be greater than 0")
+		return NewValidationError("seats must be greater than 0")
 	}
 
 	if t.DepartureTime <= 0 {
-		return errors.New("departure time must be a valid timestamp")
+		return NewValidationError("departure time must be a valid timestamp")
 	}
 
 	validStatuses := []string{"SCHEDULED", "IN_PROGRESS", "COMPLETED", "NOT_COMPLETED"}
@@ -182,7 +181,7 @@ func (t *Trip) Validate() error {
 		}
 	}
 	if !statusValid {
-		return errors.New("invalid status")
+		return NewValidationError("invalid status")
 	}
 
 	validConnectionModes := []string{"ONLINE", "OFFLINE", "HYBRID"}
@@ -194,7 +193,7 @@ func (t *Trip) Validate() error {
 		}
 	}
 	if !connectionValid {
-		return errors.New("invalid connection mode")
+		return NewValidationError("invalid connection mode")
 	}
 
 	usedLocations := make(map[int64]bool)
@@ -209,25 +208,25 @@ func (t *Trip) Validate() error {
 		// Check if orders start from 0 or 1 and are sequential
 		expectedStart := orders[0]
 		if expectedStart != 0 && expectedStart != 1 {
-			return errors.New("waypoint order must start from 0 or 1")
+			return NewValidationError("waypoint order must start from 0 or 1")
 		}
 
 		// Validate sequential ordering
 		for i, waypoint := range t.Waypoints {
 			expectedOrder := expectedStart + i
 			if waypoint.Order != expectedOrder {
-				return fmt.Errorf("waypoint orders must be sequential starting from %d, expected %d but got %d", expectedStart, expectedOrder, waypoint.Order)
+				return NewValidationError(fmt.Sprintf("waypoint orders must be sequential starting from %d, expected %d but got %d", expectedStart, expectedOrder, waypoint.Order))
 			}
 
 			// For non-custom waypoints, price should be set
 			if !waypoint.IsCustom && (waypoint.Price == nil || *waypoint.Price <= 0) {
-				return fmt.Errorf("waypoint %d must have a valid price", i+1)
+				return NewValidationError(fmt.Sprintf("waypoint %d must have a valid price", i+1))
 			}
 
 			// Check for duplicate locations (only if location ID is non-zero)
 			if waypoint.LocationID != 0 {
 				if usedLocations[waypoint.LocationID] {
-					return fmt.Errorf("waypoint %d has duplicate location ID", i+1)
+					return NewValidationError(fmt.Sprintf("waypoint %d has duplicate location ID", i+1))
 				}
 				usedLocations[waypoint.LocationID] = true
 			}
