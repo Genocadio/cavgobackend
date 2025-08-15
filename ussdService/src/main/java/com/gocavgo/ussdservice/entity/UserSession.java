@@ -1,5 +1,6 @@
 package com.gocavgo.ussdservice.entity;
 
+import com.gocavgo.ussdservice.dto.TripBookingOption;
 import com.gocavgo.ussdservice.dto.TripDto;
 import jakarta.persistence.*;
 import lombok.*;
@@ -36,6 +37,11 @@ public class UserSession {
 
     @Column
     private String destination;
+
+    @ElementCollection
+    @CollectionTable(name = "user_session_booking_options",
+            joinColumns = @JoinColumn(name = "user_session_id"))
+    private List<TripBookingOption> bookingOptions;
 
     @Transient // Not persisted to database
     private List<TripDto> availableTrips;

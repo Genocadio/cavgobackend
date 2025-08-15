@@ -3,10 +3,9 @@ package com.nexxserve.cavgomain.entity;
 import com.nexxserve.cavgomain.enums.VehicleStatus;
 import com.nexxserve.cavgomain.enums.VehicleType;
 import jakarta.persistence.*;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.ToString;
+import lombok.*;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,6 +30,11 @@ public class Vehicle extends BaseEntity {
     @Column(name = "capacity", nullable = false)
     private int capacity;
 
+    @Column(name = "device_public_key", columnDefinition = "TEXT")
+    @Setter(AccessLevel.NONE)
+    private String pubKey;
+
+    private Instant keysetTime;
 
     @Column(name = "license_plate", unique = true)
     private String licensePlate;
@@ -47,4 +51,12 @@ public class Vehicle extends BaseEntity {
     @OneToMany(mappedBy = "vehicle", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @ToString.Exclude
     private List<VehicleAssignment> assignments = new ArrayList<>();
+
+    public void setPubKey(String pubKey) {
+        // Only update keysetTime if pubKey actually changes
+        if (pubKey != null && !pubKey.equals(this.pubKey)) {
+            this.keysetTime = Instant.now();
+        }
+        this.pubKey = pubKey;
+    }
 }

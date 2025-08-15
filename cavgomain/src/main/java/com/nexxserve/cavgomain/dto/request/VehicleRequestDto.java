@@ -15,13 +15,16 @@ import org.springframework.validation.annotation.Validated;
 public class VehicleRequestDto {
 
     @NotNull(message = "Company ID is required")
-    private Long companyId;
+    private String companyCode;
 
     @NotBlank(message = "Make is required")
     private String make;
 
     @NotBlank(message = "Model is required")
     private String model;
+
+    @NotBlank(message = "Public key is required") //base 64 encoded
+    private String pubKey;
 
     @Min(value = 1, message = "Capacity must be at least 1")
     private int capacity;
@@ -39,6 +42,7 @@ public class VehicleRequestDto {
         vehicle.setCompany(company);
         vehicle.setMake(this.make);
         vehicle.setModel(this.model);
+        vehicle.setPubKey(this.pubKey);
         vehicle.setCapacity(this.capacity);
         vehicle.setLicensePlate(this.licensePlate);
         vehicle.setVehicleType(this.vehicleType);

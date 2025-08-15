@@ -14,7 +14,7 @@ import java.time.LocalDate;
 @Data
 public class CompanyUserRequestDto {
     @NotNull(message = "Company ID is required")
-    private Long companyId;
+    private String companyCode;
 
     @NotBlank(message = "First name is required")
     private String firstName;

@@ -99,6 +99,7 @@ type CreateTripRequest struct {
 	Notes           *string                `json:"notes"`
 	IsReversed      bool                   `json:"is_reversed"`
 	CustomWaypoints []CreateCustomWaypoint `json:"custom_waypoints"` // Optional custom waypoints
+	NoWaypoints     bool                   `json:"no_waypoints"`     // If true, no waypoints are copied (only origin/destination)
 }
 
 // Validate checks for required fields and valid values in CreateTripRequest

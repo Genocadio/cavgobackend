@@ -23,7 +23,25 @@ public class CompanyService {
             throw new IllegalArgumentException("Company code already exists");
         }
         Company newCompany = company.toEntity();
+        newCompany.setCompanyCode(generateCompanyCode(newCompany.getCompanyName()));
         return CompanyResponseDto.fromEntity(companyRepository.save(newCompany));
+    }
+
+    private String generateCompanyCode(String companyName) {
+        String name = companyName.replaceAll("[^A-Za-z]", "").toUpperCase();
+        StringBuilder code = new StringBuilder();
+        for (char c : name.toCharArray()) {
+            if ("AEIOU".indexOf(c) == -1) {
+                code.append(c);
+                if (code.length() == 2) break;
+            }
+        }
+        while (code.length() < 2) code.append('X');
+        String digits;
+        do {
+            digits = String.format("%03d", (int)(Math.random() * 1000));
+        } while (companyRepository.existsByCompanyCode(code + digits));
+        return code + digits;
     }
 
     public CompanyResponseDto updateCompany(Long id, CompanyRequestDto company) {

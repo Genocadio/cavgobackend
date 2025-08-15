@@ -16,5 +16,6 @@ public class AuthResponseDto {
     private String userType;
     private boolean isCompanyUser;
     private Long companyId;
+    private String companyName;
     private CompanyUserRole companyUserRole;
 }

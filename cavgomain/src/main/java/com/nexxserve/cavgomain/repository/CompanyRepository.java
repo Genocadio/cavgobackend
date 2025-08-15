@@ -17,6 +17,10 @@ public interface CompanyRepository extends JpaRepository<Company, Long> {
     List<Company> findByCompanyNameContainingIgnoreCase(String name);
     Boolean existsByCompanyName(String companyName);
 
+    boolean existsByCompanyCode(String companyCode);
+
+    Optional<Company> findByCompanyCode(String companyCode);
+
     @Query("SELECT c FROM Company c WHERE c.email = :email")
     Optional<Company> findByEmail(@Param("email") String email);
 }

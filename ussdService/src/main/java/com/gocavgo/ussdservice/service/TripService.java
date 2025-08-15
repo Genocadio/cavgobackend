@@ -26,8 +26,11 @@ public class TripService {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
-    @Value("${app.backend.base-url:https://api.gocavgo.com/api}")
-    private String backendBaseUrl;
+    @Value("${app.trip-service.host:localhost}")
+    private String tripServiceHost;
+
+    @Value("${app.trip-service.port:8080}")
+    private int tripServicePort;
 
     /**
      * Get paginated trips with optional filtering
@@ -55,7 +58,7 @@ public class TripService {
 
         } catch (Exception e) {
             log.error("Error fetching trips with filters: {}", filters, e);
-            throw new RuntimeException("Failed to fetch trips from backend", e);
+            throw new RuntimeException("Failed to fetch trips from trip service", e);
         }
     }
 
@@ -66,7 +69,7 @@ public class TripService {
         try {
             log.info("Fetching trip with ID: {}", tripId);
 
-            String url = backendBaseUrl + "/navig/trips/" + tripId;
+            String url = getBaseUrl() + "/trips/" + tripId;
 
             HttpHeaders headers = createHeaders();
             HttpEntity<String> entity = new HttpEntity<>(headers);
@@ -149,20 +152,27 @@ public class TripService {
      */
     private String buildTripsUrl(TripFilters filters) {
         UriComponentsBuilder builder = UriComponentsBuilder
-                .fromHttpUrl(backendBaseUrl + "/navig/trips");
+                .fromHttpUrl(getBaseUrl() + "/trips");
 
         if (filters.getOrigin() != null && !filters.getOrigin().trim().isEmpty()) {
-            builder.queryParam("origin", filters.getOrigin());
+            builder.queryParam("originContains", filters.getOrigin().trim());
         }
 
         if (filters.getDestination() != null && !filters.getDestination().trim().isEmpty()) {
-            builder.queryParam("destination", filters.getDestination());
+            builder.queryParam("destinationContains", filters.getDestination().trim());
         }
 
         builder.queryParam("limit", filters.getLimit());
         builder.queryParam("offset", filters.getOffset());
 
         return builder.toUriString();
+    }
+
+    /**
+     * Get base URL for trip service
+     */
+    private String getBaseUrl() {
+        return String.format("http://%s:%d", tripServiceHost, tripServicePort);
     }
 
     /**
@@ -186,7 +196,7 @@ public class TripService {
      */
     public boolean isServiceAvailable() {
         try {
-            String healthUrl = backendBaseUrl + "/health";
+            String healthUrl = getBaseUrl() + "/actuator/health";
             ResponseEntity<String> response = restTemplate.getForEntity(healthUrl, String.class);
             return response.getStatusCode().is2xxSuccessful();
         } catch (Exception e) {

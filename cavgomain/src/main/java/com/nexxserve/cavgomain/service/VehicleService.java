@@ -39,15 +39,21 @@ public class VehicleService {
         if (vehicleRepository.existsByLicensePlate(vehicle.getLicensePlate())) {
             throw new IllegalArgumentException("Vehicle with this license plate already exists");
         }
-        Company company = companyRepository.findById(vehicle.getCompanyId()).orElseThrow(EntityNotFoundException::new);
+        Company company = companyRepository.findByCompanyCode(vehicle.getCompanyCode())
+            .orElseThrow(() -> new IllegalArgumentException("Company with code '" + vehicle.getCompanyCode() + "' not found"));
         Vehicle newVehicle = vehicle.toEntity(company);
 
         return VehicleResponseDto.fromEntity(vehicleRepository.save(newVehicle));
     }
-
     public Vehicle getVehicle(Long id) {
         return vehicleRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Vehicle not found"));
+    }
+
+    public List<VehicleResponseDto> getVehicleUser(Long userId) {
+        CompanyUser user = companyUserRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found"));
+        return getCompanyVehicles(user.getCompany().getId());
     }
 
     public VehicleResponseDto getVehicleResponse(Long id) {
@@ -59,6 +65,13 @@ public class VehicleService {
                 .map(VehicleResponseDto::fromEntity)
                 .toList();
     }
+
+    public List<VehicleResponseDto> getCompanyVehicles(Long id) {
+        return vehicleRepository.findByCompanyId(id).stream()
+                .map(VehicleResponseDto::fromEntity)
+                .toList();
+    }
+
 
     public VehicleResponseDto updateVehicle(Long id, VehicleRequestDto updated) {
         Vehicle vehicle = getVehicle(id);

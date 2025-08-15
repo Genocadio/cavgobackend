@@ -12,6 +12,7 @@ public class CompanyResponseDto {
     private String phone;
     private String address;
     private String city;
+    private String companyCode;
     private CompanyStatus status;
     private String createdAt;
     private String updatedAt;
@@ -27,6 +28,7 @@ public class CompanyResponseDto {
         dto.setAddress(entity.getAddress());
         dto.setCity(entity.getCity());
         dto.setStatus(entity.getStatus());
+        dto.setCompanyCode(entity.getCompanyCode());
         dto.setCreatedAt(entity.getCreatedAt().toString());
         dto.setUpdatedAt(entity.getUpdatedAt() != null ? entity.getUpdatedAt().toString() : null);
         dto.setCreatedBy(entity.getCreatedBy());

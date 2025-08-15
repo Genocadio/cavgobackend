@@ -166,11 +166,12 @@ print_status "Building and pushing application services..."
 
 #Build and push each service
 # build_and_push "eureka" "./Eurekacavgo"
-# build_and_push "main" "./cavgomain"
+build_and_push "main" "./cavgomain"
 #build_and_push "gateway" "./Cavgogateway"
- build_and_push "trips" "./cavgotrips"
+build_and_push "trips" "./cavgotrips"
 # build_and_push "booking" "./cavgoBooking"
 # build_and_push "cavgomqt" "./cavgomqt"
+# build_and_push "ussd" "./ussdService"
 
 print_success "All images have been built and pushed successfully!"
 print_status "You can now use the docker-compose-hub.yml file to deploy using the pushed images."
@@ -183,6 +184,7 @@ echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:main"
 echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:gateway"
 echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:trips"
 echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:booking"
+echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ussd"
 
 # Optional: Clean up local images to save space
 echo ""
@@ -196,6 +198,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     docker rmi "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:gateway" 2>/dev/null || true
     docker rmi "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:trips" 2>/dev/null || true
     docker rmi "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:booking" 2>/dev/null || true
+    docker rmi "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ussd" 2>/dev/null || true
     print_success "Local images cleaned up!"
 fi
 

@@ -45,14 +45,17 @@ public class JwtTokenProvider {
         claims.put("userType", getUserType(user));
         claims.put("isActive", user.getStatus().toString().equals("ACTIVE"));
 
-        // Add company-specific details if it's a company user
         boolean isCompanyUser = user instanceof CompanyUser;
         claims.put("isCompanyUser", isCompanyUser);
 
         if (isCompanyUser) {
             CompanyUser companyUser = (CompanyUser) user;
             claims.put("companyId", companyUser.getCompany().getId());
-            claims.put("companyRole", companyUser.getRole().toString());
+            if (companyUser.getRole() != null) {
+                claims.put("companyRole", companyUser.getRole().toString());
+            } else {
+                claims.put("companyRole", null);
+            }
         }
 
         return claims;

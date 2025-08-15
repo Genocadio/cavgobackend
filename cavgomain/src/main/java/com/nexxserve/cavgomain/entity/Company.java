@@ -31,6 +31,9 @@ public class Company extends BaseEntity {
     @Column(name = "city")
     private String city;
 
+    @Column(name = "company_code", nullable = false, unique = true)
+    private String companyCode;
+
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status")

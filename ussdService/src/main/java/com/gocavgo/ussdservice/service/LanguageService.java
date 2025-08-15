@@ -23,7 +23,7 @@ public class LanguageService {
         englishMessages.put("enter_destination", "CON Enter your destination:");
         englishMessages.put("available_trips", "CON Available Trips:");
         englishMessages.put("select_trip", "CON Select a trip by number:");
-        englishMessages.put("trip_selected", "END Trip booked successfully!\nFrom: %s\nTo: %s\nPrice: %s\nThank you for using GoCavGo!");
+        englishMessages.put("trip_selected", "END Trip booked successfully follow payment instructions sent!\nFrom: %s\nTo: %s\nPrice: %s\nThank you for using GoCavGo!");
         englishMessages.put("no_trips_found", "CON No trips found for this route.");
         englishMessages.put("search_error", "CON Sorry, we couldn't search for trips right now. Please try again later.");
         englishMessages.put("invalid_origin", "CON Please enter a valid origin location.");
@@ -32,6 +32,7 @@ public class LanguageService {
         englishMessages.put("help", "END Help: Use this service to book trips between different locations. Follow the prompts to search and select your preferred trip.");
         englishMessages.put("invalid_option", "CON Invalid option. Please try again:");
         englishMessages.put("goodbye", "END Thank you for using GoCavGo!");
+        englishMessages.put("session_expired", "END Your session has expired. Please start over ");
 
         // Kinyarwanda messages
         Map<String, String> kinyarwandaMessages = new HashMap<>();
@@ -41,7 +42,7 @@ public class LanguageService {
         kinyarwandaMessages.put("enter_destination", "CON Andika aho ujya:");
         kinyarwandaMessages.put("available_trips", "CON Ingendo Ziboneka:");
         kinyarwandaMessages.put("select_trip", "CON Hitamo urugendo ukoresha numero:");
-        kinyarwandaMessages.put("trip_selected", "END Urugendo rwanditswe neza!\nUva: %s\nUgiye: %s\nIgiciro: %s\nUrakoze gukoresha GoCavGo!");
+        kinyarwandaMessages.put("trip_selected", "END Gutega byagenze neza Kurikiza amaabwiriza yo kwishyura ugiye kwakira!\nUva: %s\nUgiye: %s\nIgiciro: %s\nUrakoze gukoresha GoCavGo!");
         kinyarwandaMessages.put("no_trips_found", "CON Nta rugendo rwaboneka kuri ubu muhanda.");
         kinyarwandaMessages.put("search_error", "CON Ihangane, tutashobora gushaka ingendo ubu. Ongera ugerageze nyuma.");
         kinyarwandaMessages.put("invalid_origin", "CON Nyamuneka andika aho uva neza.");
@@ -50,6 +51,7 @@ public class LanguageService {
         kinyarwandaMessages.put("help", "END Ubufasha: Koresha iki gikorwa kugira ngo wandike ingendo hagati y'ahantu hatandukanye. Kurikiza ibikubiye kugira ngo ushake kandi uhitamo urugendo rwawe.");
         kinyarwandaMessages.put("invalid_option", "CON Ihitamo ridafite. Ongera ugerageze:");
         kinyarwandaMessages.put("goodbye", "END Urakoze gukoresha GoCavGo!");
+        kinyarwandaMessages.put("session_expired", "END Igihe cyawe cyarangiye. tangira bushya.");
 
         // French messages
         Map<String, String> frenchMessages = new HashMap<>();
@@ -68,6 +70,7 @@ public class LanguageService {
         frenchMessages.put("help", "END Aide: Utilisez ce service pour réserver des voyages entre différents lieux. Suivez les instructions pour rechercher et sélectionner votre voyage préféré.");
         frenchMessages.put("invalid_option", "CON Option invalide. Veuillez réessayer:");
         frenchMessages.put("goodbye", "END Merci d'utiliser GoCavGo!");
+        frenchMessages.put("session_expired", "END Votre session a expiré. Veuillez recommencer.");
 
         messages.put("en", englishMessages);
         messages.put("rw", kinyarwandaMessages);

@@ -57,11 +57,16 @@ public class AuthenticationService {
                     .userType(user.getClass().getSimpleName());
 
             // Add company details if applicable
+            // Inside login() and refreshToken() methods, update this block:
             if (user instanceof CompanyUser companyUser) {
                 responseBuilder
-                        .isCompanyUser(true)
-                        .companyId(companyUser.getCompany().getId())
-                        .companyUserRole(companyUser.getRole());
+                    .isCompanyUser(true)
+                    .companyId(companyUser.getCompany().getId())
+                        .companyName(companyUser.getCompany().getCompanyName());
+                if (companyUser.getRole() != null) {
+                    responseBuilder.companyUserRole(companyUser.getRole());
+                }
+
             } else {
                 responseBuilder.isCompanyUser(false);
             }

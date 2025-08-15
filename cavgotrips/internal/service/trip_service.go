@@ -128,7 +128,7 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		Notes:              request.Notes,
 		Seats:              vehicle.Capacity,
 		IsReversed:         request.IsReversed,
-		HasCustomWaypoints: len(request.CustomWaypoints) > 0,
+		HasCustomWaypoints: !request.NoWaypoints && len(request.CustomWaypoints) > 0,
 	}
 
 	// Validate trip
@@ -141,8 +141,11 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		return nil, err
 	}
 
-	// Create waypoints based on whether we have custom waypoints or use route waypoints
-	if len(request.CustomWaypoints) > 0 {
+	// Create waypoints based on the request parameters
+	if request.NoWaypoints {
+		// No waypoints - only origin and destination from route
+		// This creates a simple point-to-point trip without intermediate stops
+	} else if len(request.CustomWaypoints) > 0 {
 		// Use custom waypoints
 		for _, customWaypoint := range request.CustomWaypoints {
 			// Validate location exists

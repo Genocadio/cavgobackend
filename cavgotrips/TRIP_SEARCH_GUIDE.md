@@ -83,6 +83,40 @@ When both origin and destination are found as waypoints, the system ensures:
 - Origin waypoint comes before destination waypoint in trip sequence
 - Only returns trips where the route makes logical sense
 
+## API Endpoints
+
+### 1. General Trip Search
+```
+GET /trips
+```
+**Query Parameters**: `origin`, `destination`, `company`, `status`, `vehicle_id`, `city_route`, `limit`, `offset`, `session_uuid`
+
+### 2. Vehicle-Specific Trips (NEW)
+```
+GET /trips/vehicle/{vehicle_id}
+```
+**Path Parameters**: `vehicle_id` - ID of the vehicle
+**Query Parameters**: `status`, `limit`, `offset`, `session_uuid`
+
+**Features**:
+- Get all trips for a specific vehicle
+- Filter by trip status
+- Pagination support
+- Session management for real-time updates
+- Optimized for vehicle-specific queries
+
+**Example**:
+```bash
+# Get all trips for vehicle 123
+GET /trips/vehicle/123
+
+# Get SCHEDULED trips for vehicle 123 with pagination
+GET /trips/vehicle/123?status=SCHEDULED&limit=10&offset=0
+
+# Get IN_PROGRESS trips for vehicle 123 with session
+GET /trips/vehicle/123?status=IN_PROGRESS&limit=5&session_uuid=abc123
+```
+
 ## API Examples
 
 ### Basic Search
@@ -93,6 +127,12 @@ GET /trips?origin=kigali&destination=musanze&limit=10
 ### Code-Based Search
 ```bash
 GET /trips?origin=110&destination=230&company=express
+```
+
+### Vehicle-Specific Search
+```bash
+GET /trips/vehicle/456
+GET /trips/vehicle/456?status=SCHEDULED&limit=20
 ```
 
 ### Paginated Search with Session
@@ -148,6 +188,19 @@ GET /trips?origin=kigali&destination=airport&city_route=true
 
 ## Performance Notes
 
-- Code-based searches are generally faster than name-based searches
-- Pagination is recommended for large result sets
-- Use specific codes when possible for optimal performance 
+- **Code-based searches** are generally faster than name-based searches
+- **Vehicle-specific endpoint** (`/trips/vehicle/{id}`) is optimized for vehicle queries
+- **Pagination** is recommended for large result sets
+- **Use specific codes** when possible for optimal performance
+- **Session management** reduces overhead for subsequent requests
+
+## Comparison: General vs Vehicle-Specific Search
+
+| Feature | General Search (`/trips`) | Vehicle Search (`/trips/vehicle/{id}`) |
+|---------|---------------------------|----------------------------------------|
+| **Use Case** | Complex filtering (origin, destination, company) | Simple vehicle-specific queries |
+| **Performance** | Good for complex filters | Optimized for vehicle queries |
+| **Flexibility** | High (multiple filter combinations) | Medium (vehicle + status + pagination) |
+| **URL Structure** | Query parameters | Path parameter + query parameters |
+| **Session Support** | ✅ Full session management | ✅ Full session management |
+| **Pagination** | ✅ Full pagination support | ✅ Full pagination support | 

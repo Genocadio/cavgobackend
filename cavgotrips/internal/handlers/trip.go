@@ -275,3 +275,137 @@ func (h *TripHandler) GetTripProgress(w http.ResponseWriter, r *http.Request) {
 
 	utils.JSONResponse(w, progress, http.StatusOK)
 }
+
+// GetTripsByVehicleID gets all trips for a specific vehicle
+func (h *TripHandler) GetTripsByVehicleID(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	vehicleID, err := strconv.ParseInt(vars["vehicle_id"], 10, 64)
+	if err != nil {
+		utils.ErrorResponse(w, "Invalid vehicle ID", http.StatusBadRequest)
+		return
+	}
+
+	// Check for optional query parameters
+	status := r.URL.Query().Get("status")
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+
+	limit := 20 // default page size
+	offset := 0
+
+	if limitStr != "" {
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil || limit < 0 {
+			utils.ErrorResponse(w, "Invalid limit parameter", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if offsetStr != "" {
+		offset, err = strconv.Atoi(offsetStr)
+		if err != nil || offset < 0 {
+			utils.ErrorResponse(w, "Invalid offset parameter", http.StatusBadRequest)
+			return
+		}
+	}
+
+	var trips []models.Trip
+	var total int64
+
+	if status != "" {
+		// Filter by both vehicle ID and status
+		allTrips, err := h.service.GetTripsByVehicleID(vehicleID)
+		if err != nil {
+			utils.ErrorResponse(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Filter by status in memory
+		filteredTrips := make([]models.Trip, 0)
+		for _, trip := range allTrips {
+			if trip.Status == status {
+				filteredTrips = append(filteredTrips, trip)
+			}
+		}
+
+		trips = filteredTrips
+		total = int64(len(trips))
+
+		// Apply pagination
+		if offset < len(trips) {
+			end := offset + limit
+			if end > len(trips) {
+				end = len(trips)
+			}
+			trips = trips[offset:end]
+		} else {
+			trips = []models.Trip{}
+		}
+	} else {
+		// Just get all trips for the vehicle
+		allTrips, err := h.service.GetTripsByVehicleID(vehicleID)
+		if err != nil {
+			utils.ErrorResponse(w, "Invalid vehicle ID", http.StatusInternalServerError)
+			return
+		}
+
+		total = int64(len(allTrips))
+
+		// Apply pagination
+		if offset < len(trips) {
+			end := offset + limit
+			if end > len(trips) {
+				end = len(trips)
+			}
+			trips = allTrips[offset:end]
+		} else {
+			trips = []models.Trip{}
+		}
+	}
+
+	// Extract trip IDs for session
+	tripIDs := make([]int64, len(trips))
+	for i, trip := range trips {
+		tripIDs[i] = trip.ID
+	}
+
+	// Handle session logic
+	sessionUUID := r.URL.Query().Get("session_uuid")
+	var finalSessionUUID string
+	var isNewSession bool
+
+	if sessionUUID == "" {
+		// Create new session for first page
+		session := h.service.SessionService.CreateSession(tripIDs)
+		finalSessionUUID = session.UUID
+		isNewSession = true
+	} else {
+		// Try to update existing session with new trip IDs
+		success := h.service.SessionService.UpdateSession(sessionUUID, tripIDs)
+		if !success {
+			// Session not found or expired, create new session instead of returning error
+			log.Printf("[Trip] ⚠️ Session %s not found or expired, creating new session", sessionUUID)
+			session := h.service.SessionService.CreateSession(tripIDs)
+			finalSessionUUID = session.UUID
+			isNewSession = true
+		} else {
+			finalSessionUUID = sessionUUID
+			isNewSession = false
+		}
+	}
+
+	// Create page response with session data
+	pageResponse := models.PageResponse{
+		Trips:  trips,
+		Total:  total,
+		Limit:  limit,
+		Offset: offset,
+	}
+
+	// Only include session UUID if it's a new session
+	if isNewSession {
+		pageResponse.SSEUUID = finalSessionUUID
+	}
+
+	utils.JSONResponse(w, pageResponse, http.StatusOK)
+}

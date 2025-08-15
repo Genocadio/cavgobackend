@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: ussdService
+app:
+  backend:
+    base-url: ${BACKEND_BASE_URL:http://cavgomain:6060}
+  trip-service:
+    port: ${TRIP_SERVICE_PORT:6080}
+    host: ${TRIP_SERVICE_HOST:cavgotrips}
+server:
+  port: 6050

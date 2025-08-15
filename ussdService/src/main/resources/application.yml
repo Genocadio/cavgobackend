@@ -4,3 +4,8 @@ spring:
 app:
   backend:
     base-url: ${BACKEND_BASE_URL:https://api.gocavgo.com/api}
+  trip-service:
+    port: ${TRIP_SERVICE_PORT:6080}
+    host: ${TRIP_SERVICE_HOST:localhost}
+server:
+  port: 5050

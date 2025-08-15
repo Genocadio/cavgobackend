@@ -2,6 +2,8 @@ package com.gocavgo.ussdservice.service;
 
 import com.gocavgo.ussdservice.dto.LocationDto;
 import com.gocavgo.ussdservice.dto.TripWaypointDto;
+import com.gocavgo.ussdservice.dto.TripBookingOption;
+import com.gocavgo.ussdservice.dto.MatchedLocation;
 import com.gocavgo.ussdservice.dto.USSDRequest;
 import com.gocavgo.ussdservice.dto.TripDto;
 import com.gocavgo.ussdservice.entity.UserSession;
@@ -15,7 +17,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+
 
 @Service
 @RequiredArgsConstructor
@@ -118,7 +122,67 @@ public class USSDService {
     private String handleBookNowSelection(UserSession userSession, String input, String[] allInputs) {
         String language = userSession.getLanguage();
 
-        // Handle different navigation scenarios
+        // Handle shortcut input: 1*origin*destination or 1*origin
+        if (allInputs.length >= 2 && "1".equals(allInputs[0])) {
+            String origin = allInputs[1];
+
+            // Validate origin
+            if (origin == null || origin.trim().isEmpty()) {
+                userSession.setCurrentStep("enter_origin");
+                return languageService.getMessage(language, "invalid_origin") + "\n" +
+                        languageService.getMessage(language, "enter_origin");
+            }
+
+            userSession.setOrigin(origin.trim());
+
+            // Check if destination is also provided: 1*origin*destination
+            if (allInputs.length >= 3) {
+                String destination = allInputs[2];
+
+                if (destination == null || destination.trim().isEmpty()) {
+                    userSession.setCurrentStep("enter_destination");
+                    return languageService.getMessage(language, "invalid_destination") + "\n" +
+                            languageService.getMessage(language, "enter_destination");
+                }
+
+                userSession.setDestination(destination.trim());
+
+                // Search for trips directly
+                try {
+                    List<TripDto> trips = tripService.getTripsByRoute(
+                            userSession.getOrigin(),
+                            userSession.getDestination(),
+                            5, // limit to 5 trips for USSD display
+                            0
+                    );
+
+                    if (trips.isEmpty()) {
+                        userSession.setCurrentStep("book_now");
+                        return languageService.getMessage(language, "no_trips_found") + "\n" +
+                                languageService.getMessage(language, "book_now");
+                    }
+
+                    // Store trips in session for selection
+                    userSession.setAvailableTrips(trips);
+                    userSession.setCurrentStep("trip_selection");
+
+                    return formatTripsList(trips, language,
+                            userSession.getOrigin(), userSession.getDestination(), userSession);
+
+                } catch (Exception e) {
+                    log.error("Error searching for trips", e);
+                    userSession.setCurrentStep("book_now");
+                    return languageService.getMessage(language, "search_error") + "\n" +
+                            languageService.getMessage(language, "book_now");
+                }
+            } else {
+                // Only origin provided: 1*origin
+                userSession.setCurrentStep("enter_destination");
+                return languageService.getMessage(language, "enter_destination");
+            }
+        }
+
+        // Handle different navigation scenarios for single inputs
         if (allInputs.length == 1) {
             // Direct selection from main menu (e.g., "1", "2", "3")
             return switch (input) {
@@ -215,7 +279,7 @@ public class USSDService {
             userSession.setCurrentStep("trip_selection");
 
             return formatTripsList(trips, language,
-                    userSession.getOrigin(), userSession.getDestination());
+                    userSession.getOrigin(), userSession.getDestination(), userSession);
 
         } catch (Exception e) {
             log.error("Error searching for trips", e);
@@ -228,93 +292,236 @@ public class USSDService {
     private String handleTripSelection(UserSession userSession, String input) {
         String language = userSession.getLanguage();
 
+        // Check if booking options exist
+        List<TripBookingOption> bookingOptions = userSession.getBookingOptions();
+        if (bookingOptions == null || bookingOptions.isEmpty()) {
+            userSession.setCurrentStep("book_now");
+            return languageService.getMessage(language, "session_expired") + "\n" +
+                    languageService.getMessage(language, "book_now");
+        }
+
         try {
             int selection = Integer.parseInt(input);
-            List<TripDto> availableTrips = userSession.getAvailableTrips();
 
-            if (selection < 1 || selection > availableTrips.size()) {
+            if (selection < 1 || selection > bookingOptions.size()) {
                 return languageService.getMessage(language, "invalid_selection") + "\n" +
-                        formatTripsList(availableTrips, language,
-                                userSession.getOrigin(), userSession.getDestination());
+                        formatTripsList(userSession.getAvailableTrips(), language,
+                                userSession.getOrigin(), userSession.getDestination(), userSession);
             }
 
-            TripDto selectedTrip = availableTrips.get(selection - 1);
+            TripBookingOption selectedOption = bookingOptions.get(selection - 1);
 
-            // Log the selected trip with correct field access
-            log.info("User {} selected trip: ID={}, Route={}, Price={}, DepartureTime={}",
-                    userSession.getPhoneNumber(),
-                    selectedTrip.getId(),
-                    selectedTrip.getRoute() != null ?
-                            String.format("%s -> %s", getOriginFromTrip(selectedTrip), getDestinationFromTrip(selectedTrip)) : "N/A",
-                    getPriceFromTrip(selectedTrip),
-                    formatDepartureTime(selectedTrip.getDepartureTime()));
+            // Log successful booking
+            log.info("=== SUCCESSFUL BOOKING ===");
+            log.info("Phone Number: {}", userSession.getPhoneNumber());
+            log.info("Trip ID: {}", selectedOption.getTripId());
+            log.info("Origin: {} (ID: {}, Waypoint: {})",
+                    selectedOption.getOriginName(),
+                    selectedOption.getOriginLocationId(),
+                    selectedOption.isOriginIsWaypoint());
+            log.info("Destination: {} (ID: {}, Waypoint: {})",
+                    selectedOption.getDestinationName(),
+                    selectedOption.getDestinationLocationId(),
+                    selectedOption.isDestinationIsWaypoint());
+            log.info("Price: {}", selectedOption.getPrice());
+            log.info("Departure Time: {}", selectedOption.getDepartureTime());
+            log.info("Available Seats: {}", selectedOption.getAvailableSeats());
+            log.info("Payment will be processed later...");
+            log.info("=========================");
 
             // Reset session for new booking
             userSession.setCurrentStep("book_now");
             userSession.setOrigin(null);
             userSession.setDestination(null);
             userSession.setAvailableTrips(null);
+            userSession.setBookingOptions(null);
 
             return languageService.getMessage(language, "trip_selected",
-                    getOriginFromTrip(selectedTrip),
-                    getDestinationFromTrip(selectedTrip),
-                    getPriceFromTrip(selectedTrip));
+                    selectedOption.getOriginName(),
+                    selectedOption.getDestinationName(),
+                    selectedOption.getPrice());
 
         } catch (NumberFormatException e) {
-            List<TripDto> availableTrips = userSession.getAvailableTrips();
             return languageService.getMessage(language, "invalid_selection") + "\n" +
-                    formatTripsList(availableTrips, language,
-                            userSession.getOrigin(), userSession.getDestination());
+                    languageService.getMessage(language, "book_now");
         }
     }
 
-    private String formatTripsList(List<TripDto> trips, String language, String userOrigin, String userDestination) {
+    private String formatTripsList(List<TripDto> trips, String language, String userOrigin, String userDestination, UserSession userSession) {
         StringBuilder sb = new StringBuilder();
         sb.append(languageService.getMessage(language, "available_trips")).append("\n");
 
+        List<TripBookingOption> bookingOptions = new ArrayList<>();
+
         for (int i = 0; i < trips.size(); i++) {
             TripDto trip = trips.get(i);
-            String matchedOrigin = findMatchingLocationName(userOrigin, trip, true);
-            String matchedDestination = findMatchingLocationName(userDestination, trip, false);
+
+            // Find matched locations and their IDs
+            MatchedLocation matchedOriginInfo = findMatchingLocationWithId(userOrigin, trip, true);
+            MatchedLocation matchedDestinationInfo = findMatchingLocationWithId(userDestination, trip, false);
+
+            // Create booking option with correct location IDs
+            TripBookingOption bookingOption = TripBookingOption.builder()
+                    .tripId(trip.getId())
+                    .originLocationId(matchedOriginInfo.getLocationId())
+                    .destinationLocationId(matchedDestinationInfo.getLocationId())
+                    .originName(matchedOriginInfo.getName())
+                    .destinationName(matchedDestinationInfo.getName())
+                    .price(getPriceFromTrip(trip))
+                    .departureTime(formatDepartureTime(trip.getDepartureTime()))
+                    .availableSeats(trip.getSeats())
+                    .originIsWaypoint(matchedOriginInfo.isWaypoint())
+                    .destinationIsWaypoint(matchedDestinationInfo.isWaypoint())
+                    .build();
+
+            bookingOptions.add(bookingOption);
 
             sb.append(String.format("%d. %s -> %s (Price: %s, Time: %s)\n",
                     i + 1,
-                    matchedOrigin,
-                    matchedDestination,
+                    matchedOriginInfo.getName(),
+                    matchedDestinationInfo.getName(),
                     getPriceFromTrip(trip),
                     formatDepartureTime(trip.getDepartureTime())));
         }
+
+        // Save booking options to user session
+        userSession.setBookingOptions(bookingOptions);
 
         sb.append(languageService.getMessage(language, "select_trip"));
         return sb.toString();
     }
 
-    private String findMatchingLocationName(String userInput, TripDto trip, boolean isOrigin) {
+    private MatchedLocation findMatchingLocationWithId(String userInput, TripDto trip, boolean isOrigin) {
+        String userInputLower = userInput.toLowerCase().trim();
+
+        // Check if input is a 5-digit numeric code
+        boolean isNumericCode = userInput.matches("\\d{5}");
+
+        // Check route locations first
         if (trip.getRoute() != null) {
             LocationDto location = isOrigin ? trip.getRoute().getOrigin() : trip.getRoute().getDestination();
             if (location != null) {
-                if (location.getCustomName() != null && location.getCustomName().equalsIgnoreCase(userInput)) {
-                    return location.getCustomName();
+                // Check for numeric code match first
+                if (isNumericCode && location.getCode() != null && location.getCode().equals(userInput)) {
+                    String displayName = location.getCustomName() != null ?
+                        location.getCustomName() : location.getGooglePlaceName();
+                    return new MatchedLocation(location.getId(), displayName, false);
                 }
-                if (location.getGooglePlaceName() != null && location.getGooglePlaceName().equalsIgnoreCase(userInput)) {
-                    return location.getGooglePlaceName();
+
+                // Check custom name
+                if (location.getCustomName() != null &&
+                        containsPartialMatch(location.getCustomName(), userInputLower)) {
+                    return new MatchedLocation(location.getId(), location.getCustomName(), false);
+                }
+
+                // Check Google place name
+                if (location.getGooglePlaceName() != null &&
+                        containsPartialMatch(location.getGooglePlaceName(), userInputLower)) {
+                    return new MatchedLocation(location.getId(), location.getGooglePlaceName(), false);
                 }
             }
         }
+
+        // Check waypoints
         if (trip.getWaypoints() != null) {
             for (TripWaypointDto waypoint : trip.getWaypoints()) {
                 LocationDto loc = waypoint.getLocation();
                 if (loc != null) {
-                    if (loc.getCustomName() != null && loc.getCustomName().equalsIgnoreCase(userInput)) {
+                    // Check for numeric code match first
+                    if (isNumericCode && loc.getCode() != null && loc.getCode().equals(userInput)) {
+                        String displayName = loc.getCustomName() != null ?
+                            loc.getCustomName() : loc.getGooglePlaceName();
+                        return new MatchedLocation(loc.getId(), displayName, true);
+                    }
+
+                    // Check custom name
+                    if (loc.getCustomName() != null &&
+                            containsPartialMatch(loc.getCustomName(), userInputLower)) {
+                        return new MatchedLocation(loc.getId(), loc.getCustomName(), true);
+                    }
+
+                    // Check Google place name
+                    if (loc.getGooglePlaceName() != null &&
+                            containsPartialMatch(loc.getGooglePlaceName(), userInputLower)) {
+                        return new MatchedLocation(loc.getId(), loc.getGooglePlaceName(), true);
+                    }
+                }
+            }
+        }
+
+        // Fallback: return the best available location
+        if (trip.getRoute() != null) {
+            LocationDto location = isOrigin ? trip.getRoute().getOrigin() : trip.getRoute().getDestination();
+            if (location != null) {
+                String name = location.getCustomName() != null ?
+                        location.getCustomName() : location.getGooglePlaceName();
+                if (name != null) {
+                    return new MatchedLocation(location.getId(), name, false);
+                }
+            }
+        }
+
+        return new MatchedLocation(null, userInput, false);
+    }
+
+    private String findMatchingLocationName(String userInput, TripDto trip, boolean isOrigin) {
+        String userInputLower = userInput.toLowerCase().trim();
+
+        // Check route locations first
+        if (trip.getRoute() != null) {
+            LocationDto location = isOrigin ? trip.getRoute().getOrigin() : trip.getRoute().getDestination();
+            if (location != null) {
+                if (location.getCustomName() != null &&
+                    containsPartialMatch(location.getCustomName(), userInputLower)) {
+                    return location.getCustomName();
+                }
+                if (location.getGooglePlaceName() != null &&
+                    containsPartialMatch(location.getGooglePlaceName(), userInputLower)) {
+                    return location.getGooglePlaceName();
+                }
+            }
+        }
+
+        // Check waypoints
+        if (trip.getWaypoints() != null) {
+            for (TripWaypointDto waypoint : trip.getWaypoints()) {
+                LocationDto loc = waypoint.getLocation();
+                if (loc != null) {
+                    if (loc.getCustomName() != null &&
+                        containsPartialMatch(loc.getCustomName(), userInputLower)) {
                         return loc.getCustomName();
                     }
-                    if (loc.getGooglePlaceName() != null && loc.getGooglePlaceName().equalsIgnoreCase(userInput)) {
+                    if (loc.getGooglePlaceName() != null &&
+                        containsPartialMatch(loc.getGooglePlaceName(), userInputLower)) {
                         return loc.getGooglePlaceName();
                     }
                 }
             }
         }
-        return "N/A";
+
+        // Fallback: return the best available location name even if no match
+        if (trip.getRoute() != null) {
+            LocationDto location = isOrigin ? trip.getRoute().getOrigin() : trip.getRoute().getDestination();
+            if (location != null) {
+                if (location.getCustomName() != null) {
+                    return location.getCustomName();
+                }
+                if (location.getGooglePlaceName() != null) {
+                    return location.getGooglePlaceName();
+                }
+            }
+        }
+
+        return userInput; // Return user input if no location found
+    }
+
+    private boolean containsPartialMatch(String locationName, String userInput) {
+        if (locationName == null || userInput == null) return false;
+
+        String locationLower = locationName.toLowerCase().trim();
+
+        // Check if either contains the other for partial matching
+        return locationLower.contains(userInput) || userInput.contains(locationLower);
     }
 
     // Helper methods to safely extract trip information

@@ -278,6 +278,43 @@ services:
       retries: 3
       start_period: 60s
     restart: unless-stopped
+
+  # USSD Service (Java)
+  cavgoussd:
+    image: genoyves/cavgo-system:ussd
+    container_name: cavgo-ussd
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      TRIP_SERVICE_HOST: cavgotrips
+      TRIP_SERVICE_PORT: 6080
+      BACKEND_BASE_URL: http://cavgomain:6060
+    ports:
+      - "6050:6050"
+    depends_on:
+      eurekacavgo:
+        condition: service_healthy
+      cavgotrips:
+        condition: service_healthy
+      cavgomain:
+        condition: service_healthy
+    networks:
+      - cavgo-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:6050/actuator/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   portainer_data:
 

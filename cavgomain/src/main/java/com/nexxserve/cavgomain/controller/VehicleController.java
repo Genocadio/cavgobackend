@@ -39,6 +39,11 @@ public class VehicleController {
         return vehicleService.updateVehicle(id, vehicle);
     }
 
+    @GetMapping("/company/{companyId}")
+    public List<VehicleResponseDto> getcompanyVehicles(@PathVariable Long companyId) {
+        return vehicleService.getCompanyVehicles(companyId);
+    }
+
     @DeleteMapping("/{id}")
     public void deleteVehicle(@PathVariable Long id) {
         vehicleService.deleteVehicle(id);

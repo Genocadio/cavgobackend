@@ -28,8 +28,8 @@ public class CompanyUserService {
         if (companyUserRepository.findByEmail(user.getEmail()).isPresent()) {
             throw new IllegalArgumentException("Email already exists");
         }
-        Company company = companyRepository.findById(user.getCompanyId())
-                .orElseThrow(() -> new IllegalArgumentException("Company not found with id: " + user.getCompanyId()));
+        Company company = companyRepository.findByCompanyCode(user.getCompanyCode())
+                .orElseThrow(() -> new IllegalArgumentException("Company not found with Code: " + user.getCompanyCode()));
         user.setPassword(passwordEncoder.encode(user.getPassword()));
         CompanyUser saved = companyUserRepository.save(user.toEntity(company));
         return CompanyUserResponseDto.fromEntity(saved);
