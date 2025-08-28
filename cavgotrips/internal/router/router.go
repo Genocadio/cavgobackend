@@ -48,6 +48,7 @@ func Setup(
 	r.HandleFunc("/trips", tripHandler.GetTrips).Methods("GET")
 	r.HandleFunc("/trips/vehicle/{vehicle_id}", tripHandler.GetTripsByVehicleID).Methods("GET")
 	r.HandleFunc("/trips/{id}", tripHandler.GetTrip).Methods("GET")
+	r.HandleFunc("/trips/{id}", tripHandler.DeleteTrip).Methods("DELETE")
 	r.HandleFunc("/trips/{id}/progress", tripHandler.UpdateTripProgress).Methods("PUT")
 	r.HandleFunc("/trips/{id}/progress", tripHandler.GetTripProgress).Methods("GET")
 

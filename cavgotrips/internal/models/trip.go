@@ -35,6 +35,7 @@ type Trip struct {
 	ConnectionMode                 string    `json:"connection_mode" gorm:"not null"` // ONLINE, OFFLINE, HYBRID
 	Notes                          *string   `json:"notes"`
 	Seats                          int       `json:"seats" gorm:"not null"`
+	Price                          *float64  `json:"price"` // If not provided, will use route price
 	RemainingTimeToDestination     *int64    `json:"remaining_time_to_destination"`
 	RemainingDistanceToDestination *float64  `json:"remaining_distance_to_destination"`
 	IsReversed                     bool      `json:"is_reversed" gorm:"default:false"`
@@ -96,6 +97,7 @@ type CreateTripRequest struct {
 	VehicleID       int64                  `json:"vehicle_id"`
 	DepartureTime   int64                  `json:"departure_time"`
 	ConnectionMode  string                 `json:"connection_mode"`
+	Price           *float64               `json:"price"` // Optional: if not provided, route price will be used
 	Notes           *string                `json:"notes"`
 	IsReversed      bool                   `json:"is_reversed"`
 	CustomWaypoints []CreateCustomWaypoint `json:"custom_waypoints"` // Optional custom waypoints
@@ -128,6 +130,11 @@ func (r *CreateTripRequest) Validate() error {
 	}
 	if !connectionValid {
 		return NewValidationError("invalid connection_mode; must be ONLINE, OFFLINE, or HYBRID")
+	}
+
+	// Price is optional, but if provided, must be > 0
+	if r.Price != nil && *r.Price <= 0 {
+		return NewValidationError("price, if provided, must be greater than 0")
 	}
 
 	for i, wp := range r.CustomWaypoints {
@@ -195,6 +202,11 @@ func (t *Trip) Validate() error {
 	}
 	if !connectionValid {
 		return NewValidationError("invalid connection mode")
+	}
+
+	// Price must be set and greater than 0
+	if t.Price == nil || *t.Price <= 0 {
+		return NewValidationError("trip must have a valid price greater than 0")
 	}
 
 	usedLocations := make(map[int64]bool)

@@ -117,6 +117,14 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		},
 	}
 
+	// Determine trip price: use provided price or route price
+	var tripPrice *float64
+	if request.Price != nil {
+		tripPrice = request.Price
+	} else {
+		tripPrice = &route.RoutePrice
+	}
+
 	// Create the trip
 	trip := &models.Trip{
 		RouteID:            request.RouteID,
@@ -125,6 +133,7 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		Status:             "SCHEDULED",
 		DepartureTime:      request.DepartureTime,
 		ConnectionMode:     request.ConnectionMode,
+		Price:              tripPrice,
 		Notes:              request.Notes,
 		Seats:              vehicle.Capacity,
 		IsReversed:         request.IsReversed,
@@ -507,4 +516,32 @@ func (s *TripService) GetTripsByFiltersWithCityRoute(origin, destination, compan
 		return s.GetTripsByFiltersPaginated(origin, destination, company, limit, offset)
 	}
 	return s.tripRepo.GetTripsByFiltersWithCityRoute(origin, destination, company, *cityRoute, limit, offset)
+}
+
+func (s *TripService) DeleteTrip(id int64) error {
+	// Get the trip to check if it exists and get its status
+	trip, err := s.tripRepo.GetByID(id)
+	if err != nil {
+		return errors.New("trip not found")
+	}
+
+	// Only allow deletion of SCHEDULED trips (not IN_PROGRESS or COMPLETED)
+	if trip.Status != "SCHEDULED" {
+		return errors.New("can only delete scheduled trips")
+	}
+
+	// Delete the trip (this will also delete associated waypoints)
+	if err := s.tripRepo.Delete(id); err != nil {
+		return err
+	}
+
+	// Broadcast SSE event for trip deletion
+	if s.sseService != nil {
+		s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{
+			Event: "deleted",
+			Data:  *trip,
+		})
+	}
+
+	return nil
 }

@@ -284,7 +284,12 @@ func (r *tripRepository) GetTripsByFiltersPaginated(origin, destination, company
 
 func (r *tripRepository) GetTripsByVehicleID(vehicleID int64) ([]models.Trip, error) {
 	var trips []models.Trip
-	err := r.db.Preload("Route").Preload("Waypoints").Where("vehicle_id = ?", vehicleID).Find(&trips).Error
+	err := r.db.Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		Where("vehicle_id = ?", vehicleID).
+		Order("created_at DESC").
+		Find(&trips).Error
 	if err != nil {
 		return nil, err
 	}
@@ -576,4 +581,14 @@ func sortTripsByMatchScore(trips []models.Trip, origin, destination, company str
 		result[i] = st.trip
 	}
 	return result
+}
+
+func (r *tripRepository) Delete(id int64) error {
+	// First delete all waypoints associated with the trip
+	if err := r.db.Where("trip_id = ?", id).Delete(&models.TripWaypoint{}).Error; err != nil {
+		return err
+	}
+
+	// Then delete the trip itself
+	return r.db.Delete(&models.Trip{}, id).Error
 }

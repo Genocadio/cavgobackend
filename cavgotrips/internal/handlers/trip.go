@@ -146,7 +146,21 @@ func (h *TripHandler) GetTrips(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		trips, err = h.service.GetTripsByVehicleID(id)
+		if err != nil {
+			utils.ErrorResponse(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		total = int64(len(trips))
+		// Apply pagination to vehicle trips
+		if offset < len(trips) {
+			end := offset + limit
+			if end > len(trips) {
+				end = len(trips)
+			}
+			trips = trips[offset:end]
+		} else {
+			trips = []models.Trip{}
+		}
 	} else {
 		trips, total, err = h.service.GetTripsByFiltersPaginated("", "", "", limit, offset)
 	}
@@ -328,16 +342,16 @@ func (h *TripHandler) GetTripsByVehicleID(w http.ResponseWriter, r *http.Request
 			}
 		}
 
-		trips = filteredTrips
-		total = int64(len(trips))
+		// Set total to the count of filtered trips (before pagination)
+		total = int64(len(filteredTrips))
 
 		// Apply pagination
-		if offset < len(trips) {
+		if offset < len(filteredTrips) {
 			end := offset + limit
-			if end > len(trips) {
-				end = len(trips)
+			if end > len(filteredTrips) {
+				end = len(filteredTrips)
 			}
-			trips = trips[offset:end]
+			trips = filteredTrips[offset:end]
 		} else {
 			trips = []models.Trip{}
 		}
@@ -349,13 +363,14 @@ func (h *TripHandler) GetTripsByVehicleID(w http.ResponseWriter, r *http.Request
 			return
 		}
 
+		// Set total to the count of all trips (before pagination)
 		total = int64(len(allTrips))
 
 		// Apply pagination
-		if offset < len(trips) {
+		if offset < len(allTrips) {
 			end := offset + limit
-			if end > len(trips) {
-				end = len(trips)
+			if end > len(allTrips) {
+				end = len(allTrips)
 			}
 			trips = allTrips[offset:end]
 		} else {
@@ -408,4 +423,29 @@ func (h *TripHandler) GetTripsByVehicleID(w http.ResponseWriter, r *http.Request
 	}
 
 	utils.JSONResponse(w, pageResponse, http.StatusOK)
+}
+
+func (h *TripHandler) DeleteTrip(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		utils.ErrorResponse(w, "Invalid trip ID", http.StatusBadRequest)
+		return
+	}
+
+	err = h.service.DeleteTrip(id)
+	if err != nil {
+		if err.Error() == "trip not found" {
+			utils.ErrorResponse(w, "Trip not found", http.StatusNotFound)
+			return
+		} else if err.Error() == "can only delete scheduled trips" {
+			utils.ErrorResponse(w, err.Error(), http.StatusBadRequest)
+			return
+		} else {
+			utils.ErrorResponse(w, "Internal server error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	utils.JSONResponse(w, map[string]string{"message": "Trip deleted successfully"}, http.StatusOK)
 }
