@@ -1,6 +1,7 @@
 package com.nexxserve.cavgomqt.config;
 
 import com.nexxserve.cavgomqt.service.VehicleRegistryService;
+import com.nexxserve.cavgomqt.service.TripReceiverService;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +24,9 @@ public class MqttConfiguration {
     @Autowired
     private VehicleRegistryService vehicleRegistryService;
 
+    @Autowired
+    private TripReceiverService tripReceiverService;
+
     @Value("${mqtt.broker.url:tcp://localhost:1883}")
     private String brokerUrl;
 
@@ -40,11 +44,20 @@ public class MqttConfiguration {
         DefaultMqttPahoClientFactory factory =
             new DefaultMqttPahoClientFactory();
         MqttConnectOptions options = new MqttConnectOptions();
+        
+        // Connection settings optimized for HiveMQ Cloud
         options.setCleanSession(false); // Persistent session for reliable delivery
-        options.setConnectionTimeout(30);
-        options.setKeepAliveInterval(60);
+        options.setConnectionTimeout(60); // Increased for SSL connections
+        options.setKeepAliveInterval(30); // Reduced for better connection stability
         options.setAutomaticReconnect(true);
-        options.setMaxInflight(100); // Allow more concurrent messages
+        options.setMaxInflight(50); // Reduced to prevent overwhelming the broker
+        options.setMqttVersion(4); // Use MQTT 3.1.1 for better compatibility
+        
+        // SSL Configuration for HiveMQ Cloud
+        if (brokerUrl.startsWith("ssl://")) {
+            options.setHttpsHostnameVerificationEnabled(false); // Disable for cloud brokers
+            options.setSSLProperties(new java.util.Properties());
+        }
 
         if (!username.isEmpty()) {
             options.setUserName(username);
@@ -106,11 +119,11 @@ public class MqttConfiguration {
         MqttPahoMessageDrivenChannelAdapter adapter =
             new MqttPahoMessageDrivenChannelAdapter(
                 brokerUrl,
-                clientId + "-status",
+                clientId + "-status-" + System.currentTimeMillis(),
                 mqttClientFactory(),
                 "car/+/status"
             );
-        adapter.setCompletionTimeout(5000);
+        adapter.setCompletionTimeout(10000); // Increased timeout for SSL
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(carStatusChannel());
@@ -122,11 +135,11 @@ public class MqttConfiguration {
         MqttPahoMessageDrivenChannelAdapter adapter =
             new MqttPahoMessageDrivenChannelAdapter(
                 brokerUrl,
-                clientId + "-trip-updates",
+                clientId + "-trip-updates-" + System.currentTimeMillis(),
                 mqttClientFactory(),
                 "car/+/trip/updates"
             );
-        adapter.setCompletionTimeout(5000);
+        adapter.setCompletionTimeout(10000); // Increased timeout for SSL
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(tripUpdatesChannel());
@@ -138,11 +151,11 @@ public class MqttConfiguration {
         MqttPahoMessageDrivenChannelAdapter adapter =
             new MqttPahoMessageDrivenChannelAdapter(
                 brokerUrl,
-                clientId + "-heartbeat",
+                clientId + "-heartbeat-" + System.currentTimeMillis(),
                 mqttClientFactory(),
                 "car/+/pong"
             );
-        adapter.setCompletionTimeout(5000);
+        adapter.setCompletionTimeout(10000); // Increased timeout for SSL
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(heartbeatChannel());
@@ -183,13 +196,13 @@ public class MqttConfiguration {
                 .getHeaders()
                 .get("mqtt_receivedTopic");
 
-            String carId = extractCarIdFromTopic(topic);
+            System.out.println("🔍 MQTT Handler Debug:");
+            System.out.println("  - Topic: " + topic);
+            System.out.println("  - Payload length: " + (payload != null ? payload.length() : "null"));
+            System.out.println("  - All headers: " + message.getHeaders());
 
-            System.out.println("=== TRIP UPDATE ===");
-            System.out.println("Car ID: " + carId);
-            System.out.println("Update: " + payload);
-
-            // TODO: Process trip update (update trip status, notify passengers)
+            // Use TripReceiverService to process the trip event message
+            tripReceiverService.processTripEventMessage(topic, payload);
         };
     }
 
@@ -223,7 +236,7 @@ public class MqttConfiguration {
     public MessageHandler tripAssignmentOutbound() {
         MqttPahoMessageHandler messageHandler = new MqttPahoMessageHandler(
             brokerUrl,
-            clientId + "-trip-assign",
+            clientId + "-trip-assign-" + System.currentTimeMillis(),
             mqttClientFactory()
         );
         messageHandler.setAsync(true);
@@ -237,7 +250,7 @@ public class MqttConfiguration {
     public MessageHandler bookingUpdatesOutbound() {
         MqttPahoMessageHandler messageHandler = new MqttPahoMessageHandler(
             brokerUrl,
-            clientId + "-bookings",
+            clientId + "-bookings-" + System.currentTimeMillis(),
             mqttClientFactory()
         );
         messageHandler.setAsync(true);
@@ -251,7 +264,7 @@ public class MqttConfiguration {
     public MessageHandler heartbeatOutbound() {
         MqttPahoMessageHandler messageHandler = new MqttPahoMessageHandler(
             brokerUrl,
-            clientId + "-ping",
+            clientId + "-ping-" + System.currentTimeMillis(),
             mqttClientFactory()
         );
         messageHandler.setAsync(true);

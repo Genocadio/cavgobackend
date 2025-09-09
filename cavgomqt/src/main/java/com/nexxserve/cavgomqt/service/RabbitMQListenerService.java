@@ -55,57 +55,120 @@ public class RabbitMQListenerService {
 
     @RabbitListener(queues = "trips.queue")
     public void handleTripChanges(TripEventMessage message) {
-        logger.info("Received trip message: {}", message);
+        logger.info("📥 Received trip message from RabbitMQ: {}", message.getEvent());
 
         try {
             Trip trip = message.getData();
-            mqttService.publishTrip(message);
-
-//            logger.info("Processed trip change:");
-//            logger.info("- Trip ID: {}", trip.getId());
-//            logger.info("- Status: {}", trip.getStatus());
-//            logger.info("- Vehicle: {} ({})", trip.getVehicle().getLicensePlate(), trip.getVehicle().getCompanyName());
-//            logger.info("- Driver: {} ({})", trip.getVehicle().getDriver().getName(), trip.getVehicle().getDriver().getPhone());
-//            logger.info("- Departure Time: {}", trip.getDepartureTime());
-//            logger.info("- Seats: {}", trip.getSeats());
-//            logger.info("- Connection Mode: {}", trip.getConnectionMode());
-//
-//
-//            if (trip.getRoute() != null) {
-//                logger.info("- Route: {} -> {}",
-//                        trip.getRoute().getOrigin().getCustomName() != null ?
-//                                trip.getRoute().getOrigin().getCustomName() : trip.getRoute().getOrigin().getGooglePlaceName(),
-//                        trip.getRoute().getDestination().getCustomName() != null ?
-//                                trip.getRoute().getDestination().getCustomName() : trip.getRoute().getDestination().getGooglePlaceName());
-//                logger.info("- Route Price: {}", trip.getRoute().getRoutePrice());
-//            }
-//
-//            if (trip.getCurrentLatitude() != null && trip.getCurrentLongitude() != null) {
-//                logger.info("- Current Location: {}, {}", trip.getCurrentLatitude(), trip.getCurrentLongitude());
-//            }
-//
-//            if (trip.getCurrentSpeed() != null) {
-//                logger.info("- Current Speed: {} km/h", trip.getCurrentSpeed());
-//            }
-//
-//            if (trip.getRemainingTimeToDestination() != null) {
-//                logger.info("- Remaining Time: {} seconds", trip.getRemainingTimeToDestination());
-//            }
-//
-//            if (trip.getWaypoints() != null && !trip.getWaypoints().isEmpty()) {
-//                logger.info("- Waypoints: {} total", trip.getWaypoints().size());
-//                trip.getWaypoints().forEach(waypoint -> {
-//                    logger.info("  - Waypoint {}: {} (passed: {}, next: {})",
-//                            waypoint.getOrder(),
-//                            waypoint.getLocation().getCustomName() != null ?
-//                                    waypoint.getLocation().getCustomName() : waypoint.getLocation().getGooglePlaceName(),
-//                            waypoint.getIsPassed(),
-//                            waypoint.getIsNext());
-//                });
-//            }
+            String event = message.getEvent();
+            
+            // Handle different trip event types
+            switch (event) {
+                case "TRIP_STARTED":
+                    handleTripStartedEvent(message, trip);
+                    break;
+                case "TRIP_COMPLETED":
+                    handleTripCompletedEvent(message, trip);
+                    break;
+                case "TRIP_CANCELLED":
+                    handleTripCancelledEvent(message, trip);
+                    break;
+                case "TRIP_UPDATED":
+                case "TRIP_PROGRESS_UPDATE":
+                    handleTripUpdatedEvent(message, trip);
+                    break;
+                default:
+                    logger.info("📋 Unhandled trip event type: {}, forwarding to MQTT", event);
+                    mqttService.publishTrip(message);
+                    break;
+            }
 
         } catch (Exception e) {
-            logger.error("Error parsing trip message: {}", e.getMessage());
+            logger.error("❌ Error processing trip message from RabbitMQ: {}", e.getMessage(), e);
         }
+    }
+
+    private void handleTripStartedEvent(TripEventMessage message, Trip trip) {
+        logger.info("🚗 Processing TRIP_STARTED event from RabbitMQ:");
+        logger.info("  - Trip ID: {}", trip.getId());
+        logger.info("  - Vehicle: {} ({})", 
+                   trip.getVehicle() != null ? trip.getVehicle().getLicensePlate() : "unknown",
+                   trip.getVehicle() != null ? trip.getVehicle().getCompanyName() : "unknown");
+        logger.info("  - Status: {}", trip.getStatus());
+        logger.info("  - Departure Time: {}", trip.getDepartureTime());
+        
+        // Forward to MQTT for other services
+        mqttService.publishTrip(message);
+        logger.info("✅ TRIP_STARTED event processed and forwarded to MQTT");
+    }
+
+    private void handleTripCompletedEvent(TripEventMessage message, Trip trip) {
+        logger.info("✅ Processing TRIP_COMPLETED event from RabbitMQ:");
+        logger.info("  - Trip ID: {}", trip.getId());
+        logger.info("  - Vehicle: {} ({})", 
+                   trip.getVehicle() != null ? trip.getVehicle().getLicensePlate() : "unknown",
+                   trip.getVehicle() != null ? trip.getVehicle().getCompanyName() : "unknown");
+        logger.info("  - Completion Time: {}", trip.getCompletionTime());
+        
+        // Forward to MQTT for other services
+        mqttService.publishTrip(message);
+        logger.info("✅ TRIP_COMPLETED event processed and forwarded to MQTT");
+    }
+
+    private void handleTripCancelledEvent(TripEventMessage message, Trip trip) {
+        logger.info("❌ Processing TRIP_CANCELLED event from RabbitMQ:");
+        logger.info("  - Trip ID: {}", trip.getId());
+        logger.info("  - Vehicle: {} ({})", 
+                   trip.getVehicle() != null ? trip.getVehicle().getLicensePlate() : "unknown",
+                   trip.getVehicle() != null ? trip.getVehicle().getCompanyName() : "unknown");
+        logger.info("  - Status: {}", trip.getStatus());
+        
+        // Forward to MQTT for other services
+        mqttService.publishTrip(message);
+        logger.info("✅ TRIP_CANCELLED event processed and forwarded to MQTT");
+    }
+
+    private void handleTripUpdatedEvent(TripEventMessage message, Trip trip) {
+        logger.info("🔄 Processing TRIP_UPDATED/TRIP_PROGRESS_UPDATE event from RabbitMQ:");
+        logger.info("  - Trip ID: {}", trip.getId());
+        logger.info("  - Vehicle: {} ({})", 
+                   trip.getVehicle() != null ? trip.getVehicle().getLicensePlate() : "unknown",
+                   trip.getVehicle() != null ? trip.getVehicle().getCompanyName() : "unknown");
+        logger.info("  - Status: {}", trip.getStatus());
+        
+        // Log location and progress information
+        if (trip.getCurrentLatitude() != null && trip.getCurrentLongitude() != null) {
+            logger.info("  - Current Location: {}, {}", trip.getCurrentLatitude(), trip.getCurrentLongitude());
+        }
+        
+        if (trip.getCurrentSpeed() != null) {
+            logger.info("  - Current Speed: {} km/h", trip.getCurrentSpeed());
+        }
+        
+        if (trip.getRemainingTimeToDestination() != null) {
+            logger.info("  - Remaining Time: {} seconds", trip.getRemainingTimeToDestination());
+        }
+        
+        if (trip.getRemainingDistanceToDestination() != null) {
+            logger.info("  - Remaining Distance: {} meters", trip.getRemainingDistanceToDestination());
+        }
+        
+        // Log waypoint information
+        if (trip.getWaypoints() != null && !trip.getWaypoints().isEmpty()) {
+            logger.info("  - Waypoints: {} total", trip.getWaypoints().size());
+            trip.getWaypoints().forEach(waypoint -> {
+                if (waypoint.getLocation() != null) {
+                    logger.info("    - Waypoint {}: {} (passed: {}, next: {})",
+                            waypoint.getOrder(),
+                            waypoint.getLocation().getCustomName() != null ?
+                                    waypoint.getLocation().getCustomName() : waypoint.getLocation().getGooglePlaceName(),
+                            waypoint.getIsPassed(),
+                            waypoint.getIsNext());
+                }
+            });
+        }
+        
+        // Forward to MQTT for other services
+        mqttService.publishTrip(message);
+        logger.info("✅ TRIP_UPDATED/TRIP_PROGRESS_UPDATE event processed and forwarded to MQTT");
     }
 }

@@ -2,6 +2,8 @@ package com.nexxserve.cavgomqt.controller;
 
 import com.nexxserve.cavgomqt.dto.SimpleTripRequest;
 import com.nexxserve.cavgomqt.service.MqttService;
+import com.nexxserve.cavgomqt.service.TripReceiverService;
+import com.nexxserve.cavgomqt.service.MqttConnectionHealthService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -12,6 +14,12 @@ public class MqttController {
 
     @Autowired
     private MqttService mqttService;
+
+    @Autowired
+    private TripReceiverService tripReceiverService;
+
+    @Autowired
+    private MqttConnectionHealthService mqttConnectionHealthService;
 
     // === TRIP MANAGEMENT ENDPOINTS ===
 
@@ -79,6 +87,55 @@ public class MqttController {
     public ResponseEntity<String> pingAllCars() {
         mqttService.pingAllCars();
         return ResponseEntity.ok("Broadcast ping sent to all cars");
+    }
+
+    // === TRIP RECEIVER TEST ENDPOINTS ===
+
+    /**
+     * Test endpoint to simulate receiving a trip event message
+     * This can be used to test the TripReceiverService without MQTT
+     */
+    @PostMapping("/test/trip-event")
+    public ResponseEntity<String> testTripEvent(
+            @RequestParam String topic,
+            @RequestBody String payload) {
+        
+        try {
+            tripReceiverService.processTripEventMessage(topic, payload);
+            return ResponseEntity.ok("Trip event processed successfully");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                    .body("Error processing trip event: " + e.getMessage());
+        }
+    }
+
+    // === CONNECTION HEALTH ENDPOINTS ===
+
+    /**
+     * Get MQTT connection health status
+     */
+    @GetMapping("/health")
+    public ResponseEntity<Object> getConnectionHealth() {
+        boolean isConnected = mqttConnectionHealthService.isConnected();
+        int failures = mqttConnectionHealthService.getConnectionFailures();
+        String healthSummary = mqttConnectionHealthService.getConnectionHealthSummary();
+        
+        return ResponseEntity.ok()
+                .body(new Object() {
+                    public final boolean connected = isConnected;
+                    public final int connectionFailures = failures;
+                    public final String summary = healthSummary;
+                    public final long timestamp = System.currentTimeMillis();
+                });
+    }
+
+    /**
+     * Reset MQTT connection failure count
+     */
+    @PostMapping("/health/reset")
+    public ResponseEntity<String> resetConnectionFailures() {
+        mqttConnectionHealthService.resetConnectionFailures();
+        return ResponseEntity.ok("Connection failure count reset");
     }
 
     public static class BookingRequest {

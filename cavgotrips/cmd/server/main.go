@@ -179,6 +179,54 @@ func main() {
 		}
 	}()
 
+	// Create a separate RabbitMQ service instance for MQTT trip events
+	tripsQueueName := "trips.publisher.queue"
+	mqttRabbitMQService, err := service.NewRabbitMQService(rabbitURL, tripsQueueName)
+	if err != nil {
+		log.Printf("[MQTT Trip MQ] ❌ Failed to create RabbitMQ service for MQTT trips: %v", err)
+	} else {
+		defer mqttRabbitMQService.Close()
+
+		// Listen to trip events from MQTT service
+		go func() {
+			log.Printf("[MQTT Trip MQ] 🚀 Starting MQTT trip listener setup...")
+			log.Printf("[MQTT Trip MQ] 📋 Target queue: %s", tripsQueueName)
+			log.Printf("[MQTT Trip MQ] 🔗 RabbitMQ connection: %s", rabbitURL)
+
+			// Add a small delay to ensure RabbitMQ connection is ready
+			time.Sleep(2 * time.Second)
+
+			// List available queues for debugging
+			mqttRabbitMQService.ListQueues()
+
+			log.Printf("[MQTT Trip MQ] Setting up listener for queue: %s", tripsQueueName)
+
+			err := mqttRabbitMQService.ListenMQTTTripEvents(tripsQueueName, func(event models.MQTTTripEventMessage) {
+				log.Printf("[MQTT Trip MQ] ✅ Received trip event: %s for trip ID: %d", event.Event, event.Data.ID)
+
+				// Log the full event structure for debugging
+				eventJSON, _ := json.MarshalIndent(event, "", "  ")
+				log.Printf("[MQTT Trip MQ] Full event data: %s", string(eventJSON))
+
+				// Update the trip with data from MQTT service
+				updatedTrip, err := tripService.UpdateTripFromMQTT(event.Data)
+				if err != nil {
+					log.Printf("[MQTT Trip MQ] ❌ Failed to update trip %d: %v", event.Data.ID, err)
+					return
+				}
+
+				log.Printf("[MQTT Trip MQ] ✅ Successfully updated trip %d with event %s", event.Data.ID, event.Event)
+
+				// Log the updated trip details for debugging
+				tripJSON, _ := json.MarshalIndent(updatedTrip, "", "  ")
+				log.Printf("[MQTT Trip MQ] Updated trip data: %s", string(tripJSON))
+			})
+			if err != nil {
+				log.Printf("[MQTT Trip MQ] ❌ Failed to listen to trip events: %v", err)
+			}
+		}()
+	}
+
 	// Initialize Eureka service
 	eurekaService := service.NewEurekaService(cfg)
 

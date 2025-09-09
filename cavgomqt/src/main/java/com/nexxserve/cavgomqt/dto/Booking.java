@@ -29,6 +29,4 @@ public class Booking {
     private String updatedAt;
     private List<Ticket> tickets;
     private Payment payment;
-
-
 }

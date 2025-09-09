@@ -27,20 +27,24 @@ spring:
     password: admin
 
 mqtt:
-  client:
-    id: cavgomqt
+  client.id: cavgomqt
   username: genoyves
   password: Cadio*11.
-  broker:
-    url: ssl://73d5ec93cbe843ab83b8f29e68f6979e.s1.eu.hivemq.cloud
-  topic: hello
+  broker.url: ssl://73d5ec93cbe843ab83b8f29e68f6979e.s1.eu.hivemq.cloud:8883
 logging:
   level:
     org:
       springframework:
+        integration:
+          mqtt: DEBUG
         mqtt: DEBUG
+      eclipse:
+        paho:
+          client:
+            mqttv3: DEBUG
     com:
-      genoyves: DEBUG
+      nexxserve:
+        cavgomqt: DEBUG
 
 
 app:

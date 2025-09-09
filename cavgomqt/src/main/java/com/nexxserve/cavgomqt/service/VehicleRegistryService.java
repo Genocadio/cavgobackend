@@ -145,6 +145,19 @@ public class VehicleRegistryService {
         }
     }
 
+    public void clearActiveTrip(Long vehicleId) {
+        Optional<MqttVehicleEntity> entityOpt = mqttVehicleRepository.findByVehicleId(vehicleId);
+        if (entityOpt.isPresent()) {
+            MqttVehicleEntity entity = entityOpt.get();
+            entity.setCurrentTripId(null);
+            entity.setUpdatedAt(java.time.LocalDateTime.now());
+            mqttVehicleRepository.save(entity);
+            System.out.println("✅ Cleared active trip for vehicle " + vehicleId);
+        } else {
+            System.err.println("❌ Vehicle " + vehicleId + " not found in registry");
+        }
+    }
+
 
     public String getRegistryStats() {
         long total = mqttVehicleRepository.count();

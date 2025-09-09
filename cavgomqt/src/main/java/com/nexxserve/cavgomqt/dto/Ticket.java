@@ -23,6 +23,4 @@ public class Ticket {
     private String carPlate;
     private String carCompany;
     private String pickupTime;
-
-
 }

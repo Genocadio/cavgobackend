@@ -66,3 +66,10 @@ type BookingEventMessage struct {
 	Message          string           `json:"message"`
 	PaymentReference string           `json:"payment_reference"`
 }
+
+// MQTTTripEventMessage is used for RabbitMQ trip events from MQTT service
+// This matches the Java TripEventMessage structure
+type MQTTTripEventMessage struct {
+	Event string `json:"event"` // TRIP_STARTED, TRIP_COMPLETED, TRIP_CANCELLED, TRIP_UPDATED
+	Data  Trip   `json:"data"`  // Trip object with updated data
+}

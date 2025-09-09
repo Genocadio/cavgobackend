@@ -545,3 +545,88 @@ func (s *TripService) DeleteTrip(id int64) error {
 
 	return nil
 }
+
+// UpdateTripFromMQTT updates a trip with data from MQTT service without publishing back to RabbitMQ
+func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, error) {
+	// Get the existing trip to ensure it exists
+	_, err := s.tripRepo.GetByIDWithRelations(mqttTrip.ID)
+	if err != nil {
+		return nil, fmt.Errorf("trip not found: %w", err)
+	}
+
+	// Prepare updates map with only the fields that should be updated from MQTT
+	updates := make(map[string]interface{})
+
+	// Update status if provided
+	if mqttTrip.Status != "" {
+		updates["status"] = mqttTrip.Status
+	}
+
+	// Update completion time if provided
+	if mqttTrip.CompletionTime != nil {
+		updates["completion_time"] = *mqttTrip.CompletionTime
+	}
+
+	// Update connection mode if provided
+	if mqttTrip.ConnectionMode != "" {
+		updates["connection_mode"] = mqttTrip.ConnectionMode
+	}
+
+	// Update notes if provided
+	if mqttTrip.Notes != nil {
+		updates["notes"] = *mqttTrip.Notes
+	}
+
+	// Update remaining time to destination if provided
+	if mqttTrip.RemainingTimeToDestination != nil {
+		updates["remaining_time_to_destination"] = *mqttTrip.RemainingTimeToDestination
+	}
+
+	// Update remaining distance to destination if provided
+	if mqttTrip.RemainingDistanceToDestination != nil {
+		updates["remaining_distance_to_destination"] = *mqttTrip.RemainingDistanceToDestination
+	}
+
+	// Update is reversed if provided
+	updates["is_reversed"] = mqttTrip.IsReversed
+
+	// Update current speed if provided
+	if mqttTrip.CurrentSpeed != nil {
+		updates["current_speed"] = *mqttTrip.CurrentSpeed
+	}
+
+	// Update current location if provided
+	if mqttTrip.CurrentLatitude != nil {
+		updates["current_latitude"] = *mqttTrip.CurrentLatitude
+	}
+	if mqttTrip.CurrentLongitude != nil {
+		updates["current_longitude"] = *mqttTrip.CurrentLongitude
+	}
+
+	// Update has custom waypoints if provided
+	updates["has_custom_waypoints"] = mqttTrip.HasCustomWaypoints
+
+	// Always update the updated_at timestamp
+	updates["updated_at"] = time.Now()
+
+	// Update the trip in the database
+	if err := s.tripRepo.UpdateProgress(mqttTrip.ID, updates); err != nil {
+		return nil, fmt.Errorf("failed to update trip: %w", err)
+	}
+
+	// Get the updated trip with relations
+	updatedTrip, err := s.tripRepo.GetByIDWithRelations(mqttTrip.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get updated trip: %w", err)
+	}
+
+	// Broadcast SSE event for real-time updates (but don't publish to RabbitMQ)
+	if s.sseService != nil {
+		s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{
+			Event: "updated",
+			Data:  *updatedTrip,
+		})
+	}
+
+	return updatedTrip, nil
+}
