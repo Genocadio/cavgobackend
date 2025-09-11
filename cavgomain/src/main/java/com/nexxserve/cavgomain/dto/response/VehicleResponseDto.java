@@ -23,6 +23,7 @@ public class VehicleResponseDto {
     private String createdAt;
     private String updatedAt;
     private CompanyUserResponseDto driver;
+    private String initialPassword; // only set on creation
 
     public static VehicleResponseDto fromEntity(Vehicle entity) {
         VehicleResponseDto dto = new VehicleResponseDto();

@@ -1,6 +1,7 @@
 package com.nexxserve.cavgomain.controller;
 
 import com.nexxserve.cavgomain.dto.request.VehicleRequestDto;
+import com.nexxserve.cavgomain.dto.request.VehicleLoginRequestDto;
 import com.nexxserve.cavgomain.dto.response.VehicleAssignmentResponseDto;
 import com.nexxserve.cavgomain.dto.response.VehicleResponseDto;
 import com.nexxserve.cavgomain.entity.Vehicle;
@@ -8,6 +9,7 @@ import com.nexxserve.cavgomain.entity.VehicleAssignment;
 import com.nexxserve.cavgomain.service.VehicleService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -20,8 +22,11 @@ public class VehicleController {
     private final VehicleService vehicleService;
 
     @PostMapping
-    public VehicleResponseDto createVehicle(@Valid @RequestBody VehicleRequestDto vehicle) {
-        return vehicleService.createVehicle(vehicle);
+    public ResponseEntity<VehicleResponseDto> createVehicle(@Valid @RequestBody VehicleRequestDto vehicle) {
+        var result = vehicleService.createVehicleWithPassword(vehicle);
+        VehicleResponseDto body = result.response();
+        body.setInitialPassword(result.initialPassword());
+        return ResponseEntity.ok(body);
     }
 
     @GetMapping("/{id}")
@@ -55,5 +60,16 @@ public class VehicleController {
             @PathVariable Long driverId,
             @RequestParam(required = false) String notes) {
         return vehicleService.assignVehicleToDriver(vehicleId, driverId, notes);
+    }
+
+    @PostMapping("/login")
+    public VehicleResponseDto loginVehicle(@Valid @RequestBody VehicleLoginRequestDto request) {
+        return vehicleService.loginVehicle(request.getCompanyCode(), request.getLicensePlate(), request.getPassword(), request.getPubKey());
+    }
+
+    @PostMapping("/{licensePlate}/password/reset")
+    public ResponseEntity<String> resetVehiclePassword(@PathVariable String licensePlate) {
+        String newPassword = vehicleService.regenerateVehiclePassword(licensePlate);
+        return ResponseEntity.ok(newPassword);
     }
 }

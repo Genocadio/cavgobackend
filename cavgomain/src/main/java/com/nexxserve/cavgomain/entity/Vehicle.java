@@ -47,6 +47,9 @@ public class Vehicle extends BaseEntity {
     @Column(name = "status")
     private VehicleStatus status = VehicleStatus.AVAILABLE;
 
+    @Column(name = "password_hash")
+    private String passwordHash;
+
 
     @OneToMany(mappedBy = "vehicle", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @ToString.Exclude

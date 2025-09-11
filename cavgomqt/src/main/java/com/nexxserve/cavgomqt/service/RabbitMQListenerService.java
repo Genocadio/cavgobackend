@@ -5,6 +5,8 @@ import com.nexxserve.cavgomqt.dto.BookingResponse;
 import com.nexxserve.cavgomqt.dto.Trip;
 import com.nexxserve.cavgomqt.dto.TripEventMessage;
 import lombok.RequiredArgsConstructor;
+import com.nexxserve.cavgomqt.dto.mqtt.BookingBundle;
+import com.nexxserve.cavgomqt.config.RabbitMQConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
@@ -84,6 +86,19 @@ public class RabbitMQListenerService {
 
         } catch (Exception e) {
             logger.error("❌ Error processing trip message from RabbitMQ: {}", e.getMessage(), e);
+        }
+    }
+
+    @RabbitListener(queues = RabbitMQConfig.BOOKINGS_BUNDLE_REPLY_QUEUE)
+    public void handleBookingBundleReplies(BookingBundle bundle) {
+        try {
+            logger.info("📥 Received booking bundle reply for trip_id={} booking_id={}",
+                    bundle != null ? bundle.tripId : "null",
+                    bundle != null && bundle.booking != null ? bundle.booking.id : "null");
+            mqttService.publishBookingBundle(bundle);
+            logger.info("✅ Forwarded booking bundle reply to MQTT");
+        } catch (Exception e) {
+            logger.error("❌ Error forwarding booking bundle reply to MQTT: {}", e.getMessage(), e);
         }
     }
 

@@ -180,14 +180,23 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		// Use route waypoints
 		waypoints := route.Waypoints
 		if request.IsReversed {
-			// Reverse the waypoints
+			// Reverse the waypoints and recalculate prices based on total trip price
+			// Original waypoint prices are cumulative from origin -> waypoint.
+			// For reversed trips, price at each waypoint should be from destination -> waypoint,
+			// i.e., (total trip price) - (original cumulative price).
+			totalPrice := *tripPrice
 			for i := len(waypoints) - 1; i >= 0; i-- {
 				routeWaypoint := waypoints[i]
+				calculated := totalPrice - routeWaypoint.Price
+				if calculated <= 0 {
+					calculated = 0.01 // ensure positive price to satisfy validation
+				}
+				priceCopy := calculated
 				tripWaypoint := &models.TripWaypoint{
 					TripID:     trip.ID,
 					LocationID: routeWaypoint.LocationID,
 					Order:      len(waypoints) - i,
-					Price:      &routeWaypoint.Price,
+					Price:      &priceCopy,
 					IsCustom:   false,
 				}
 
@@ -220,6 +229,8 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 	}
 
 	createdTrip.Route.Waypoints = nil
+	// If reversed, swap route origin/destination for response consistency
+	adjustRouteForReversed(createdTrip)
 
 	// Publish event to RabbitMQ
 	if s.rabbitMQService != nil {
@@ -312,6 +323,8 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 	}
 
 	updatedTrip.Route.Waypoints = nil
+	// If reversed, swap route origin/destination for response consistency
+	adjustRouteForReversed(updatedTrip)
 
 	// Publish event to RabbitMQ
 	if s.rabbitMQService != nil {
@@ -354,6 +367,8 @@ func (s *TripService) StartTrip(id int64) (*models.Trip, error) {
 	}
 
 	startedTrip.Route.Waypoints = nil
+	// If reversed, swap route origin/destination for response consistency
+	adjustRouteForReversed(startedTrip)
 
 	// Broadcast SSE event for trip start
 	if s.sseService != nil {
@@ -393,6 +408,8 @@ func (s *TripService) CompleteTrip(id int64) (*models.Trip, error) {
 	}
 
 	completedTrip.Route.Waypoints = nil
+	// If reversed, swap route origin/destination for response consistency
+	adjustRouteForReversed(completedTrip)
 
 	// Broadcast SSE event for trip completion
 	if s.sseService != nil {
@@ -412,6 +429,8 @@ func (s *TripService) GetTripByID(id int64) (*models.Trip, error) {
 	}
 
 	trip.Route.Waypoints = nil
+	// If reversed, swap route origin/destination for response consistency
+	adjustRouteForReversed(trip)
 
 	return trip, nil
 }
@@ -422,11 +441,10 @@ func (s *TripService) GetAllTrips() ([]models.Trip, error) {
 		return nil, err
 	}
 
-	// Clear route waypoints for all trips
+	// Clear route waypoints and adjust origin/destination for all trips
 	for i := range trips {
-
 		trips[i].Route.Waypoints = nil
-
+		adjustRouteForReversed(&trips[i])
 	}
 
 	return trips, nil
@@ -438,10 +456,10 @@ func (s *TripService) GetTripsByStatus(status string) ([]models.Trip, error) {
 		return nil, err
 	}
 
-	// Clear route waypoints for all trips
+	// Clear route waypoints and adjust origin/destination for all trips
 	for i := range trips {
-
 		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
 	}
 
 	return trips, nil
@@ -453,11 +471,10 @@ func (s *TripService) GetTripsByCarPlate(carPlate string) ([]models.Trip, error)
 		return nil, err
 	}
 
-	// Clear route waypoints for all trips
+	// Clear route waypoints and adjust origin/destination for all trips
 	for i := range trips {
-
 		trips[i].Route.Waypoints = nil
-
+		adjustRouteForReversed(&trips[i])
 	}
 
 	return trips, nil
@@ -470,16 +487,34 @@ func (s *TripService) GetTripProgress(id int64) (*models.Trip, error) {
 	}
 
 	trip.Route.Waypoints = nil
+	// If reversed, swap route origin/destination for response consistency
+	adjustRouteForReversed(trip)
 
 	return trip, nil
 }
 
 func (s *TripService) GetTripsByFilters(origin, destination, company string) ([]models.Trip, error) {
-	return s.tripRepo.GetTripsByFilters(origin, destination, company)
+	trips, err := s.tripRepo.GetTripsByFilters(origin, destination, company)
+	if err != nil {
+		return nil, err
+	}
+	for i := range trips {
+		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
+	}
+	return trips, nil
 }
 
 func (s *TripService) GetTripsByFiltersPaginated(origin, destination, company string, limit, offset int) ([]models.Trip, int64, error) {
-	return s.tripRepo.GetTripsByFiltersPaginated(origin, destination, company, limit, offset)
+	trips, total, err := s.tripRepo.GetTripsByFiltersPaginated(origin, destination, company, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range trips {
+		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
+	}
+	return trips, total, nil
 }
 
 func (s *TripService) GetTripsByVehicleID(vehicleID int64) ([]models.Trip, error) {
@@ -489,6 +524,7 @@ func (s *TripService) GetTripsByVehicleID(vehicleID int64) ([]models.Trip, error
 	}
 	for i := range trips {
 		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
 	}
 	return trips, nil
 }
@@ -498,9 +534,10 @@ func (s *TripService) GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error)
 	if err != nil {
 		return nil, err
 	}
-	// Clear route waypoints for all trips
+	// Clear route waypoints and adjust origin/destination for all trips
 	for i := range trips {
 		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
 	}
 	return trips, nil
 }
@@ -515,7 +552,15 @@ func (s *TripService) GetTripsByFiltersWithCityRoute(origin, destination, compan
 	if cityRoute == nil {
 		return s.GetTripsByFiltersPaginated(origin, destination, company, limit, offset)
 	}
-	return s.tripRepo.GetTripsByFiltersWithCityRoute(origin, destination, company, *cityRoute, limit, offset)
+	trips, total, err := s.tripRepo.GetTripsByFiltersWithCityRoute(origin, destination, company, *cityRoute, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range trips {
+		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
+	}
+	return trips, total, nil
 }
 
 func (s *TripService) DeleteTrip(id int64) error {
@@ -629,4 +674,21 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 	}
 
 	return updatedTrip, nil
+}
+
+// adjustRouteForReversed swaps the route origin and destination (and their IDs)
+// in the provided trip if the trip is marked as reversed. This affects only
+// the in-memory representation returned to clients and does not persist changes
+// to the underlying route.
+func adjustRouteForReversed(trip *models.Trip) {
+	if trip == nil {
+		return
+	}
+	if !trip.IsReversed {
+		return
+	}
+	// Swap IDs
+	trip.Route.OriginID, trip.Route.DestinationID = trip.Route.DestinationID, trip.Route.OriginID
+	// Swap Locations
+	trip.Route.Origin, trip.Route.Destination = trip.Route.Destination, trip.Route.Origin
 }

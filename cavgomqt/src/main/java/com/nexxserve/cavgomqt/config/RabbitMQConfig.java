@@ -17,6 +17,8 @@ public class RabbitMQConfig {
     public static final String BOOKINGS_QUEUE = "bookings.queue";
     public static final String TRIPS_QUEUE = "trips.queue";
     public static final String TRIPS_PUBLISHER_QUEUE = "trips.publisher.queue";
+    public static final String BOOKINGS_BUNDLE_QUEUE = "bookingbundles.queue";
+    public static final String BOOKINGS_BUNDLE_REPLY_QUEUE = "bookingbundles.reply.queue";
 
     @Bean
     public FanoutExchange bookingsFanoutExchange() {
@@ -65,6 +67,32 @@ public class RabbitMQConfig {
     @Bean
     public Queue tripsPublisherDeadLetterQueue() {
         return QueueBuilder.durable(TRIPS_PUBLISHER_QUEUE + ".dlq").build();
+    }
+
+    @Bean
+    public Queue bookingsBundleQueue() {
+        return QueueBuilder.durable(BOOKINGS_BUNDLE_QUEUE)
+                .withArgument("x-dead-letter-exchange", "")
+                .withArgument("x-dead-letter-routing-key", BOOKINGS_BUNDLE_QUEUE + ".dlq")
+                .build();
+    }
+
+    @Bean
+    public Queue bookingsBundleDeadLetterQueue() {
+        return QueueBuilder.durable(BOOKINGS_BUNDLE_QUEUE + ".dlq").build();
+    }
+
+    @Bean
+    public Queue bookingsBundleReplyQueue() {
+        return QueueBuilder.durable(BOOKINGS_BUNDLE_REPLY_QUEUE)
+                .withArgument("x-dead-letter-exchange", "")
+                .withArgument("x-dead-letter-routing-key", BOOKINGS_BUNDLE_REPLY_QUEUE + ".dlq")
+                .build();
+    }
+
+    @Bean
+    public Queue bookingsBundleReplyDeadLetterQueue() {
+        return QueueBuilder.durable(BOOKINGS_BUNDLE_REPLY_QUEUE + ".dlq").build();
     }
 
     @Bean

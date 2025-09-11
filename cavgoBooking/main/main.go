@@ -61,8 +61,10 @@ func main() {
 	// Initialize repositories
 	bookingRepo := repository.NewBookingRepository(db)
 
-	// Initialize RabbitMQ publisher
+	// Initialize RabbitMQ publisher and bundle publisher
 	var rabbitPublisher *service.RabbitMQPublisher
+	var bundlePublisher *service.BundlePublisher
+	var rabbitConsumer *service.RabbitMQConsumer
 	{
 		rabbitHost := getEnv("RABBITMQ_HOST", "localhost")
 		rabbitPort := getEnv("RABBITMQ_PORT", "5672")
@@ -71,19 +73,34 @@ func main() {
 		rabbitExchange := getEnv("RABBITMQ_EXCHANGE", "bookings.fanout")
 		rabbitURL := fmt.Sprintf("amqp://%s:%s@%s:%s/", rabbitUser, rabbitPass, rabbitHost, rabbitPort)
 
+		// Queue names
+		bundleQueueName := getEnv("BUNDLE_QUEUE_NAME", "bookingbundles.queue")
+		bundleReplyQueueName := getEnv("BUNDLE_REPLY_QUEUE_NAME", "bookingbundles.reply.queue")
+
 		log.Printf("[RabbitMQ] Connecting with:")
 		log.Printf("  Host: %s", rabbitHost)
 		log.Printf("  Port: %s", rabbitPort)
 		log.Printf("  User: %s", rabbitUser)
 		log.Printf("  Pass: %s", rabbitPass)
 		log.Printf("  Exchange: %s", rabbitExchange)
+		log.Printf("  Bundle Queue: %s", bundleQueueName)
+		log.Printf("  Bundle Reply Queue: %s", bundleReplyQueueName)
 		log.Printf("  URL: %s", rabbitURL)
 
+		// Initialize fanout publisher
 		publisher, err := service.NewRabbitMQPublisher(rabbitURL, rabbitExchange)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize RabbitMQ publisher: %v", err)
 		} else {
 			rabbitPublisher = publisher
+		}
+
+		// Initialize bundle publisher
+		bundlePub, err := service.NewBundlePublisher(rabbitURL, bundleReplyQueueName)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize Bundle publisher: %v", err)
+		} else {
+			bundlePublisher = bundlePub
 		}
 	}
 
@@ -91,10 +108,35 @@ func main() {
 	tripService := service.NewHTTPTripService(config.TripServiceURL)
 	// Remove MockUserService and update bookingService initialization
 	// userService := &MockUserService{}
-	bookingService := service.NewBookingService(bookingRepo, tripService, rabbitPublisher)
+	bookingService := service.NewBookingService(bookingRepo, tripService, rabbitPublisher, bundlePublisher)
 
 	// Start background booking monitor
 	service.StartBookingMonitor(bookingRepo, rabbitPublisher)
+
+	// Initialize and start RabbitMQ consumer for booking bundles
+	if bundlePublisher != nil {
+		bundleQueueName := getEnv("BUNDLE_QUEUE_NAME", "bookingbundles.queue")
+		bundleReplyQueueName := getEnv("BUNDLE_REPLY_QUEUE_NAME", "bookingbundles.reply.queue")
+		rabbitHost := getEnv("RABBITMQ_HOST", "localhost")
+		rabbitPort := getEnv("RABBITMQ_PORT", "5672")
+		rabbitUser := getEnv("RABBITMQ_USER", "admin")
+		rabbitPass := getEnv("RABBITMQ_PASS", "admin")
+		rabbitURL := fmt.Sprintf("amqp://%s:%s@%s:%s/", rabbitUser, rabbitPass, rabbitHost, rabbitPort)
+
+		consumer, err := service.NewRabbitMQConsumer(rabbitURL, bundleQueueName, bundleReplyQueueName, bundlePublisher, bookingService)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize RabbitMQ consumer: %v", err)
+		} else {
+			rabbitConsumer = consumer
+			// Start consuming messages
+			ctx := context.Background()
+			if err := consumer.StartConsuming(ctx); err != nil {
+				log.Printf("Warning: Failed to start RabbitMQ consumer: %v", err)
+			} else {
+				log.Printf("RabbitMQ consumer started successfully, listening on queue: %s", bundleQueueName)
+			}
+		}
+	}
 
 	// Initialize Eureka service
 	eurekaService := service.NewEurekaService()
@@ -166,6 +208,16 @@ func main() {
 	// Close RabbitMQ publisher
 	if rabbitPublisher != nil {
 		rabbitPublisher.Close()
+	}
+
+	// Close bundle publisher
+	if bundlePublisher != nil {
+		bundlePublisher.Close()
+	}
+
+	// Close RabbitMQ consumer
+	if rabbitConsumer != nil {
+		rabbitConsumer.Close()
 	}
 
 	// Graceful shutdown

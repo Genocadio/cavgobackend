@@ -26,12 +26,18 @@ type BookingService interface {
 
 	ProcessPayment(ctx context.Context, bookingID string, paymentData *string) (*models.BookingResponse, error)
 	RefundPayment(ctx context.Context, bookingID string) error
+
+	// Bundle methods
+	CreateBookingBundle(ctx context.Context, booking *models.Booking, payment *models.Payment, tickets []models.Ticket) (*models.BookingBundle, error)
+	SetFromRabbitMQ(fromRabbitMQ bool)
 }
 
 type bookingService struct {
 	bookingRepo     repository.BookingRepository
 	tripService     TripService        // Interface to trip service
 	rabbitPublisher *RabbitMQPublisher // Add publisher
+	bundlePublisher *BundlePublisher   // Add bundle publisher
+	fromRabbitMQ    bool               // Track if booking came from RabbitMQ
 }
 
 // TripService interface for trip service integration (now HTTP-based)
@@ -49,11 +55,13 @@ type TripService interface {
 // Remove User struct
 // type User struct { ... }
 
-func NewBookingService(bookingRepo repository.BookingRepository, tripService TripService, publisher *RabbitMQPublisher) BookingService {
+func NewBookingService(bookingRepo repository.BookingRepository, tripService TripService, publisher *RabbitMQPublisher, bundlePublisher *BundlePublisher) BookingService {
 	return &bookingService{
 		bookingRepo:     bookingRepo,
 		tripService:     tripService,
 		rabbitPublisher: publisher,
+		bundlePublisher: bundlePublisher,
+		fromRabbitMQ:    false,
 	}
 }
 
@@ -180,12 +188,7 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 	}
 
 	// Publish to RabbitMQ (ignore error, but log)
-	if s.rabbitPublisher != nil {
-		err := s.rabbitPublisher.PublishBookingEvent("created", resp)
-		if err != nil {
-			fmt.Println("[RabbitMQ] Failed to publish booking created event:", err)
-		}
-	}
+	s.publishBookingEvents("created", resp)
 
 	return resp, nil
 }
@@ -388,12 +391,7 @@ func (s *bookingService) ProcessPayment(ctx context.Context, bookingID string, p
 	}
 
 	// Publish to RabbitMQ (ignore error, but log)
-	if s.rabbitPublisher != nil {
-		err := s.rabbitPublisher.PublishBookingEvent("paid", resp)
-		if err != nil {
-			fmt.Println("[RabbitMQ] Failed to publish booking paid event:", err)
-		}
-	}
+	s.publishBookingEvents("paid", resp)
 
 	return resp, nil
 }
@@ -638,7 +636,7 @@ func (s *HTTPTripService) GetTripByID(ctx context.Context, tripID int) (*models.
 func (s *HTTPTripService) ValidateTripBooking(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int) error {
 	trip, err := s.GetTripByID(ctx, tripID)
 	if err != nil {
-		if err.Error() == "unexpected status code: 404" || (err != nil && contains404(err.Error())) {
+		if err.Error() == "unexpected status code: 404" || contains404(err.Error()) {
 			return fmt.Errorf("trip not found")
 		}
 		return fmt.Errorf("failed to fetch trip: %w", err)
@@ -720,4 +718,106 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// publishBookingEvents publishes to both fanout exchange and bundle reply queue
+func (s *bookingService) publishBookingEvents(eventType string, resp *models.BookingResponse) {
+	// Always publish to fanout exchange
+	if s.rabbitPublisher != nil {
+		err := s.rabbitPublisher.PublishBookingEvent(eventType, resp)
+		if err != nil {
+			fmt.Printf("[RabbitMQ] Failed to publish booking %s event: %v\n", eventType, err)
+		}
+	}
+
+	// Only publish to bundle reply queue if booking didn't come from RabbitMQ
+	if !s.fromRabbitMQ && s.bundlePublisher != nil {
+		bundle, err := s.CreateBookingBundle(context.Background(), resp.Booking, resp.Booking.Payment, resp.Booking.Tickets)
+		if err != nil {
+			fmt.Printf("[BundlePublisher] Failed to create bundle for %s event: %v\n", eventType, err)
+			return
+		}
+
+		err = s.bundlePublisher.PublishBundle(bundle)
+		if err != nil {
+			fmt.Printf("[BundlePublisher] Failed to publish bundle for %s event: %v\n", eventType, err)
+		}
+	}
+}
+
+// CreateBookingBundle creates a booking bundle from internal models
+func (s *bookingService) CreateBookingBundle(ctx context.Context, booking *models.Booking, payment *models.Payment, tickets []models.Ticket) (*models.BookingBundle, error) {
+	// Convert booking to TripBooking
+	tripBooking := models.TripBooking{
+		ID:                booking.ID,
+		TripID:            booking.TripID,
+		UserID:            booking.UserID,
+		UserEmail:         booking.UserEmail,
+		UserPhone:         booking.UserPhone,
+		UserName:          booking.UserName,
+		PickupLocationID:  booking.PickupLocationID,
+		DropoffLocationID: booking.DropoffLocationID,
+		NumberOfTickets:   booking.NumberOfTickets,
+		TotalAmount:       booking.TotalAmount,
+		Status:            booking.Status,
+		BookingReference:  booking.BookingReference,
+		CreatedAt:         booking.CreatedAt.UnixMilli(),
+		UpdatedAt:         booking.UpdatedAt.UnixMilli(),
+	}
+
+	// Convert payment to BundlePayment
+	bundlePayment := models.BundlePayment{
+		ID:            payment.ID,
+		BookingID:     payment.BookingID,
+		Amount:        payment.Amount,
+		PaymentMethod: payment.PaymentMethod,
+		Status:        payment.Status,
+		TransactionID: payment.TransactionID,
+		PaymentData:   payment.PaymentData,
+		CreatedAt:     payment.CreatedAt.UnixMilli(),
+		UpdatedAt:     payment.UpdatedAt.UnixMilli(),
+	}
+
+	// Convert tickets to BundleTickets
+	bundleTickets := make([]models.BundleTicket, len(tickets))
+	for i, ticket := range tickets {
+		bundleTicket := models.BundleTicket{
+			ID:                  ticket.ID,
+			BookingID:           ticket.BookingID,
+			TicketNumber:        ticket.TicketNumber,
+			QRCode:              ticket.QRCode,
+			IsUsed:              ticket.IsUsed,
+			ValidatedBy:         ticket.ValidatedBy,
+			CreatedAt:           ticket.CreatedAt.UnixMilli(),
+			UpdatedAt:           ticket.UpdatedAt.UnixMilli(),
+			PickupLocationName:  ticket.PickupLocationName,
+			DropoffLocationName: ticket.DropoffLocationName,
+			CarPlate:            ticket.CarPlate,
+			CarCompany:          ticket.CarCompany,
+			PickupTime:          ticket.PickupTime.UnixMilli(),
+		}
+
+		// Handle UsedAt field
+		if ticket.UsedAt != nil {
+			usedAt := ticket.UsedAt.UnixMilli()
+			bundleTicket.UsedAt = &usedAt
+		}
+
+		bundleTickets[i] = bundleTicket
+	}
+
+	// Create bundle
+	bundle := &models.BookingBundle{
+		TripID:  fmt.Sprintf("%d", booking.TripID),
+		Booking: tripBooking,
+		Payment: bundlePayment,
+		Tickets: bundleTickets,
+	}
+
+	return bundle, nil
+}
+
+// SetFromRabbitMQ sets the flag to indicate if booking came from RabbitMQ
+func (s *bookingService) SetFromRabbitMQ(fromRabbitMQ bool) {
+	s.fromRabbitMQ = fromRabbitMQ
 }

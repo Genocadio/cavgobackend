@@ -17,6 +17,7 @@ import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.awt.geom.PathIterator;
 import java.time.LocalDateTime;
@@ -32,6 +33,7 @@ public class VehicleService {
     private final VehicleAssignmentRepository assignmentRepository;
     private final CompanyUserRepository companyUserRepository;
     private final CompanyRepository companyRepository;
+    private final PasswordEncoder passwordEncoder;
 
 
     // CRUD methods
@@ -42,8 +44,29 @@ public class VehicleService {
         Company company = companyRepository.findByCompanyCode(vehicle.getCompanyCode())
             .orElseThrow(() -> new IllegalArgumentException("Company with code '" + vehicle.getCompanyCode() + "' not found"));
         Vehicle newVehicle = vehicle.toEntity(company);
-
         return VehicleResponseDto.fromEntity(vehicleRepository.save(newVehicle));
+    }
+
+    public record VehicleCreateResult(VehicleResponseDto response, String initialPassword) {}
+
+    public VehicleCreateResult createVehicleWithPassword(VehicleRequestDto vehicle) {
+        if (vehicleRepository.existsByLicensePlate(vehicle.getLicensePlate())) {
+            throw new IllegalArgumentException("Vehicle with this license plate already exists");
+        }
+        Company company = companyRepository.findByCompanyCode(vehicle.getCompanyCode())
+            .orElseThrow(() -> new IllegalArgumentException("Company with code '" + vehicle.getCompanyCode() + "' not found"));
+        Vehicle newVehicle = vehicle.toEntity(company);
+
+        String initialPassword = generateSixDigitPassword();
+        newVehicle.setPasswordHash(passwordEncoder.encode(initialPassword));
+
+        Vehicle saved = vehicleRepository.save(newVehicle);
+        return new VehicleCreateResult(VehicleResponseDto.fromEntity(saved), initialPassword);
+    }
+
+    private String generateSixDigitPassword() {
+        int code = (int) (Math.random() * 1_000_000);
+        return String.format("%06d", code);
     }
     public Vehicle getVehicle(Long id) {
         return vehicleRepository.findById(id)
@@ -129,5 +152,34 @@ public class VehicleService {
        vehicleRepository.save(vehicle);
 
        return VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(assignment));
+   }
+
+   public VehicleResponseDto loginVehicle(String companyCode, String licensePlate, String password, String newPubKey) {
+       Vehicle vehicle = vehicleRepository.findByLicensePlate(licensePlate)
+               .orElseThrow(() -> new EntityNotFoundException("Vehicle not found"));
+
+       if (!vehicle.getCompany().getCompanyCode().equals(companyCode)) {
+           throw new IllegalArgumentException("Company code does not match vehicle");
+       }
+
+       String storedHash = vehicle.getPasswordHash();
+       if (storedHash == null || !passwordEncoder.matches(password, storedHash)) {
+           throw new IllegalArgumentException("Invalid password");
+       }
+
+       vehicle.setPubKey(newPubKey);
+       vehicleRepository.save(vehicle);
+
+       return VehicleResponseDto.fromEntity(vehicle);
+   }
+
+   public String regenerateVehiclePassword(String licensePlate) {
+       Vehicle vehicle = vehicleRepository.findByLicensePlate(licensePlate)
+               .orElseThrow(() -> new EntityNotFoundException("Vehicle not found"));
+
+        String newPassword = generateSixDigitPassword();
+        vehicle.setPasswordHash(passwordEncoder.encode(newPassword));
+        vehicleRepository.save(vehicle);
+        return newPassword;
    }
 }

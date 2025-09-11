@@ -2,6 +2,9 @@ package com.nexxserve.cavgomqt.config;
 
 import com.nexxserve.cavgomqt.service.VehicleRegistryService;
 import com.nexxserve.cavgomqt.service.TripReceiverService;
+import com.nexxserve.cavgomqt.service.RabbitMQBookingBundlePublisherService;
+import com.nexxserve.cavgomqt.dto.mqtt.BookingBundle;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +29,12 @@ public class MqttConfiguration {
 
     @Autowired
     private TripReceiverService tripReceiverService;
+
+    @Autowired
+    private RabbitMQBookingBundlePublisherService bookingBundlePublisherService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Value("${mqtt.broker.url:tcp://localhost:1883}")
     private String brokerUrl;
@@ -95,6 +104,11 @@ public class MqttConfiguration {
         return new DirectChannel();
     }
 
+    @Bean
+    public MessageChannel bookingBundleChannel() {
+        return new DirectChannel();
+    }
+
     // === OUTBOUND CHANNELS ===
 
     @Bean
@@ -109,6 +123,11 @@ public class MqttConfiguration {
 
     @Bean
     public MessageChannel heartbeatOutboundChannel() {
+        return new DirectChannel();
+    }
+
+    @Bean
+    public MessageChannel bookingBundleOutboundChannel() {
         return new DirectChannel();
     }
 
@@ -159,6 +178,22 @@ public class MqttConfiguration {
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(heartbeatChannel());
+        return adapter;
+    }
+
+    @Bean
+    public MessageProducer bookingBundleInbound() {
+        MqttPahoMessageDrivenChannelAdapter adapter =
+            new MqttPahoMessageDrivenChannelAdapter(
+                brokerUrl,
+                clientId + "-booking-bundle-" + System.currentTimeMillis(),
+                mqttClientFactory(),
+                "trip/+/booking_bundle"
+            );
+        adapter.setCompletionTimeout(10000);
+        adapter.setConverter(new DefaultPahoMessageConverter());
+        adapter.setQos(1);
+        adapter.setOutputChannel(bookingBundleChannel());
         return adapter;
     }
 
@@ -229,6 +264,23 @@ public class MqttConfiguration {
         };
     }
 
+    @Bean
+    @ServiceActivator(inputChannel = "bookingBundleChannel")
+    public MessageHandler bookingBundleHandler() {
+        return message -> {
+            String payload = (String) message.getPayload();
+            String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
+            System.out.println("📦 Received booking bundle on topic: " + topic);
+            try {
+                BookingBundle bundle = objectMapper.readValue(payload, BookingBundle.class);
+                bookingBundlePublisherService.publish(bundle);
+            } catch (Exception e) {
+                System.err.println("❌ Failed to deserialize/publish booking bundle: " + e.getMessage());
+                e.printStackTrace();
+            }
+        };
+    }
+
     // === OUTBOUND HANDLERS ===
 
     @Bean
@@ -265,6 +317,20 @@ public class MqttConfiguration {
         MqttPahoMessageHandler messageHandler = new MqttPahoMessageHandler(
             brokerUrl,
             clientId + "-ping-" + System.currentTimeMillis(),
+            mqttClientFactory()
+        );
+        messageHandler.setAsync(true);
+        messageHandler.setDefaultQos(1);
+        messageHandler.setDefaultRetained(false);
+        return messageHandler;
+    }
+
+    @Bean
+    @ServiceActivator(inputChannel = "bookingBundleOutboundChannel")
+    public MessageHandler bookingBundleOutbound() {
+        MqttPahoMessageHandler messageHandler = new MqttPahoMessageHandler(
+            brokerUrl,
+            clientId + "-bundle-out-" + System.currentTimeMillis(),
             mqttClientFactory()
         );
         messageHandler.setAsync(true);

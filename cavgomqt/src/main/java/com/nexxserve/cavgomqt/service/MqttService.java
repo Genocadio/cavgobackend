@@ -2,6 +2,7 @@ package com.nexxserve.cavgomqt.service;
 
 import com.nexxserve.cavgomqt.dto.BookingEventMessage;
 import com.nexxserve.cavgomqt.dto.TripEventMessage;
+import com.nexxserve.cavgomqt.dto.mqtt.BookingBundle;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.integration.support.MessageBuilder;
 import org.springframework.messaging.MessageChannel;
@@ -26,6 +27,9 @@ public class MqttService {
 
     @Autowired
     private MessageChannel heartbeatOutboundChannel;
+
+    @Autowired
+    private MessageChannel bookingBundleOutboundChannel;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -196,6 +200,28 @@ public class MqttService {
 
         } catch (JsonProcessingException e) {
             System.err.println("❌ Failed to serialize broadcast ping: " + e.getMessage());
+        }
+    }
+
+    public void publishBookingBundle(BookingBundle bundle) {
+        try {
+            String tripId = bundle != null ? bundle.tripId : null;
+            if (tripId == null || tripId.isEmpty()) {
+                System.err.println("❌ Missing trip_id in booking bundle; cannot publish to MQTT");
+                return;
+            }
+            String topic = "trip/" + tripId + "/booking_bundle";
+            String jsonPayload = objectMapper.writeValueAsString(bundle);
+            bookingBundleOutboundChannel.send(
+                    MessageBuilder.withPayload(jsonPayload)
+                            .setHeader("mqtt_topic", topic)
+                            .setHeader("mqtt_qos", 1)
+                            .setHeader("mqtt_retained", false)
+                            .build()
+            );
+            System.out.println("📦 Booking bundle published to MQTT for trip " + tripId);
+        } catch (JsonProcessingException e) {
+            System.err.println("❌ Failed to serialize booking bundle: " + e.getMessage());
         }
     }
 

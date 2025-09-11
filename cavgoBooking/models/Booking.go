@@ -69,3 +69,60 @@ type BookingResponse struct {
 	Message          string   `json:"message"`
 	PaymentReference *string  `json:"payment_reference,omitempty"`
 }
+
+// TripBooking represents booking data for RabbitMQ bundle format
+type TripBooking struct {
+	ID                string        `json:"id"`
+	TripID            int           `json:"trip_id"`
+	UserID            *string       `json:"user_id"`
+	UserEmail         *string       `json:"user_email"`
+	UserPhone         string        `json:"user_phone"`
+	UserName          string        `json:"user_name"`
+	PickupLocationID  string        `json:"pickup_location_id"`
+	DropoffLocationID string        `json:"dropoff_location_id"`
+	NumberOfTickets   int           `json:"number_of_tickets"`
+	TotalAmount       float64       `json:"total_amount"`
+	Status            BookingStatus `json:"status"`
+	BookingReference  string        `json:"booking_reference"`
+	CreatedAt         int64         `json:"created_at"` // epoch ms
+	UpdatedAt         int64         `json:"updated_at"` // epoch ms
+}
+
+// BundlePayment represents payment data for RabbitMQ bundle format
+type BundlePayment struct {
+	ID            string        `json:"id"`
+	BookingID     string        `json:"booking_id"`
+	Amount        float64       `json:"amount"`
+	PaymentMethod PaymentMethod `json:"payment_method"`
+	Status        PaymentStatus `json:"status"`
+	TransactionID *string       `json:"transaction_id"`
+	PaymentData   *string       `json:"payment_data"`
+	CreatedAt     int64         `json:"created_at"` // epoch ms
+	UpdatedAt     int64         `json:"updated_at"` // epoch ms
+}
+
+// BundleTicket represents ticket data for RabbitMQ bundle format
+type BundleTicket struct {
+	ID                  string  `json:"id"`
+	BookingID           string  `json:"booking_id"`
+	TicketNumber        string  `json:"ticket_number"`
+	QRCode              string  `json:"qr_code"`
+	IsUsed              bool    `json:"is_used"`
+	UsedAt              *int64  `json:"used_at"` // epoch ms or null
+	ValidatedBy         *string `json:"validated_by"`
+	CreatedAt           int64   `json:"created_at"` // epoch ms
+	UpdatedAt           int64   `json:"updated_at"` // epoch ms
+	PickupLocationName  string  `json:"pickup_location_name"`
+	DropoffLocationName string  `json:"dropoff_location_name"`
+	CarPlate            string  `json:"car_plate"`
+	CarCompany          string  `json:"car_company"`
+	PickupTime          int64   `json:"pickup_time"` // epoch ms
+}
+
+// BookingBundle represents the complete bundle message for RabbitMQ
+type BookingBundle struct {
+	TripID  string         `json:"trip_id"`
+	Booking TripBooking    `json:"booking"`
+	Payment BundlePayment  `json:"payment"`
+	Tickets []BundleTicket `json:"tickets"`
+}
