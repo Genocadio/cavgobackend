@@ -91,14 +91,38 @@ public class RabbitMQListenerService {
 
     @RabbitListener(queues = RabbitMQConfig.BOOKINGS_BUNDLE_REPLY_QUEUE)
     public void handleBookingBundleReplies(BookingBundle bundle) {
+        logger.info("📥 === RECEIVING BOOKING BUNDLE REPLY FROM RABBITMQ ===");
+        logger.info("  - Queue: {}", RabbitMQConfig.BOOKINGS_BUNDLE_REPLY_QUEUE);
+        logger.info("  - Timestamp: {}", System.currentTimeMillis());
+        
         try {
-            logger.info("📥 Received booking bundle reply for trip_id={} booking_id={}",
-                    bundle != null ? bundle.tripId : "null",
-                    bundle != null && bundle.booking != null ? bundle.booking.id : "null");
+            // Validate input
+            if (bundle == null) {
+                logger.error("❌ Booking bundle reply is null - cannot process");
+                return;
+            }
+            
+            logger.info("  - Trip ID: {}", bundle.tripId != null ? bundle.tripId : "null");
+            logger.info("  - Booking ID: {}", bundle.booking != null ? bundle.booking.id : "null");
+            logger.info("  - Payment ID: {}", bundle.payment != null ? bundle.payment.id : "null");
+            logger.info("  - Ticket ID: {}", bundle.ticket != null ? bundle.ticket.id : "null");
+            
+            // Forward to MQTT
+            logger.info("📤 Forwarding booking bundle reply to MQTT...");
             mqttService.publishBookingBundle(bundle);
-            logger.info("✅ Forwarded booking bundle reply to MQTT");
+            
+            logger.info("✅ SUCCESS: Booking bundle reply forwarded to MQTT");
+            logger.info("  - Trip ID: {}", bundle.tripId);
+            logger.info("  - Booking ID: {}", bundle.booking != null ? bundle.booking.id : "null");
+            
         } catch (Exception e) {
-            logger.error("❌ Error forwarding booking bundle reply to MQTT: {}", e.getMessage(), e);
+            logger.error("❌ FAILED to forward booking bundle reply to MQTT:");
+            logger.error("  - Queue: {}", RabbitMQConfig.BOOKINGS_BUNDLE_REPLY_QUEUE);
+            logger.error("  - Trip ID: {}", bundle != null ? bundle.tripId : "null");
+            logger.error("  - Booking ID: {}", bundle != null && bundle.booking != null ? bundle.booking.id : "null");
+            logger.error("  - Error: {}", e.getMessage());
+            logger.error("  - Exception type: {}", e.getClass().getSimpleName());
+            e.printStackTrace();
         }
     }
 

@@ -204,14 +204,38 @@ public class MqttService {
     }
 
     public void publishBookingBundle(BookingBundle bundle) {
+        System.out.println("📤 === PUBLISHING BOOKING BUNDLE TO MQTT ===");
+        System.out.println("  - Timestamp: " + System.currentTimeMillis());
+        
         try {
-            String tripId = bundle != null ? bundle.tripId : null;
-            if (tripId == null || tripId.isEmpty()) {
-                System.err.println("❌ Missing trip_id in booking bundle; cannot publish to MQTT");
+            // Validate input
+            if (bundle == null) {
+                System.err.println("❌ Booking bundle is null - cannot publish to MQTT");
                 return;
             }
+            
+            String tripId = bundle.tripId;
+            if (tripId == null || tripId.isEmpty()) {
+                System.err.println("❌ Missing trip_id in booking bundle; cannot publish to MQTT");
+                System.err.println("  - Bundle details: " + bundle);
+                return;
+            }
+            
+            System.out.println("  - Trip ID: " + tripId);
+            System.out.println("  - Booking ID: " + (bundle.booking != null ? bundle.booking.id : "null"));
+            System.out.println("  - Payment ID: " + (bundle.payment != null ? bundle.payment.id : "null"));
+            System.out.println("  - Ticket ID: " + (bundle.ticket != null ? bundle.ticket.id : "null"));
+            
             String topic = "trip/" + tripId + "/booking_bundle";
+            System.out.println("  - MQTT Topic: " + topic);
+            
+            // Serialize to JSON
             String jsonPayload = objectMapper.writeValueAsString(bundle);
+            System.out.println("  - Payload length: " + jsonPayload.length());
+            System.out.println("  - Payload preview: " + (jsonPayload.length() > 200 ? jsonPayload.substring(0, 200) + "..." : jsonPayload));
+            
+            // Send to MQTT
+            System.out.println("📤 Sending booking bundle to MQTT...");
             bookingBundleOutboundChannel.send(
                     MessageBuilder.withPayload(jsonPayload)
                             .setHeader("mqtt_topic", topic)
@@ -219,9 +243,24 @@ public class MqttService {
                             .setHeader("mqtt_retained", false)
                             .build()
             );
-            System.out.println("📦 Booking bundle published to MQTT for trip " + tripId);
+            
+            System.out.println("✅ SUCCESS: Booking bundle published to MQTT");
+            System.out.println("  - Topic: " + topic);
+            System.out.println("  - Trip ID: " + tripId);
+            System.out.println("  - Booking ID: " + (bundle.booking != null ? bundle.booking.id : "null"));
+            
         } catch (JsonProcessingException e) {
-            System.err.println("❌ Failed to serialize booking bundle: " + e.getMessage());
+            System.err.println("❌ FAILED to serialize booking bundle for MQTT:");
+            System.err.println("  - Error: " + e.getMessage());
+            System.err.println("  - Trip ID: " + (bundle != null ? bundle.tripId : "null"));
+            System.err.println("  - Booking ID: " + (bundle != null && bundle.booking != null ? bundle.booking.id : "null"));
+            e.printStackTrace();
+        } catch (Exception e) {
+            System.err.println("❌ FAILED to publish booking bundle to MQTT:");
+            System.err.println("  - Error: " + e.getMessage());
+            System.err.println("  - Trip ID: " + (bundle != null ? bundle.tripId : "null"));
+            System.err.println("  - Exception type: " + e.getClass().getSimpleName());
+            e.printStackTrace();
         }
     }
 

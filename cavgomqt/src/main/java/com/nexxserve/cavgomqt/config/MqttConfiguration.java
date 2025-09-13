@@ -270,12 +270,30 @@ public class MqttConfiguration {
         return message -> {
             String payload = (String) message.getPayload();
             String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
-            System.out.println("📦 Received booking bundle on topic: " + topic);
+            
+            System.out.println("📦 === RECEIVING BOOKING BUNDLE FROM MQTT ===");
+            System.out.println("  - Topic: " + topic);
+            System.out.println("  - Payload length: " + (payload != null ? payload.length() : "null"));
+            System.out.println("  - Timestamp: " + System.currentTimeMillis());
+            
             try {
+                // Log the raw payload for debugging
+                System.out.println("  - Raw payload: " + payload);
+                
                 BookingBundle bundle = objectMapper.readValue(payload, BookingBundle.class);
+                System.out.println("✅ Successfully deserialized booking bundle:");
+                System.out.println("  - Trip ID: " + (bundle != null ? bundle.tripId : "null"));
+                System.out.println("  - Booking ID: " + (bundle != null && bundle.booking != null ? bundle.booking.id : "null"));
+                
+                // Publish to RabbitMQ
                 bookingBundlePublisherService.publish(bundle);
+                System.out.println("✅ Successfully forwarded booking bundle to RabbitMQ");
+                
             } catch (Exception e) {
-                System.err.println("❌ Failed to deserialize/publish booking bundle: " + e.getMessage());
+                System.err.println("❌ FAILED to process booking bundle from MQTT:");
+                System.err.println("  - Error: " + e.getMessage());
+                System.err.println("  - Topic: " + topic);
+                System.err.println("  - Payload: " + payload);
                 e.printStackTrace();
             }
         };
