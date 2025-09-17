@@ -49,7 +49,10 @@ func NewRabbitMQConsumer(amqpURL, queueName, replyQueueName string, bundlePublis
 		false, // delete when unused
 		false, // exclusive
 		false, // no-wait
-		nil,   // arguments
+		amqp091.Table{
+			"x-dead-letter-exchange":     "",
+			"x-dead-letter-routing-key": queueName + ".dlq",
+		}, // arguments to match Spring config
 	)
 	if err != nil {
 		ch.Close()
@@ -64,7 +67,10 @@ func NewRabbitMQConsumer(amqpURL, queueName, replyQueueName string, bundlePublis
 		false, // delete when unused
 		false, // exclusive
 		false, // no-wait
-		nil,   // arguments
+		amqp091.Table{
+			"x-dead-letter-exchange":     "",
+			"x-dead-letter-routing-key": replyQueueName + ".dlq",
+		}, // arguments to match Spring config
 	)
 	if err != nil {
 		ch.Close()
@@ -140,7 +146,25 @@ func (c *RabbitMQConsumer) StartConsuming(ctx context.Context) error {
 
 // processMessage processes a single message from the queue
 func (c *RabbitMQConsumer) processMessage(ctx context.Context, msg amqp091.Delivery) error {
-	log.Printf("[RabbitMQConsumer] Received message: %s", string(msg.Body))
+	// Log full delivery metadata and payload for observability
+	log.Printf("[RabbitMQConsumer] Received delivery: tag=%d redelivered=%t exchange=%s routingKey=%s contentType=%s contentEncoding=%s correlationId=%s replyTo=%s messageId=%s appId=%s type=%s timestamp=%s",
+		msg.DeliveryTag,
+		msg.Redelivered,
+		msg.Exchange,
+		msg.RoutingKey,
+		msg.ContentType,
+		msg.ContentEncoding,
+		msg.CorrelationId,
+		msg.ReplyTo,
+		msg.MessageId,
+		msg.AppId,
+		msg.Type,
+		msg.Timestamp.Format(time.RFC3339),
+	)
+	if len(msg.Headers) > 0 {
+		log.Printf("[RabbitMQConsumer] Headers: %+v", msg.Headers)
+	}
+	log.Printf("[RabbitMQConsumer] Payload (%d bytes): %s", len(msg.Body), string(msg.Body))
 
 	var bundle models.BookingBundle
 	if err := json.Unmarshal(msg.Body, &bundle); err != nil {
@@ -150,9 +174,31 @@ func (c *RabbitMQConsumer) processMessage(ctx context.Context, msg amqp091.Deliv
 	// Convert bundle to internal models
 	booking, payment, tickets := c.convertBundleToModels(&bundle)
 
+	// Log extracted key identifiers
+	log.Printf("[RabbitMQConsumer] Parsed bundle identifiers: tripId=%s bookingId=%s paymentId=%s tickets=%d",
+		bundle.TripID,
+		bundle.Booking.ID,
+		bundle.Payment.ID,
+		len(bundle.Tickets),
+	)
+
 	// Save booking data (without generating new IDs)
 	if err := c.saveBundleData(ctx, booking, payment, tickets); err != nil {
 		return fmt.Errorf("failed to save bundle data: %w", err)
+	}
+
+	// Create booking response for publishing
+	booking.Tickets = tickets
+	booking.Payment = payment
+	resp := &models.BookingResponse{
+		Booking:          booking,
+		Message:          "Booking bundle processed successfully",
+		PaymentReference: &payment.ID,
+	}
+
+	// Publish to fanout exchange for other services (but not to reply queue to avoid duplicates)
+	if err := c.publishBundleEvent("created", resp); err != nil {
+		log.Printf("[RabbitMQConsumer] Warning: Failed to publish bundle event: %v", err)
 	}
 
 	log.Printf("[RabbitMQConsumer] Successfully processed booking bundle for trip %s", bundle.TripID)
@@ -249,6 +295,23 @@ func (c *RabbitMQConsumer) saveBundleData(ctx context.Context, booking *models.B
 	// Reset flag after processing
 	c.bookingService.(*bookingService).SetFromRabbitMQ(false)
 
+	return nil
+}
+
+// publishBundleEvent publishes booking events to fanout exchange only (not reply queue)
+func (c *RabbitMQConsumer) publishBundleEvent(eventType string, resp *models.BookingResponse) error {
+	// Get the fanout publisher from the booking service
+	bookingService := c.bookingService.(*bookingService)
+	if bookingService.rabbitPublisher == nil {
+		return fmt.Errorf("rabbit publisher not available")
+	}
+
+	// Publish to fanout exchange for other services to consume
+	if err := bookingService.rabbitPublisher.PublishBookingEvent(eventType, resp); err != nil {
+		return fmt.Errorf("failed to publish to fanout exchange: %w", err)
+	}
+
+	log.Printf("[RabbitMQConsumer] Published bundle event '%s' to fanout exchange for booking %s", eventType, resp.Booking.ID)
 	return nil
 }
 

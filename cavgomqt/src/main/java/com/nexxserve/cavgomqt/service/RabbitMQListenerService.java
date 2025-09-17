@@ -105,7 +105,7 @@ public class RabbitMQListenerService {
             logger.info("  - Trip ID: {}", bundle.tripId != null ? bundle.tripId : "null");
             logger.info("  - Booking ID: {}", bundle.booking != null ? bundle.booking.id : "null");
             logger.info("  - Payment ID: {}", bundle.payment != null ? bundle.payment.id : "null");
-            logger.info("  - Ticket ID: {}", bundle.ticket != null ? bundle.ticket.id : "null");
+            logger.info("  - Ticket ID: {}", bundle.tickets != null ? bundle.tickets.size() : "null");
             
             // Forward to MQTT
             logger.info("📤 Forwarding booking bundle reply to MQTT...");

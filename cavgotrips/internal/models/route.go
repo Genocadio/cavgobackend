@@ -69,8 +69,11 @@ func (r *Route) Validate() error {
 				return NewValidationError(fmt.Sprintf("waypoint orders must be sequential starting from %d, expected %d but got %d", expectedStart, expectedOrder, waypoint.Order))
 			}
 
-			if waypoint.Price <= 0 {
-				return NewValidationError(fmt.Sprintf("waypoint %d must have a valid price", i+1))
+			// For passthrough waypoints, price may be nil; otherwise must be > 0
+			if !waypoint.IsPassThrough {
+				if waypoint.Price == nil || *waypoint.Price <= 0 {
+					return NewValidationError(fmt.Sprintf("waypoint %d must have a valid price", i+1))
+				}
 			}
 
 			// Check for duplicate locations (only if location ID is non-zero)
@@ -88,12 +91,13 @@ func (r *Route) Validate() error {
 
 // RouteWaypoint represents a waypoint in a route with its price
 type RouteWaypoint struct {
-	ID         int64     `json:"id" gorm:"primaryKey"`
-	RouteID    int64     `json:"route_id"`
-	LocationID int64     `json:"location_id"`
-	Order      int       `json:"order" gorm:"not null"`
-	Price      float64   `json:"price" gorm:"not null"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID            int64     `json:"id" gorm:"primaryKey"`
+	RouteID       int64     `json:"route_id"`
+	LocationID    int64     `json:"location_id"`
+	Order         int       `json:"order" gorm:"not null"`
+	Price         *float64  `json:"price"`
+	IsPassThrough bool      `json:"is_pass_through" gorm:"default:false"`
+	CreatedAt     time.Time `json:"created_at"`
 
 	// Relationships
 	Location Location `json:"location" gorm:"foreignKey:LocationID"`

@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -152,17 +154,63 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 
 	// Create waypoints based on the request parameters
 	if request.NoWaypoints {
-		// No waypoints - only origin and destination from route
-		// This creates a simple point-to-point trip without intermediate stops
+		// Include only passthrough waypoints from the route
+		waypoints := route.Waypoints
+		if request.IsReversed {
+			for i := len(waypoints) - 1; i >= 0; i-- {
+				rw := waypoints[i]
+				if !rw.IsPassThrough {
+					continue
+				}
+				tw := &models.TripWaypoint{
+					TripID:        trip.ID,
+					LocationID:    rw.LocationID,
+					Order:         len(waypoints) - i,
+					Price:         nil,
+					IsCustom:      false,
+					IsPassThrough: true,
+				}
+				if err := s.tripRepo.CreateWaypoint(tw); err != nil {
+					return nil, err
+				}
+			}
+		} else {
+			for _, rw := range waypoints {
+				if !rw.IsPassThrough {
+					continue
+				}
+				tw := &models.TripWaypoint{
+					TripID:        trip.ID,
+					LocationID:    rw.LocationID,
+					Order:         rw.Order,
+					Price:         nil,
+					IsCustom:      false,
+					IsPassThrough: true,
+				}
+				if err := s.tripRepo.CreateWaypoint(tw); err != nil {
+					return nil, err
+				}
+			}
+		}
 	} else if len(request.CustomWaypoints) > 0 {
-		// Use custom waypoints
+		// Use custom waypoints but ensure route passthroughs are included
+		customByLocation := make(map[int64]models.CreateCustomWaypoint)
+		for _, cw := range request.CustomWaypoints {
+			customByLocation[cw.LocationID] = cw
+		}
+		var tripWaypoints []models.TripWaypoint
 		for _, customWaypoint := range request.CustomWaypoints {
-			// Validate location exists
 			if err := s.locationRepo.ValidateExists(customWaypoint.LocationID); err != nil {
 				return nil, models.NewValidationError("invalid location in custom waypoints " + strconv.FormatInt(customWaypoint.LocationID, 10))
 			}
-
-			tripWaypoint := &models.TripWaypoint{
+			isPass := false
+			for _, rw := range route.Waypoints {
+				if rw.IsPassThrough && rw.LocationID == customWaypoint.LocationID {
+					isPass = true
+					break
+				}
+			}
+			tripWaypoints = append(tripWaypoints, models.TripWaypoint{
 				TripID:            trip.ID,
 				LocationID:        customWaypoint.LocationID,
 				Order:             customWaypoint.Order,
@@ -170,9 +218,30 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 				RemainingTime:     customWaypoint.RemainingTime,
 				RemainingDistance: customWaypoint.RemainingDistance,
 				IsCustom:          true,
+				IsPassThrough:     isPass,
+			})
+		}
+		for _, rw := range route.Waypoints {
+			if !rw.IsPassThrough {
+				continue
 			}
-
-			if err := s.tripRepo.CreateWaypoint(tripWaypoint); err != nil {
+			if _, ok := customByLocation[rw.LocationID]; ok {
+				continue
+			}
+			tripWaypoints = append(tripWaypoints, models.TripWaypoint{
+				TripID:        trip.ID,
+				LocationID:    rw.LocationID,
+				Order:         rw.Order,
+				Price:         nil,
+				IsCustom:      false,
+				IsPassThrough: true,
+			})
+		}
+		sort.SliceStable(tripWaypoints, func(i, j int) bool { return tripWaypoints[i].Order < tripWaypoints[j].Order })
+		for i := range tripWaypoints {
+			tripWaypoints[i].Order = i + 1
+			wp := tripWaypoints[i]
+			if err := s.tripRepo.CreateWaypoint(&wp); err != nil {
 				return nil, err
 			}
 		}
@@ -187,17 +256,26 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 			totalPrice := *tripPrice
 			for i := len(waypoints) - 1; i >= 0; i-- {
 				routeWaypoint := waypoints[i]
-				calculated := totalPrice - routeWaypoint.Price
-				if calculated <= 0 {
-					calculated = 0.01 // ensure positive price to satisfy validation
+				var pricePtr *float64
+				if routeWaypoint.IsPassThrough || routeWaypoint.Price == nil {
+					pricePtr = nil
+				} else {
+					calculated := totalPrice - *routeWaypoint.Price
+					if calculated <= 0 {
+						min := 0.01
+						pricePtr = &min
+					} else {
+						cp := calculated
+						pricePtr = &cp
+					}
 				}
-				priceCopy := calculated
 				tripWaypoint := &models.TripWaypoint{
-					TripID:     trip.ID,
-					LocationID: routeWaypoint.LocationID,
-					Order:      len(waypoints) - i,
-					Price:      &priceCopy,
-					IsCustom:   false,
+					TripID:        trip.ID,
+					LocationID:    routeWaypoint.LocationID,
+					Order:         len(waypoints) - i,
+					Price:         pricePtr,
+					IsCustom:      false,
+					IsPassThrough: routeWaypoint.IsPassThrough,
 				}
 
 				if err := s.tripRepo.CreateWaypoint(tripWaypoint); err != nil {
@@ -208,11 +286,12 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 			// Normal order
 			for _, routeWaypoint := range waypoints {
 				tripWaypoint := &models.TripWaypoint{
-					TripID:     trip.ID,
-					LocationID: routeWaypoint.LocationID,
-					Order:      routeWaypoint.Order,
-					Price:      &routeWaypoint.Price,
-					IsCustom:   false,
+					TripID:        trip.ID,
+					LocationID:    routeWaypoint.LocationID,
+					Order:         routeWaypoint.Order,
+					Price:         routeWaypoint.Price,
+					IsCustom:      false,
+					IsPassThrough: routeWaypoint.IsPassThrough,
 				}
 
 				if err := s.tripRepo.CreateWaypoint(tripWaypoint); err != nil {
@@ -657,6 +736,51 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 	// Update the trip in the database
 	if err := s.tripRepo.UpdateProgress(mqttTrip.ID, updates); err != nil {
 		return nil, fmt.Errorf("failed to update trip: %w", err)
+	}
+
+	// Update waypoints if provided in MQTT data
+	if len(mqttTrip.Waypoints) > 0 {
+		log.Printf("[UpdateTripFromMQTT] Processing %d waypoint updates for trip %d", len(mqttTrip.Waypoints), mqttTrip.ID)
+		for _, waypointUpdate := range mqttTrip.Waypoints {
+			waypointUpdates := make(map[string]interface{})
+			
+			// Update remaining time if provided
+			if waypointUpdate.RemainingTime != nil {
+				waypointUpdates["remaining_time"] = *waypointUpdate.RemainingTime
+				log.Printf("[UpdateTripFromMQTT] Updating waypoint %d remaining_time: %d", waypointUpdate.ID, *waypointUpdate.RemainingTime)
+			}
+			
+			// Update remaining distance if provided
+			if waypointUpdate.RemainingDistance != nil {
+				waypointUpdates["remaining_distance"] = *waypointUpdate.RemainingDistance
+				log.Printf("[UpdateTripFromMQTT] Updating waypoint %d remaining_distance: %f", waypointUpdate.ID, *waypointUpdate.RemainingDistance)
+			}
+			
+			// Update is_next flag
+			waypointUpdates["is_next"] = waypointUpdate.IsNext
+			log.Printf("[UpdateTripFromMQTT] Updating waypoint %d is_next: %t", waypointUpdate.ID, waypointUpdate.IsNext)
+			
+			// Update is_passed flag if provided
+			waypointUpdates["is_passed"] = waypointUpdate.IsPassed
+			log.Printf("[UpdateTripFromMQTT] Updating waypoint %d is_passed: %t", waypointUpdate.ID, waypointUpdate.IsPassed)
+			
+			// Update passed_timestamp if waypoint was marked as passed
+			if waypointUpdate.IsPassed && waypointUpdate.PassedTimestamp != nil {
+				waypointUpdates["passed_timestamp"] = *waypointUpdate.PassedTimestamp
+				log.Printf("[UpdateTripFromMQTT] Updating waypoint %d passed_timestamp: %d", waypointUpdate.ID, *waypointUpdate.PassedTimestamp)
+			}
+			
+			// Always update the updated_at timestamp for waypoints
+			waypointUpdates["updated_at"] = time.Now()
+
+			if err := s.tripRepo.UpdateWaypointProgress(waypointUpdate.ID, waypointUpdates); err != nil {
+				log.Printf("[UpdateTripFromMQTT] Failed to update waypoint %d: %v", waypointUpdate.ID, err)
+				return nil, fmt.Errorf("failed to update waypoint %d: %w", waypointUpdate.ID, err)
+			}
+			log.Printf("[UpdateTripFromMQTT] Successfully updated waypoint %d", waypointUpdate.ID)
+		}
+	} else {
+		log.Printf("[UpdateTripFromMQTT] No waypoint updates provided for trip %d", mqttTrip.ID)
 	}
 
 	// Get the updated trip with relations

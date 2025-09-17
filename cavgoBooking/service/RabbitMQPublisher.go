@@ -51,10 +51,13 @@ func (p *RabbitMQPublisher) PublishBookingEvent(eventType string, bookingRespons
 		"data":  bookingResponse,
 	}
 	body, err := json.Marshal(msg)
-	fmt.Println("Publishing to RabbitMQ fanout exchange:", string(body))
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
+
+	// Log publishing details and payload
+	fmt.Printf("[RabbitMQPublisher] Publishing event to exchange=%s contentType=%s payloadBytes=%d event=%s\n", p.exchangeName, "application/json", len(body), eventType)
+	fmt.Printf("[RabbitMQPublisher] Payload: %s\n", string(body))
 	return p.channel.Publish(
 		p.exchangeName, // publish to the exchange
 		"",             // routing key is ignored for fanout exchanges

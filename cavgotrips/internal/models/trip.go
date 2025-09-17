@@ -58,6 +58,7 @@ type TripWaypoint struct {
 	LocationID        int64     `json:"location_id"`
 	Order             int       `json:"order" gorm:"not null"`
 	Price             *float64  `json:"price"`
+	IsPassThrough     bool      `json:"is_pass_through" gorm:"default:false"`
 	IsPassed          bool      `json:"is_passed" gorm:"default:false"`
 	IsNext            bool      `json:"is_next" gorm:"default:false"` // true if this is the next waypoint
 	PassedTimestamp   *int64    `json:"passed_timestamp"`
@@ -231,9 +232,11 @@ func (t *Trip) Validate() error {
 				return NewValidationError(fmt.Sprintf("waypoint orders must be sequential starting from %d, expected %d but got %d", expectedStart, expectedOrder, waypoint.Order))
 			}
 
-			// For non-custom waypoints, price should be set
-			if !waypoint.IsCustom && (waypoint.Price == nil || *waypoint.Price <= 0) {
-				return NewValidationError(fmt.Sprintf("waypoint %d must have a valid price", i+1))
+			// For non-custom waypoints, price should be set unless passthrough
+			if !waypoint.IsCustom && !waypoint.IsPassThrough {
+				if waypoint.Price == nil || *waypoint.Price <= 0 {
+					return NewValidationError(fmt.Sprintf("waypoint %d must have a valid price", i+1))
+				}
 			}
 
 			// Check for duplicate locations (only if location ID is non-zero)

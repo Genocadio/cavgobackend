@@ -31,7 +31,7 @@ public class RabbitMQBookingBundlePublisherService {
             logger.info("  - Trip ID: {}", bookingBundle.tripId != null ? bookingBundle.tripId : "null");
             logger.info("  - Booking ID: {}", bookingBundle.booking != null ? bookingBundle.booking.id : "null");
             logger.info("  - Payment ID: {}", bookingBundle.payment != null ? bookingBundle.payment.id : "null");
-            logger.info("  - Ticket ID: {}", bookingBundle.ticket != null ? bookingBundle.ticket.id : "null");
+            logger.info("  - Ticket ID: {}", bookingBundle.tickets != null ? bookingBundle.tickets.toString() : "null");
             
             // Attempt to publish
             logger.info("📤 Sending booking bundle to RabbitMQ queue: {}", RabbitMQConfig.BOOKINGS_BUNDLE_QUEUE);

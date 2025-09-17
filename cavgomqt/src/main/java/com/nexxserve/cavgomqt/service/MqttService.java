@@ -224,7 +224,7 @@ public class MqttService {
             System.out.println("  - Trip ID: " + tripId);
             System.out.println("  - Booking ID: " + (bundle.booking != null ? bundle.booking.id : "null"));
             System.out.println("  - Payment ID: " + (bundle.payment != null ? bundle.payment.id : "null"));
-            System.out.println("  - Ticket ID: " + (bundle.ticket != null ? bundle.ticket.id : "null"));
+            System.out.println("  - Ticket ID: " + (bundle.tickets != null ? bundle.tickets.toString(): "null"));
             
             String topic = "trip/" + tripId + "/booking_bundle";
             System.out.println("  - MQTT Topic: " + topic);

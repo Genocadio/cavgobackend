@@ -32,18 +32,18 @@ func (r *routeRepository) ValidateLocationExists(locationID int64) error {
 func (r *routeRepository) ValidateAllLocationsExist(route *models.Route) error {
 	// Validate origin location exists
 	if err := r.ValidateLocationExists(route.OriginID); err != nil {
-		return models.NewValidationError(fmt.Sprintf("origin location validation failed: %w", err))
+		return models.NewValidationError(fmt.Sprintf("origin location validation failed: %v", err))
 	}
 
 	// Validate destination location exists
 	if err := r.ValidateLocationExists(route.DestinationID); err != nil {
-		return models.NewValidationError(fmt.Sprintf("destination location validation failed: %w", err))
+		return models.NewValidationError(fmt.Sprintf("destination location validation failed: %v", err))
 	}
 
 	// Validate all waypoint locations exist
 	for i, waypoint := range route.Waypoints {
 		if err := r.ValidateLocationExists(waypoint.LocationID); err != nil {
-			return models.NewValidationError(fmt.Sprintf("waypoint %d location validation failed: %w", i+1, err))
+			return models.NewValidationError(fmt.Sprintf("waypoint %d location validation failed: %v", i+1, err))
 		}
 	}
 
@@ -53,15 +53,9 @@ func (r *routeRepository) ValidateAllLocationsExist(route *models.Route) error {
 func (r *routeRepository) CheckUniqueness(route *models.Route) error {
 	var count int64
 
-	// Check for route with same origin and destination
-	if err := r.db.Model(&models.Route{}).
-		Where("origin_id = ? AND destination_id = ? AND id != ?",
-			route.OriginID, route.DestinationID, route.ID).
-		Count(&count).Error; err != nil {
+	// Check for routes with same origin, destination, and identical passthrough waypoint sequences
+	if err := r.checkRouteWithSameWaypointSequence(route); err != nil {
 		return err
-	}
-	if count > 0 {
-		return errors.New("a route with the same origin and destination already exists")
 	}
 
 	// Check for route with same name (if provided)
@@ -89,6 +83,64 @@ func (r *routeRepository) CheckUniqueness(route *models.Route) error {
 	}
 
 	return nil
+}
+
+// checkRouteWithSameWaypointSequence checks if a route with same origin, destination,
+// and identical passthrough waypoint sequence already exists
+func (r *routeRepository) checkRouteWithSameWaypointSequence(route *models.Route) error {
+	// Get all routes with same origin and destination
+	var existingRoutes []models.Route
+	if err := r.db.Preload("Waypoints").
+		Where("origin_id = ? AND destination_id = ? AND id != ?",
+			route.OriginID, route.DestinationID, route.ID).
+		Find(&existingRoutes).Error; err != nil {
+		return err
+	}
+
+	// Get only passthrough waypoints from the new route (ordered by Order field)
+	newPassthroughWaypoints := make([]int64, 0)
+	for _, waypoint := range route.Waypoints {
+		if waypoint.IsPassThrough {
+			newPassthroughWaypoints = append(newPassthroughWaypoints, waypoint.LocationID)
+		}
+	}
+
+	// Compare with each existing route
+	for _, existingRoute := range existingRoutes {
+		// Get passthrough waypoints from existing route (ordered by Order field)
+		existingPassthroughWaypoints := make([]int64, 0)
+		for _, waypoint := range existingRoute.Waypoints {
+			if waypoint.IsPassThrough {
+				existingPassthroughWaypoints = append(existingPassthroughWaypoints, waypoint.LocationID)
+			}
+		}
+
+		// Compare the sequences
+		if areWaypointSequencesEqual(newPassthroughWaypoints, existingPassthroughWaypoints) {
+			if len(newPassthroughWaypoints) == 0 {
+				return errors.New("a route with the same origin and destination (no passthrough waypoints) already exists")
+			} else {
+				return errors.New("a route with the same origin, destination, and passthrough waypoint sequence already exists")
+			}
+		}
+	}
+
+	return nil
+}
+
+// areWaypointSequencesEqual compares two waypoint sequences for equality
+func areWaypointSequencesEqual(seq1, seq2 []int64) bool {
+	if len(seq1) != len(seq2) {
+		return false
+	}
+
+	for i, locationID := range seq1 {
+		if locationID != seq2[i] {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (r *routeRepository) Create(route *models.Route) error {
@@ -137,13 +189,13 @@ func (r *routeRepository) GetAll() ([]models.Route, error) {
 func (r *routeRepository) GetAllPaginated(limit, offset int) ([]models.Route, int64, error) {
 	var routes []models.Route
 	var total int64
-	
+
 	// Get total count
 	err := r.db.Model(&models.Route{}).Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	// Get paginated results
 	err = r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location").
 		Limit(limit).Offset(offset).Find(&routes).Error
@@ -229,19 +281,19 @@ func (r *routeRepository) Delete(id int64) error {
 func (r *routeRepository) SearchByOriginDestination(origin, destination string) ([]models.Route, error) {
 	var routes []models.Route
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
-	
+
 	if origin != "" {
 		query = query.Joins("JOIN locations origin ON routes.origin_id = origin.id").
-			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)",
 				"%"+origin+"%", "%"+origin+"%")
 	}
-	
+
 	if destination != "" {
 		query = query.Joins("JOIN locations destination ON routes.destination_id = destination.id").
-			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)",
 				"%"+destination+"%", "%"+destination+"%")
 	}
-	
+
 	err := query.Find(&routes).Error
 	return routes, err
 }
@@ -249,39 +301,39 @@ func (r *routeRepository) SearchByOriginDestination(origin, destination string) 
 func (r *routeRepository) SearchByOriginDestinationPaginated(origin, destination string, limit, offset int) ([]models.Route, int64, error) {
 	var routes []models.Route
 	var total int64
-	
+
 	// Build base query for counting
 	countQuery := r.db.Model(&models.Route{})
 	if origin != "" {
 		countQuery = countQuery.Joins("JOIN locations origin ON routes.origin_id = origin.id").
-			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)",
 				"%"+origin+"%", "%"+origin+"%")
 	}
 	if destination != "" {
 		countQuery = countQuery.Joins("JOIN locations destination ON routes.destination_id = destination.id").
-			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)",
 				"%"+destination+"%", "%"+destination+"%")
 	}
-	
+
 	// Get total count
 	err := countQuery.Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	// Build query for results
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
 	if origin != "" {
 		query = query.Joins("JOIN locations origin ON routes.origin_id = origin.id").
-			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)",
 				"%"+origin+"%", "%"+origin+"%")
 	}
 	if destination != "" {
 		query = query.Joins("JOIN locations destination ON routes.destination_id = destination.id").
-			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)",
 				"%"+destination+"%", "%"+destination+"%")
 	}
-	
+
 	err = query.Limit(limit).Offset(offset).Find(&routes).Error
 	return routes, total, err
 }
@@ -289,11 +341,11 @@ func (r *routeRepository) SearchByOriginDestinationPaginated(origin, destination
 func (r *routeRepository) FilterByCityRoute(cityRoute *bool) ([]models.Route, error) {
 	var routes []models.Route
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
-	
+
 	if cityRoute != nil {
 		query = query.Where("city_route = ?", *cityRoute)
 	}
-	
+
 	err := query.Find(&routes).Error
 	return routes, err
 }
@@ -301,25 +353,25 @@ func (r *routeRepository) FilterByCityRoute(cityRoute *bool) ([]models.Route, er
 func (r *routeRepository) FilterByCityRoutePaginated(cityRoute *bool, limit, offset int) ([]models.Route, int64, error) {
 	var routes []models.Route
 	var total int64
-	
+
 	// Build base query for counting
 	countQuery := r.db.Model(&models.Route{})
 	if cityRoute != nil {
 		countQuery = countQuery.Where("city_route = ?", *cityRoute)
 	}
-	
+
 	// Get total count
 	err := countQuery.Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	// Build query for results
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
 	if cityRoute != nil {
 		query = query.Where("city_route = ?", *cityRoute)
 	}
-	
+
 	err = query.Limit(limit).Offset(offset).Find(&routes).Error
 	return routes, total, err
 }
@@ -327,17 +379,17 @@ func (r *routeRepository) FilterByCityRoutePaginated(cityRoute *bool, limit, off
 func (r *routeRepository) FilterByProvinces(originProvince, destinationProvince string) ([]models.Route, error) {
 	var routes []models.Route
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
-	
+
 	if originProvince != "" {
 		query = query.Joins("JOIN locations origin ON routes.origin_id = origin.id").
 			Where("LOWER(origin.province) LIKE LOWER(?)", "%"+originProvince+"%")
 	}
-	
+
 	if destinationProvince != "" {
 		query = query.Joins("JOIN locations destination ON routes.destination_id = destination.id").
 			Where("LOWER(destination.province) LIKE LOWER(?)", "%"+destinationProvince+"%")
 	}
-	
+
 	err := query.Find(&routes).Error
 	return routes, err
 }
@@ -345,7 +397,7 @@ func (r *routeRepository) FilterByProvinces(originProvince, destinationProvince 
 func (r *routeRepository) FilterByProvincesPaginated(originProvince, destinationProvince string, limit, offset int) ([]models.Route, int64, error) {
 	var routes []models.Route
 	var total int64
-	
+
 	// Build base query for counting
 	countQuery := r.db.Model(&models.Route{})
 	if originProvince != "" {
@@ -356,13 +408,13 @@ func (r *routeRepository) FilterByProvincesPaginated(originProvince, destination
 		countQuery = countQuery.Joins("JOIN locations destination ON routes.destination_id = destination.id").
 			Where("LOWER(destination.province) LIKE LOWER(?)", "%"+destinationProvince+"%")
 	}
-	
+
 	// Get total count
 	err := countQuery.Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	// Build query for results
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
 	if originProvince != "" {
@@ -373,7 +425,7 @@ func (r *routeRepository) FilterByProvincesPaginated(originProvince, destination
 		query = query.Joins("JOIN locations destination ON routes.destination_id = destination.id").
 			Where("LOWER(destination.province) LIKE LOWER(?)", "%"+destinationProvince+"%")
 	}
-	
+
 	err = query.Limit(limit).Offset(offset).Find(&routes).Error
 	return routes, total, err
 }
@@ -381,26 +433,26 @@ func (r *routeRepository) FilterByProvincesPaginated(originProvince, destination
 func (r *routeRepository) SearchAndFilter(origin, destination string, cityRoute *bool, originProvince, destinationProvince string) ([]models.Route, error) {
 	var routes []models.Route
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
-	
+
 	// Add origin search
 	if origin != "" {
 		query = query.Joins("JOIN locations origin ON routes.origin_id = origin.id").
-			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)",
 				"%"+origin+"%", "%"+origin+"%")
 	}
-	
+
 	// Add destination search
 	if destination != "" {
 		query = query.Joins("JOIN locations destination ON routes.destination_id = destination.id").
-			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)",
 				"%"+destination+"%", "%"+destination+"%")
 	}
-	
+
 	// Add city route filter
 	if cityRoute != nil {
 		query = query.Where("city_route = ?", *cityRoute)
 	}
-	
+
 	// Add origin province filter
 	if originProvince != "" {
 		if origin == "" {
@@ -408,7 +460,7 @@ func (r *routeRepository) SearchAndFilter(origin, destination string, cityRoute 
 		}
 		query = query.Where("LOWER(origin.province) LIKE LOWER(?)", "%"+originProvince+"%")
 	}
-	
+
 	// Add destination province filter
 	if destinationProvince != "" {
 		if destination == "" {
@@ -416,7 +468,7 @@ func (r *routeRepository) SearchAndFilter(origin, destination string, cityRoute 
 		}
 		query = query.Where("LOWER(destination.province) LIKE LOWER(?)", "%"+destinationProvince+"%")
 	}
-	
+
 	err := query.Find(&routes).Error
 	return routes, err
 }
@@ -424,29 +476,29 @@ func (r *routeRepository) SearchAndFilter(origin, destination string, cityRoute 
 func (r *routeRepository) SearchAndFilterPaginated(origin, destination string, cityRoute *bool, originProvince, destinationProvince string, limit, offset int) ([]models.Route, int64, error) {
 	var routes []models.Route
 	var total int64
-	
+
 	// Build base query for counting
 	countQuery := r.db.Model(&models.Route{})
-	
+
 	// Add origin search
 	if origin != "" {
 		countQuery = countQuery.Joins("JOIN locations origin ON routes.origin_id = origin.id").
-			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)",
 				"%"+origin+"%", "%"+origin+"%")
 	}
-	
+
 	// Add destination search
 	if destination != "" {
 		countQuery = countQuery.Joins("JOIN locations destination ON routes.destination_id = destination.id").
-			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)",
 				"%"+destination+"%", "%"+destination+"%")
 	}
-	
+
 	// Add city route filter
 	if cityRoute != nil {
 		countQuery = countQuery.Where("city_route = ?", *cityRoute)
 	}
-	
+
 	// Add origin province filter
 	if originProvince != "" {
 		if origin == "" {
@@ -454,7 +506,7 @@ func (r *routeRepository) SearchAndFilterPaginated(origin, destination string, c
 		}
 		countQuery = countQuery.Where("LOWER(origin.province) LIKE LOWER(?)", "%"+originProvince+"%")
 	}
-	
+
 	// Add destination province filter
 	if destinationProvince != "" {
 		if destination == "" {
@@ -462,35 +514,35 @@ func (r *routeRepository) SearchAndFilterPaginated(origin, destination string, c
 		}
 		countQuery = countQuery.Where("LOWER(destination.province) LIKE LOWER(?)", "%"+destinationProvince+"%")
 	}
-	
+
 	// Get total count
 	err := countQuery.Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	// Build query for results
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
-	
+
 	// Add origin search
 	if origin != "" {
 		query = query.Joins("JOIN locations origin ON routes.origin_id = origin.id").
-			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)",
 				"%"+origin+"%", "%"+origin+"%")
 	}
-	
+
 	// Add destination search
 	if destination != "" {
 		query = query.Joins("JOIN locations destination ON routes.destination_id = destination.id").
-			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)", 
+			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)",
 				"%"+destination+"%", "%"+destination+"%")
 	}
-	
+
 	// Add city route filter
 	if cityRoute != nil {
 		query = query.Where("city_route = ?", *cityRoute)
 	}
-	
+
 	// Add origin province filter
 	if originProvince != "" {
 		if origin == "" {
@@ -498,7 +550,7 @@ func (r *routeRepository) SearchAndFilterPaginated(origin, destination string, c
 		}
 		query = query.Where("LOWER(origin.province) LIKE LOWER(?)", "%"+originProvince+"%")
 	}
-	
+
 	// Add destination province filter
 	if destinationProvince != "" {
 		if destination == "" {
@@ -506,7 +558,7 @@ func (r *routeRepository) SearchAndFilterPaginated(origin, destination string, c
 		}
 		query = query.Where("LOWER(destination.province) LIKE LOWER(?)", "%"+destinationProvince+"%")
 	}
-	
+
 	err = query.Limit(limit).Offset(offset).Find(&routes).Error
 	return routes, total, err
 }
@@ -514,14 +566,14 @@ func (r *routeRepository) SearchAndFilterPaginated(origin, destination string, c
 func (r *routeRepository) GetRoutesByPriceRange(minPrice, maxPrice float64) ([]models.Route, error) {
 	var routes []models.Route
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
-	
+
 	if minPrice > 0 {
 		query = query.Where("route_price >= ?", minPrice)
 	}
 	if maxPrice > 0 {
 		query = query.Where("route_price <= ?", maxPrice)
 	}
-	
+
 	err := query.Find(&routes).Error
 	return routes, err
 }
@@ -529,7 +581,7 @@ func (r *routeRepository) GetRoutesByPriceRange(minPrice, maxPrice float64) ([]m
 func (r *routeRepository) GetRoutesByPriceRangePaginated(minPrice, maxPrice float64, limit, offset int) ([]models.Route, int64, error) {
 	var routes []models.Route
 	var total int64
-	
+
 	// Build base query for counting
 	countQuery := r.db.Model(&models.Route{})
 	if minPrice > 0 {
@@ -538,13 +590,13 @@ func (r *routeRepository) GetRoutesByPriceRangePaginated(minPrice, maxPrice floa
 	if maxPrice > 0 {
 		countQuery = countQuery.Where("route_price <= ?", maxPrice)
 	}
-	
+
 	// Get total count
 	err := countQuery.Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	// Build query for results
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
 	if minPrice > 0 {
@@ -553,7 +605,7 @@ func (r *routeRepository) GetRoutesByPriceRangePaginated(minPrice, maxPrice floa
 	if maxPrice > 0 {
 		query = query.Where("route_price <= ?", maxPrice)
 	}
-	
+
 	err = query.Limit(limit).Offset(offset).Find(&routes).Error
 	return routes, total, err
 }
@@ -561,14 +613,14 @@ func (r *routeRepository) GetRoutesByPriceRangePaginated(minPrice, maxPrice floa
 func (r *routeRepository) GetRoutesByDistanceRange(minDistance, maxDistance int) ([]models.Route, error) {
 	var routes []models.Route
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
-	
+
 	if minDistance > 0 {
 		query = query.Where("distance_meters >= ?", minDistance)
 	}
 	if maxDistance > 0 {
 		query = query.Where("distance_meters <= ?", maxDistance)
 	}
-	
+
 	err := query.Find(&routes).Error
 	return routes, err
 }
@@ -576,7 +628,7 @@ func (r *routeRepository) GetRoutesByDistanceRange(minDistance, maxDistance int)
 func (r *routeRepository) GetRoutesByDistanceRangePaginated(minDistance, maxDistance int, limit, offset int) ([]models.Route, int64, error) {
 	var routes []models.Route
 	var total int64
-	
+
 	// Build base query for counting
 	countQuery := r.db.Model(&models.Route{})
 	if minDistance > 0 {
@@ -585,13 +637,13 @@ func (r *routeRepository) GetRoutesByDistanceRangePaginated(minDistance, maxDist
 	if maxDistance > 0 {
 		countQuery = countQuery.Where("distance_meters <= ?", maxDistance)
 	}
-	
+
 	// Get total count
 	err := countQuery.Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	// Build query for results
 	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
 	if minDistance > 0 {
@@ -600,14 +652,14 @@ func (r *routeRepository) GetRoutesByDistanceRangePaginated(minDistance, maxDist
 	if maxDistance > 0 {
 		query = query.Where("distance_meters <= ?", maxDistance)
 	}
-	
+
 	err = query.Limit(limit).Offset(offset).Find(&routes).Error
 	return routes, total, err
 }
 
 func (r *routeRepository) GetRouteStatistics() (map[string]interface{}, error) {
 	stats := make(map[string]interface{})
-	
+
 	// Total routes count
 	var totalRoutes int64
 	err := r.db.Model(&models.Route{}).Count(&totalRoutes).Error
@@ -615,7 +667,7 @@ func (r *routeRepository) GetRouteStatistics() (map[string]interface{}, error) {
 		return nil, err
 	}
 	stats["total_routes"] = totalRoutes
-	
+
 	// City routes count
 	var cityRoutes int64
 	err = r.db.Model(&models.Route{}).Where("city_route = ?", true).Count(&cityRoutes).Error
@@ -623,7 +675,7 @@ func (r *routeRepository) GetRouteStatistics() (map[string]interface{}, error) {
 		return nil, err
 	}
 	stats["city_routes"] = cityRoutes
-	
+
 	// Non-city routes count
 	var nonCityRoutes int64
 	err = r.db.Model(&models.Route{}).Where("city_route = ?", false).Count(&nonCityRoutes).Error
@@ -631,7 +683,7 @@ func (r *routeRepository) GetRouteStatistics() (map[string]interface{}, error) {
 		return nil, err
 	}
 	stats["non_city_routes"] = nonCityRoutes
-	
+
 	// Average route price
 	var avgPrice float64
 	err = r.db.Model(&models.Route{}).Select("AVG(route_price)").Scan(&avgPrice).Error
@@ -639,7 +691,7 @@ func (r *routeRepository) GetRouteStatistics() (map[string]interface{}, error) {
 		return nil, err
 	}
 	stats["average_price"] = avgPrice
-	
+
 	// Average distance
 	var avgDistance float64
 	err = r.db.Model(&models.Route{}).Select("AVG(distance_meters)").Scan(&avgDistance).Error
@@ -647,7 +699,7 @@ func (r *routeRepository) GetRouteStatistics() (map[string]interface{}, error) {
 		return nil, err
 	}
 	stats["average_distance_meters"] = avgDistance
-	
+
 	// Price range
 	var priceRange []float64
 	err = r.db.Model(&models.Route{}).Select("MIN(route_price), MAX(route_price)").Scan(&priceRange).Error
@@ -658,7 +710,7 @@ func (r *routeRepository) GetRouteStatistics() (map[string]interface{}, error) {
 		"min": priceRange[0],
 		"max": priceRange[1],
 	}
-	
+
 	// Distance range
 	var distanceRange []int
 	err = r.db.Model(&models.Route{}).Select("MIN(distance_meters), MAX(distance_meters)").Scan(&distanceRange).Error
@@ -669,6 +721,6 @@ func (r *routeRepository) GetRouteStatistics() (map[string]interface{}, error) {
 		"min": distanceRange[0],
 		"max": distanceRange[1],
 	}
-	
+
 	return stats, nil
 }

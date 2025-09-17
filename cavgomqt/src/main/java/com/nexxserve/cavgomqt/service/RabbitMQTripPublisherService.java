@@ -55,6 +55,7 @@ public class RabbitMQTripPublisherService {
             logger.info("  - Source Topic: {}", sourceTopic);
             logger.info("  - Car ID: {}", carId);
             logger.info("  - Trip ID: {}", tripEventMessage.getData() != null ? tripEventMessage.getData().getId() : "unknown");
+            logger.debug("Trip event details: {}", tripEventMessage.getData().getWaypoints().getFirst().getRemainingDistance());
 
             // Add metadata to the message (you could extend TripEventMessage to include this)
             // For now, we'll just log it and publish the original message

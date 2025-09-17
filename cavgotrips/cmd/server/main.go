@@ -94,6 +94,7 @@ func main() {
 			tripID := booking.TripID
 			numTickets := booking.NumberOfTickets
 			paymentStatus := booking.Payment.Status
+			paymentMethod := booking.Payment.PaymentMethod
 
 			// Debug: log the full booking JSON
 			bookingJSON, _ := json.MarshalIndent(booking, "", "  ")
@@ -169,7 +170,46 @@ func main() {
 				}
 				log.Printf("[Booking MQ] Added back %d seats to trip %d", numTickets, tripID)
 			case "COMPLETED":
-				log.Printf("[Booking MQ] Payment completed for booking %s - no trip update needed", booking.ID)
+				// For CARD payment method, reduce seats as this might be a direct payment
+				if paymentMethod == "CARD" {
+					trip, err := tripService.GetTripByID(tripID)
+					if err != nil {
+						log.Printf("[Booking MQ] Trip not found: %v", err)
+						return
+					}
+					if trip.Seats < numTickets {
+						log.Printf("[Booking MQ] Not enough seats for trip %d: have %d, need %d", tripID, trip.Seats, numTickets)
+						return
+					}
+					err = updateTripSeats(tripService, tripID, trip.Seats-numTickets)
+					if err != nil {
+						log.Printf("[Booking MQ] Failed to update trip seats: %v", err)
+						return
+					}
+					// Publish trip update since seats were reduced
+					updatedTrip, err := tripService.GetTripByID(tripID)
+					if err == nil {
+						if rabbitMQService != nil {
+							_ = rabbitMQService.PublishTripEvent("updated", *updatedTrip)
+							log.Printf("[Booking MQ] Published trip update after reducing seats for CARD payment on trip %d", tripID)
+						}
+						// Broadcast SSE event for seat reduction
+						if sseService != nil {
+							log.Printf("[Booking MQ] 🎯 Broadcasting SSE 'seats_reduced' event for CARD payment on trip %d (seats: %d -> %d)",
+								tripID, trip.Seats, updatedTrip.Seats)
+							sseService.BroadcastTripEventToSessions(models.TripEventMessage{
+								Event: "seats_reduced",
+								Data:  *updatedTrip,
+							})
+							log.Printf("[Booking MQ] ✅ Successfully queued SSE 'seats_reduced' event for CARD payment on trip %d", tripID)
+						} else {
+							log.Printf("[Booking MQ] ⚠️  SSE service not available - cannot broadcast seat reduction event")
+						}
+					}
+					log.Printf("[Booking MQ] Reduced seats for trip %d by %d (CARD payment completed)", tripID, numTickets)
+				} else {
+					log.Printf("[Booking MQ] Payment completed for booking %s (payment method: %s) - no trip update needed", booking.ID, paymentMethod)
+				}
 			default:
 				log.Printf("[Booking MQ] Unknown payment status: %s", paymentStatus)
 			}
