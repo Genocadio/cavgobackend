@@ -73,13 +73,13 @@ func (h *RouteHandler) GetRoute(w http.ResponseWriter, r *http.Request) {
 func (h *RouteHandler) GetRoutes(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
 	queryParams := r.URL.Query()
-	
+
 	// Parse pagination parameters with defaults
 	page, _ := strconv.Atoi(queryParams.Get("page"))
 	if page <= 0 {
 		page = 1
 	}
-	
+
 	limit, _ := strconv.Atoi(queryParams.Get("limit"))
 	if limit <= 0 {
 		limit = 20 // Default limit
@@ -87,11 +87,43 @@ func (h *RouteHandler) GetRoutes(w http.ResponseWriter, r *http.Request) {
 	if limit > 100 {
 		limit = 100 // Maximum limit
 	}
-	
+
 	// Calculate offset
 	offset := (page - 1) * limit
-	
-	routes, total, err := h.service.GetAllRoutesPaginated(limit, offset)
+
+	// Parse filter parameters
+	origin := queryParams.Get("origin")
+	destination := queryParams.Get("destination")
+	cityRouteStr := queryParams.Get("city_route")
+	originProvince := queryParams.Get("origin_province")
+	destinationProvince := queryParams.Get("destination_province")
+
+	// Parse city_route parameter
+	var cityRoute *bool
+	if cityRouteStr != "" {
+		cityRouteBool, err := strconv.ParseBool(cityRouteStr)
+		if err != nil {
+			utils.ErrorResponse(w, "Invalid city_route parameter; must be 'true' or 'false'", http.StatusBadRequest)
+			return
+		}
+		cityRoute = &cityRouteBool
+	}
+
+	var routes []models.Route
+	var total int64
+	var err error
+
+	// Determine which service method to call based on provided filters
+	hasFilters := origin != "" || destination != "" || cityRoute != nil || originProvince != "" || destinationProvince != ""
+
+	if hasFilters {
+		// Use search and filter with pagination
+		routes, total, err = h.service.SearchAndFilterPaginated(origin, destination, cityRoute, originProvince, destinationProvince, limit, offset)
+	} else {
+		// Use basic pagination
+		routes, total, err = h.service.GetAllRoutesPaginated(limit, offset)
+	}
+
 	if err != nil {
 		utils.ErrorResponse(w, err.Error(), http.StatusInternalServerError)
 		return

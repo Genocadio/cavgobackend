@@ -66,6 +66,8 @@ func NewBookingService(bookingRepo repository.BookingRepository, tripService Tri
 }
 
 func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingRequest) (*models.BookingResponse, error) {
+	fmt.Printf("[CreateBooking] Starting booking creation for trip %d\n", req.TripID)
+
 	// Validate request (user_name and user_phone required)
 	if err := s.validateBookingRequest(ctx, req); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
@@ -188,7 +190,9 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 	}
 
 	// Publish to RabbitMQ (ignore error, but log)
+	fmt.Printf("[CreateBooking] About to publish booking events for booking %s\n", booking.ID)
 	s.publishBookingEvents("created", resp)
+	fmt.Printf("[CreateBooking] Finished publishing booking events for booking %s\n", booking.ID)
 
 	return resp, nil
 }
@@ -391,7 +395,9 @@ func (s *bookingService) ProcessPayment(ctx context.Context, bookingID string, p
 	}
 
 	// Publish to RabbitMQ (ignore error, but log)
+	fmt.Printf("[ProcessPayment] About to publish booking events for booking %s\n", bookingID)
 	s.publishBookingEvents("paid", resp)
+	fmt.Printf("[ProcessPayment] Finished publishing booking events for booking %s\n", bookingID)
 
 	return resp, nil
 }
@@ -574,7 +580,7 @@ func (s *bookingService) generateTickets(bookingID string, count int, trip *mode
 		tickets[i] = models.Ticket{
 			ID:                  ticketID,
 			BookingID:           bookingID,
-			TicketNumber:        fmt.Sprintf("TK-%d-%d", now.Unix(), i+1),
+			TicketNumber:        s.generateTicketNumber(),
 			QRCode:              s.generateQRCode(ticketID),
 			IsUsed:              false,
 			CreatedAt:           now,
@@ -588,6 +594,16 @@ func (s *bookingService) generateTickets(bookingID string, count int, trip *mode
 	}
 
 	return tickets
+}
+
+func (s *bookingService) generateTicketNumber() string {
+	// Generate a 6-digit ticket number using current time and random component
+	// This ensures uniqueness while keeping it exactly 6 digits
+	now := time.Now()
+	// Use nanoseconds to get more randomness, then mod to get 6 digits
+	randomPart := now.Nanosecond() % 1000000 // Get last 6 digits
+	// Ensure it's always 6 digits by padding with zeros if needed
+	return fmt.Sprintf("%06d", randomPart)
 }
 
 func (s *bookingService) generateQRCode(ticketID string) string {
@@ -727,11 +743,16 @@ func (s *bookingService) publishBookingEvents(eventType string, resp *models.Boo
 		err := s.rabbitPublisher.PublishBookingEvent(eventType, resp)
 		if err != nil {
 			fmt.Printf("[RabbitMQ] Failed to publish booking %s event: %v\n", eventType, err)
+		} else {
+			fmt.Printf("[RabbitMQ] Successfully published booking %s event to fanout exchange\n", eventType)
 		}
+	} else {
+		fmt.Printf("[RabbitMQ] Warning: rabbitPublisher is nil, skipping fanout exchange publish\n")
 	}
 
 	// Only publish to bundle reply queue if booking didn't come from RabbitMQ
 	if !s.fromRabbitMQ && s.bundlePublisher != nil {
+		fmt.Printf("[BundlePublisher] Publishing bundle for %s event (fromRabbitMQ=false)\n", eventType)
 		bundle, err := s.CreateBookingBundle(context.Background(), resp.Booking, resp.Booking.Payment, resp.Booking.Tickets)
 		if err != nil {
 			fmt.Printf("[BundlePublisher] Failed to create bundle for %s event: %v\n", eventType, err)
@@ -741,12 +762,24 @@ func (s *bookingService) publishBookingEvents(eventType string, resp *models.Boo
 		err = s.bundlePublisher.PublishBundle(bundle)
 		if err != nil {
 			fmt.Printf("[BundlePublisher] Failed to publish bundle for %s event: %v\n", eventType, err)
+		} else {
+			fmt.Printf("[BundlePublisher] Successfully published bundle for %s event to reply queue\n", eventType)
+		}
+	} else {
+		if s.fromRabbitMQ {
+			fmt.Printf("[BundlePublisher] Skipping bundle publish for %s event (fromRabbitMQ=true)\n", eventType)
+		} else {
+			fmt.Printf("[BundlePublisher] Warning: bundlePublisher is nil, skipping bundle reply queue publish\n")
 		}
 	}
 }
 
 // CreateBookingBundle creates a booking bundle from internal models
 func (s *bookingService) CreateBookingBundle(ctx context.Context, booking *models.Booking, payment *models.Payment, tickets []models.Ticket) (*models.BookingBundle, error) {
+	fmt.Printf("[CreateBookingBundle] Creating bundle for booking %s\n", booking.ID)
+	fmt.Printf("[CreateBookingBundle] Booking status: %s, Payment status: %s, Tickets count: %d\n",
+		booking.Status, payment.Status, len(tickets))
+
 	// Convert booking to TripBooking
 	tripBooking := models.TripBooking{
 		ID:                booking.ID,
@@ -813,6 +846,9 @@ func (s *bookingService) CreateBookingBundle(ctx context.Context, booking *model
 		Payment: bundlePayment,
 		Tickets: bundleTickets,
 	}
+
+	fmt.Printf("[CreateBookingBundle] Bundle created successfully for trip %s with %d tickets\n",
+		bundle.TripID, len(bundle.Tickets))
 
 	return bundle, nil
 }

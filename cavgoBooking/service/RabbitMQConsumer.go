@@ -50,7 +50,7 @@ func NewRabbitMQConsumer(amqpURL, queueName, replyQueueName string, bundlePublis
 		false, // exclusive
 		false, // no-wait
 		amqp091.Table{
-			"x-dead-letter-exchange":     "",
+			"x-dead-letter-exchange":    "",
 			"x-dead-letter-routing-key": queueName + ".dlq",
 		}, // arguments to match Spring config
 	)
@@ -68,7 +68,7 @@ func NewRabbitMQConsumer(amqpURL, queueName, replyQueueName string, bundlePublis
 		false, // exclusive
 		false, // no-wait
 		amqp091.Table{
-			"x-dead-letter-exchange":     "",
+			"x-dead-letter-exchange":    "",
 			"x-dead-letter-routing-key": replyQueueName + ".dlq",
 		}, // arguments to match Spring config
 	)
@@ -317,14 +317,20 @@ func (c *RabbitMQConsumer) publishBundleEvent(eventType string, resp *models.Boo
 
 // PublishBundle publishes a booking bundle to the reply queue
 func (p *BundlePublisher) PublishBundle(bundle *models.BookingBundle) error {
+	fmt.Printf("[BundlePublisher] Starting to publish bundle for trip %s\n", bundle.TripID)
+	fmt.Printf("[BundlePublisher] Bundle details - Booking ID: %s, Payment ID: %s, Tickets: %d\n",
+		bundle.Booking.ID, bundle.Payment.ID, len(bundle.Tickets))
+
 	body, err := json.Marshal(bundle)
 	if err != nil {
+		fmt.Printf("[BundlePublisher] ERROR: Failed to marshal bundle: %v\n", err)
 		return fmt.Errorf("failed to marshal bundle: %w", err)
 	}
 
-	log.Printf("[BundlePublisher] Publishing bundle for trip %s", bundle.TripID)
+	fmt.Printf("[BundlePublisher] Bundle marshaled successfully, size: %d bytes\n", len(body))
+	fmt.Printf("[BundlePublisher] Publishing to queue: %s\n", p.queueName)
 
-	return p.channel.Publish(
+	err = p.channel.Publish(
 		"",          // exchange
 		p.queueName, // routing key
 		false,       // mandatory
@@ -334,6 +340,14 @@ func (p *BundlePublisher) PublishBundle(bundle *models.BookingBundle) error {
 			Body:        body,
 		},
 	)
+
+	if err != nil {
+		fmt.Printf("[BundlePublisher] ERROR: Failed to publish bundle: %v\n", err)
+		return err
+	}
+
+	fmt.Printf("[BundlePublisher] SUCCESS: Bundle published successfully for trip %s\n", bundle.TripID)
+	return nil
 }
 
 // Close closes the consumer connections

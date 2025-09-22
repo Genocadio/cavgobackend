@@ -396,6 +396,14 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 		}
 	}
 
+	// Automatically update waypoint progress for IN_PROGRESS trips
+	if trip.Status == "IN_PROGRESS" {
+		if err := s.updateWaypointProgress(id); err != nil {
+			log.Printf("[UpdateTripProgress] Failed to update waypoint progress: %v", err)
+			// Don't fail the entire update, just log the error
+		}
+	}
+
 	updatedTrip, err := s.tripRepo.GetByIDWithRelations(id)
 	if err != nil {
 		return nil, err
@@ -438,6 +446,12 @@ func (s *TripService) StartTrip(id int64) (*models.Trip, error) {
 
 	if err := s.tripRepo.UpdateProgress(id, updates); err != nil {
 		return nil, err
+	}
+
+	// Automatically update waypoint progress when trip starts
+	if err := s.updateWaypointProgress(id); err != nil {
+		log.Printf("[StartTrip] Failed to update waypoint progress: %v", err)
+		// Don't fail the entire operation, just log the error
 	}
 
 	startedTrip, err := s.tripRepo.GetByIDWithRelations(id)
@@ -649,25 +663,52 @@ func (s *TripService) DeleteTrip(id int64) error {
 		return errors.New("trip not found")
 	}
 
-	// Only allow deletion of SCHEDULED trips (not IN_PROGRESS or COMPLETED)
-	if trip.Status != "SCHEDULED" {
-		return errors.New("can only delete scheduled trips")
-	}
+	// Handle different trip statuses
+	if trip.Status == "IN_PROGRESS" {
+		// Cancel the trip instead of deleting it
+		updates := map[string]interface{}{
+			"status":     "CANCELLED",
+			"updated_at": time.Now(),
+		}
 
-	// Delete the trip (this will also delete associated waypoints)
-	if err := s.tripRepo.Delete(id); err != nil {
-		return err
-	}
+		if err := s.tripRepo.UpdateProgress(id, updates); err != nil {
+			return err
+		}
 
-	// Broadcast SSE event for trip deletion
-	if s.sseService != nil {
-		s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{
-			Event: "deleted",
-			Data:  *trip,
-		})
-	}
+		// Get the updated trip for SSE broadcast
+		updatedTrip, err := s.tripRepo.GetByIDWithRelations(id)
+		if err != nil {
+			return err
+		}
 
-	return nil
+		// Broadcast SSE event for trip cancellation
+		if s.sseService != nil {
+			s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{
+				Event: "cancelled",
+				Data:  *updatedTrip,
+			})
+		}
+
+		return nil
+	} else if trip.Status == "CANCELLED" || trip.Status == "SCHEDULED" {
+		// Allow deletion of CANCELLED and SCHEDULED trips
+		if err := s.tripRepo.Delete(id); err != nil {
+			return err
+		}
+
+		// Broadcast SSE event for trip deletion
+		if s.sseService != nil {
+			s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{
+				Event: "deleted",
+				Data:  *trip,
+			})
+		}
+
+		return nil
+	} else {
+		// Cannot delete COMPLETED or NOT_COMPLETED trips
+		return errors.New("can only delete scheduled, cancelled, or in-progress trips")
+	}
 }
 
 // UpdateTripFromMQTT updates a trip with data from MQTT service without publishing back to RabbitMQ
@@ -743,33 +784,33 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 		log.Printf("[UpdateTripFromMQTT] Processing %d waypoint updates for trip %d", len(mqttTrip.Waypoints), mqttTrip.ID)
 		for _, waypointUpdate := range mqttTrip.Waypoints {
 			waypointUpdates := make(map[string]interface{})
-			
+
 			// Update remaining time if provided
 			if waypointUpdate.RemainingTime != nil {
 				waypointUpdates["remaining_time"] = *waypointUpdate.RemainingTime
 				log.Printf("[UpdateTripFromMQTT] Updating waypoint %d remaining_time: %d", waypointUpdate.ID, *waypointUpdate.RemainingTime)
 			}
-			
+
 			// Update remaining distance if provided
 			if waypointUpdate.RemainingDistance != nil {
 				waypointUpdates["remaining_distance"] = *waypointUpdate.RemainingDistance
 				log.Printf("[UpdateTripFromMQTT] Updating waypoint %d remaining_distance: %f", waypointUpdate.ID, *waypointUpdate.RemainingDistance)
 			}
-			
+
 			// Update is_next flag
 			waypointUpdates["is_next"] = waypointUpdate.IsNext
 			log.Printf("[UpdateTripFromMQTT] Updating waypoint %d is_next: %t", waypointUpdate.ID, waypointUpdate.IsNext)
-			
+
 			// Update is_passed flag if provided
 			waypointUpdates["is_passed"] = waypointUpdate.IsPassed
 			log.Printf("[UpdateTripFromMQTT] Updating waypoint %d is_passed: %t", waypointUpdate.ID, waypointUpdate.IsPassed)
-			
+
 			// Update passed_timestamp if waypoint was marked as passed
 			if waypointUpdate.IsPassed && waypointUpdate.PassedTimestamp != nil {
 				waypointUpdates["passed_timestamp"] = *waypointUpdate.PassedTimestamp
 				log.Printf("[UpdateTripFromMQTT] Updating waypoint %d passed_timestamp: %d", waypointUpdate.ID, *waypointUpdate.PassedTimestamp)
 			}
-			
+
 			// Always update the updated_at timestamp for waypoints
 			waypointUpdates["updated_at"] = time.Now()
 
@@ -781,6 +822,14 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 		}
 	} else {
 		log.Printf("[UpdateTripFromMQTT] No waypoint updates provided for trip %d", mqttTrip.ID)
+	}
+
+	// Automatically update waypoint progress for IN_PROGRESS trips
+	if mqttTrip.Status == "IN_PROGRESS" {
+		if err := s.updateWaypointProgress(mqttTrip.ID); err != nil {
+			log.Printf("[UpdateTripFromMQTT] Failed to update waypoint progress: %v", err)
+			// Don't fail the entire update, just log the error
+		}
 	}
 
 	// Get the updated trip with relations
@@ -798,6 +847,51 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 	}
 
 	return updatedTrip, nil
+}
+
+// updateWaypointProgress automatically manages waypoint progress based on order
+// Marks the first non-passed waypoint as is_next and clears is_next for others
+func (s *TripService) updateWaypointProgress(tripID int64) error {
+	// Get trip with waypoints
+	trip, err := s.tripRepo.GetByIDWithRelations(tripID)
+	if err != nil {
+		return fmt.Errorf("failed to get trip with waypoints: %w", err)
+	}
+
+	if len(trip.Waypoints) == 0 {
+		return nil // No waypoints to update
+	}
+
+	// Sort waypoints by order
+	waypoints := trip.Waypoints
+	sort.Slice(waypoints, func(i, j int) bool {
+		return waypoints[i].Order < waypoints[j].Order
+	})
+
+	// Find the first non-passed waypoint
+	nextWaypointID := int64(0)
+	for _, wp := range waypoints {
+		if !wp.IsPassed {
+			nextWaypointID = wp.ID
+			break
+		}
+	}
+
+	// Update all waypoints: clear is_next for all, then set is_next for the next one
+	for _, wp := range waypoints {
+		updates := map[string]interface{}{
+			"is_next":    wp.ID == nextWaypointID,
+			"updated_at": time.Now(),
+		}
+
+		if err := s.tripRepo.UpdateWaypointProgress(wp.ID, updates); err != nil {
+			log.Printf("[updateWaypointProgress] Failed to update waypoint %d: %v", wp.ID, err)
+			return fmt.Errorf("failed to update waypoint %d: %w", wp.ID, err)
+		}
+	}
+
+	log.Printf("[updateWaypointProgress] Updated waypoint progress for trip %d, next waypoint: %d", tripID, nextWaypointID)
+	return nil
 }
 
 // adjustRouteForReversed swaps the route origin and destination (and their IDs)

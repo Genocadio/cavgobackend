@@ -29,7 +29,7 @@ type Trip struct {
 	RouteID                        int64     `json:"route_id"`
 	VehicleID                      int64     `json:"vehicle_id" gorm:"not null"`
 	Vehicle                        Vehicle   `json:"vehicle" gorm:"type:jsonb;serializer:json"`
-	Status                         string    `json:"status" gorm:"not null"` // SCHEDULED, IN_PROGRESS, COMPLETED, NOT_COMPLETED
+	Status                         string    `json:"status" gorm:"not null"` // SCHEDULED, IN_PROGRESS, COMPLETED, NOT_COMPLETED, CANCELLED
 	DepartureTime                  int64     `json:"departure_time" gorm:"not null"`
 	CompletionTime                 *int64    `json:"completion_time"`
 	ConnectionMode                 string    `json:"connection_mode" gorm:"not null"` // ONLINE, OFFLINE, HYBRID
@@ -181,7 +181,7 @@ func (t *Trip) Validate() error {
 		return NewValidationError("departure time must be a valid timestamp")
 	}
 
-	validStatuses := []string{"SCHEDULED", "IN_PROGRESS", "COMPLETED", "NOT_COMPLETED"}
+	validStatuses := []string{"SCHEDULED", "IN_PROGRESS", "COMPLETED", "NOT_COMPLETED", "CANCELLED"}
 	statusValid := false
 	for _, status := range validStatuses {
 		if t.Status == status {

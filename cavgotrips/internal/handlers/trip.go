@@ -438,7 +438,7 @@ func (h *TripHandler) DeleteTrip(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "trip not found" {
 			utils.ErrorResponse(w, "Trip not found", http.StatusNotFound)
 			return
-		} else if err.Error() == "can only delete scheduled trips" {
+		} else if err.Error() == "can only delete scheduled, cancelled, or in-progress trips" {
 			utils.ErrorResponse(w, err.Error(), http.StatusBadRequest)
 			return
 		} else {
@@ -447,5 +447,5 @@ func (h *TripHandler) DeleteTrip(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	utils.JSONResponse(w, map[string]string{"message": "Trip deleted successfully"}, http.StatusOK)
+	utils.JSONResponse(w, map[string]string{"message": "Trip processed successfully"}, http.StatusOK)
 }

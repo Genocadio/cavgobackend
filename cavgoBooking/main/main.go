@@ -101,6 +101,7 @@ func main() {
 			log.Printf("Warning: Failed to initialize Bundle publisher: %v", err)
 		} else {
 			bundlePublisher = bundlePub
+			log.Printf("[BundlePublisher] Successfully initialized with reply queue: %s", bundleReplyQueueName)
 		}
 	}
 
@@ -109,6 +110,13 @@ func main() {
 	// Remove MockUserService and update bookingService initialization
 	// userService := &MockUserService{}
 	bookingService := service.NewBookingService(bookingRepo, tripService, rabbitPublisher, bundlePublisher)
+
+	// Log booking service initialization
+	if bundlePublisher != nil {
+		log.Printf("[BookingService] Initialized with bundlePublisher (bundle reply queue enabled)")
+	} else {
+		log.Printf("[BookingService] WARNING: Initialized WITHOUT bundlePublisher (bundle reply queue disabled)")
+	}
 
 	// Start background booking monitor
 	service.StartBookingMonitor(bookingRepo, rabbitPublisher)

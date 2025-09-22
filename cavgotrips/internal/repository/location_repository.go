@@ -54,7 +54,7 @@ func (r *locationRepository) Search(searchTerm string) ([]models.Location, error
 	}
 
 	// Search by custom name or google place name (case-insensitive)
-	// Complex ordering: field priority (custom_name first) + match position priority
+	// Custom name matches ALWAYS come first, then Google place name matches
 	searchPattern := "%" + searchTerm + "%"
 	lowerSearchTerm := strings.ToLower(searchTerm)
 	startPattern := lowerSearchTerm + "%"
@@ -62,22 +62,25 @@ func (r *locationRepository) Search(searchTerm string) ([]models.Location, error
 
 	orderClause := fmt.Sprintf(`
 		CASE 
-			-- Custom name matches (priority 0-2)
+			-- Custom name matches (priority 0-2) - ALWAYS FIRST
 			WHEN LOWER(custom_name) LIKE '%s' THEN 0
 			WHEN LOWER(custom_name) LIKE '%s' OR LOWER(custom_name) LIKE '%s' THEN 1
 			WHEN LOWER(custom_name) LIKE '%s' THEN 2
-			-- Google place name matches (priority 10-12)
-			WHEN LOWER(google_place_name) LIKE '%s' THEN 10
-			WHEN LOWER(google_place_name) LIKE '%s' OR LOWER(google_place_name) LIKE '%s' THEN 11
-			WHEN LOWER(google_place_name) LIKE '%s' THEN 12
+			-- Google place name matches (priority 10-12) - ONLY if no custom name match
+			WHEN LOWER(google_place_name) LIKE '%s' AND (custom_name IS NULL OR LOWER(custom_name) NOT LIKE '%s') THEN 10
+			WHEN LOWER(google_place_name) LIKE '%s' AND (custom_name IS NULL OR LOWER(custom_name) NOT LIKE '%s') THEN 11
+			WHEN LOWER(google_place_name) LIKE '%s' AND (custom_name IS NULL OR LOWER(custom_name) NOT LIKE '%s') THEN 12
 			ELSE 99
 		END, custom_name, google_place_name`,
 		startPattern,                   // custom_name starts with
 		wordStartPattern, startPattern, // custom_name word starts with (both patterns)
 		strings.ToLower(searchPattern), // custom_name contains
-		startPattern,                   // google_place_name starts with
-		wordStartPattern, startPattern, // google_place_name word starts with (both patterns)
-		strings.ToLower(searchPattern)) // google_place_name contains
+		startPattern,                   // google_place_name starts with (only if no custom name match)
+		strings.ToLower(searchPattern), // custom_name NOT LIKE for google place name starts with
+		wordStartPattern,               // google_place_name word starts with (only if no custom name match)
+		strings.ToLower(searchPattern), // custom_name NOT LIKE for google place name word starts with
+		strings.ToLower(searchPattern), // google_place_name contains (only if no custom name match)
+		strings.ToLower(searchPattern)) // custom_name NOT LIKE for google place name contains
 
 	err := r.db.Where("LOWER(custom_name) LIKE LOWER(?) OR LOWER(google_place_name) LIKE LOWER(?)",
 		searchPattern, searchPattern).
@@ -111,7 +114,7 @@ func (r *locationRepository) SearchPaginated(searchTerm string, limit, offset in
 	}
 
 	// Get paginated results for text search
-	// Complex ordering: field priority (custom_name first) + match position priority
+	// Custom name matches ALWAYS come first, then Google place name matches
 	searchPattern := "%" + searchTerm + "%"
 	lowerSearchTerm := strings.ToLower(searchTerm)
 	startPattern := lowerSearchTerm + "%"
@@ -119,22 +122,25 @@ func (r *locationRepository) SearchPaginated(searchTerm string, limit, offset in
 
 	orderClause := fmt.Sprintf(`
 		CASE 
-			-- Custom name matches (priority 0-2)
+			-- Custom name matches (priority 0-2) - ALWAYS FIRST
 			WHEN LOWER(custom_name) LIKE '%s' THEN 0
 			WHEN LOWER(custom_name) LIKE '%s' OR LOWER(custom_name) LIKE '%s' THEN 1
 			WHEN LOWER(custom_name) LIKE '%s' THEN 2
-			-- Google place name matches (priority 10-12)
-			WHEN LOWER(google_place_name) LIKE '%s' THEN 10
-			WHEN LOWER(google_place_name) LIKE '%s' OR LOWER(google_place_name) LIKE '%s' THEN 11
-			WHEN LOWER(google_place_name) LIKE '%s' THEN 12
+			-- Google place name matches (priority 10-12) - ONLY if no custom name match
+			WHEN LOWER(google_place_name) LIKE '%s' AND (custom_name IS NULL OR LOWER(custom_name) NOT LIKE '%s') THEN 10
+			WHEN LOWER(google_place_name) LIKE '%s' AND (custom_name IS NULL OR LOWER(custom_name) NOT LIKE '%s') THEN 11
+			WHEN LOWER(google_place_name) LIKE '%s' AND (custom_name IS NULL OR LOWER(custom_name) NOT LIKE '%s') THEN 12
 			ELSE 99
 		END, custom_name, google_place_name`,
 		startPattern,                   // custom_name starts with
 		wordStartPattern, startPattern, // custom_name word starts with (both patterns)
 		strings.ToLower(searchPattern), // custom_name contains
-		startPattern,                   // google_place_name starts with
-		wordStartPattern, startPattern, // google_place_name word starts with (both patterns)
-		strings.ToLower(searchPattern)) // google_place_name contains
+		startPattern,                   // google_place_name starts with (only if no custom name match)
+		strings.ToLower(searchPattern), // custom_name NOT LIKE for google place name starts with
+		wordStartPattern,               // google_place_name word starts with (only if no custom name match)
+		strings.ToLower(searchPattern), // custom_name NOT LIKE for google place name word starts with
+		strings.ToLower(searchPattern), // google_place_name contains (only if no custom name match)
+		strings.ToLower(searchPattern)) // custom_name NOT LIKE for google place name contains
 
 	err = r.db.Where("LOWER(custom_name) LIKE LOWER(?) OR LOWER(google_place_name) LIKE LOWER(?)",
 		searchPattern, searchPattern).
