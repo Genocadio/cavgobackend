@@ -74,6 +74,7 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		Capacity     int    `json:"capacity"`
 		LicensePlate string `json:"licensePlate"`
 		Driver       *struct {
+			ID        int64  `json:"id"`
 			FirstName string `json:"firstName"`
 			LastName  string `json:"lastName"`
 			Phone     string `json:"phone"`
@@ -100,9 +101,11 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		}
 	}
 
+	driverID := int64(0)
 	driverName := ""
 	driverPhone := ""
 	if vehicleResp.Driver != nil {
+		driverID = vehicleResp.Driver.ID
 		driverName = fmt.Sprintf("%s %s", vehicleResp.Driver.FirstName, vehicleResp.Driver.LastName)
 		driverPhone = vehicleResp.Driver.Phone
 	}
@@ -114,6 +117,7 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		Capacity:     vehicleResp.Capacity,
 		LicensePlate: vehicleResp.LicensePlate,
 		Driver: models.DriverSnapshot{
+			ID:    driverID,
 			Name:  driverName,
 			Phone: driverPhone,
 		},
@@ -612,6 +616,18 @@ func (s *TripService) GetTripsByFiltersPaginated(origin, destination, company st
 
 func (s *TripService) GetTripsByVehicleID(vehicleID int64) ([]models.Trip, error) {
 	trips, err := s.tripRepo.GetTripsByVehicleID(vehicleID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range trips {
+		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
+	}
+	return trips, nil
+}
+
+func (s *TripService) GetTripsByDriverID(driverID int64) ([]models.Trip, error) {
+	trips, err := s.tripRepo.GetTripsByDriverID(driverID)
 	if err != nil {
 		return nil, err
 	}

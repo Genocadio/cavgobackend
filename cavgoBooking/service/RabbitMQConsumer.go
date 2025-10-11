@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"strings"
 
 	"cavgoBooking/models"
 
@@ -27,6 +28,11 @@ type BundlePublisher struct {
 	conn      *amqp091.Connection
 	channel   *amqp091.Channel
 	queueName string
+}
+
+// QueueName returns the reply queue name for logging/diagnostics
+func (p *BundlePublisher) QueueName() string {
+    return p.queueName
 }
 
 // NewRabbitMQConsumer creates a new RabbitMQ consumer
@@ -131,8 +137,13 @@ func (c *RabbitMQConsumer) StartConsuming(ctx context.Context) error {
 			case msg := <-msgs:
 				if err := c.processMessage(ctx, msg); err != nil {
 					log.Printf("[RabbitMQConsumer] Error processing message: %v", err)
-					// Reject and requeue the message
-					msg.Nack(false, true)
+					if isDuplicateKeyError(err) {
+						log.Printf("[RabbitMQConsumer] Duplicate detected; acknowledging to stop requeue loop")
+						msg.Ack(false)
+					} else {
+						// Reject and requeue the message for transient errors
+						msg.Nack(false, true)
+					}
 				} else {
 					// Acknowledge the message
 					msg.Ack(false)
@@ -276,26 +287,45 @@ func (c *RabbitMQConsumer) saveBundleData(ctx context.Context, booking *models.B
 
 	// Set flag to indicate this booking came from RabbitMQ
 	c.bookingService.(*bookingService).SetFromRabbitMQ(true)
+	defer c.bookingService.(*bookingService).SetFromRabbitMQ(false)
 
 	// Save booking
 	if err := repo.CreateBooking(ctx, booking); err != nil {
-		return fmt.Errorf("failed to save booking: %w", err)
+		if isDuplicateKeyError(err) {
+			log.Printf("[RabbitMQConsumer] Booking already exists, continuing: bookingId=%s", booking.ID)
+		} else {
+			return fmt.Errorf("failed to save booking: %w", err)
+		}
 	}
 
 	// Save payment
 	if err := repo.CreatePayment(ctx, payment); err != nil {
-		return fmt.Errorf("failed to save payment: %w", err)
+		if isDuplicateKeyError(err) {
+			log.Printf("[RabbitMQConsumer] Payment already exists, continuing: paymentId=%s", payment.ID)
+		} else {
+			return fmt.Errorf("failed to save payment: %w", err)
+		}
 	}
 
 	// Save tickets
 	if err := repo.CreateTickets(ctx, tickets); err != nil {
-		return fmt.Errorf("failed to save tickets: %w", err)
+		if isDuplicateKeyError(err) {
+			log.Printf("[RabbitMQConsumer] One or more tickets already exist, continuing: bookingId=%s", booking.ID)
+		} else {
+			return fmt.Errorf("failed to save tickets: %w", err)
+		}
 	}
 
-	// Reset flag after processing
-	c.bookingService.(*bookingService).SetFromRabbitMQ(false)
-
 	return nil
+}
+
+// isDuplicateKeyError detects Postgres duplicate key errors
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "duplicate key value violates unique constraint") || strings.Contains(strings.ToLower(msg), "duplicate key")
 }
 
 // publishBundleEvent publishes booking events to fanout exchange only (not reply queue)
@@ -317,9 +347,8 @@ func (c *RabbitMQConsumer) publishBundleEvent(eventType string, resp *models.Boo
 
 // PublishBundle publishes a booking bundle to the reply queue
 func (p *BundlePublisher) PublishBundle(bundle *models.BookingBundle) error {
-	fmt.Printf("[BundlePublisher] Starting to publish bundle for trip %s\n", bundle.TripID)
-	fmt.Printf("[BundlePublisher] Bundle details - Booking ID: %s, Payment ID: %s, Tickets: %d\n",
-		bundle.Booking.ID, bundle.Payment.ID, len(bundle.Tickets))
+    fmt.Printf("[BundlePublisher] PUBLISHING reply: queue=%s tripId=%s bookingId=%s paymentId=%s tickets=%d\n",
+        p.queueName, bundle.TripID, bundle.Booking.ID, bundle.Payment.ID, len(bundle.Tickets))
 
 	body, err := json.Marshal(bundle)
 	if err != nil {
@@ -327,8 +356,7 @@ func (p *BundlePublisher) PublishBundle(bundle *models.BookingBundle) error {
 		return fmt.Errorf("failed to marshal bundle: %w", err)
 	}
 
-	fmt.Printf("[BundlePublisher] Bundle marshaled successfully, size: %d bytes\n", len(body))
-	fmt.Printf("[BundlePublisher] Publishing to queue: %s\n", p.queueName)
+    fmt.Printf("[BundlePublisher] Payload bytes=%d\n", len(body))
 
 	err = p.channel.Publish(
 		"",          // exchange
@@ -341,12 +369,12 @@ func (p *BundlePublisher) PublishBundle(bundle *models.BookingBundle) error {
 		},
 	)
 
-	if err != nil {
-		fmt.Printf("[BundlePublisher] ERROR: Failed to publish bundle: %v\n", err)
-		return err
-	}
+    if err != nil {
+        fmt.Printf("[BundlePublisher] FAILED reply publish: queue=%s bookingId=%s err=%v\n", p.queueName, bundle.Booking.ID, err)
+        return err
+    }
 
-	fmt.Printf("[BundlePublisher] SUCCESS: Bundle published successfully for trip %s\n", bundle.TripID)
+    fmt.Printf("[BundlePublisher] PUBLISHED reply: queue=%s bookingId=%s\n", p.queueName, bundle.Booking.ID)
 	return nil
 }
 

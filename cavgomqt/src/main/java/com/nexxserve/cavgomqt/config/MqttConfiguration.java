@@ -8,8 +8,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.ApplicationListener;
 import org.springframework.integration.annotation.ServiceActivator;
 import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.core.MessageProducer;
@@ -20,9 +23,14 @@ import org.springframework.integration.mqtt.outbound.MqttPahoMessageHandler;
 import org.springframework.integration.mqtt.support.DefaultPahoMessageConverter;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
+import org.springframework.integration.mqtt.event.MqttIntegrationEvent;
+import org.springframework.integration.mqtt.event.MqttSubscribedEvent;
+import org.springframework.integration.mqtt.event.MqttConnectionFailedEvent;
 
 @Configuration
 public class MqttConfiguration {
+
+    private static final Logger logger = LoggerFactory.getLogger(MqttConfiguration.class);
 
     @Autowired
     private VehicleRegistryService vehicleRegistryService;
@@ -75,16 +83,29 @@ public class MqttConfiguration {
             options.setPassword(password.toCharArray());
         }
 
-        // Last Will and Testament for backend service
-        String lwillTopic = "backend/status";
-        String lwillMessage =
-            "{\"status\":\"OFFLINE\",\"timestamp\":" +
-            System.currentTimeMillis() +
-            "}";
-        options.setWill(lwillTopic, lwillMessage.getBytes(), 1, true);
+        // Do not configure Last Will to avoid offline messages on graceful or active sessions
 
         factory.setConnectionOptions(options);
         return factory;
+    }
+
+    @Bean
+    public ApplicationListener<MqttIntegrationEvent> mqttEventLogger() {
+        return event -> {
+            if (event instanceof MqttConnectionFailedEvent) {
+                MqttConnectionFailedEvent e = (MqttConnectionFailedEvent) event;
+                Throwable cause = e.getCause();
+                logger.warn("MQTT connection failed: {}", cause != null ? cause.getMessage() : "unknown");
+            } else if (event instanceof MqttSubscribedEvent) {
+                logger.info("MQTT subscribed: {}", ((MqttSubscribedEvent) event).getMessage());
+            } else if ("org.springframework.integration.mqtt.event.MqttConnectionEstablishedEvent".equals(event.getClass().getName())) {
+                logger.info("MQTT connected: {}", event.getSource());
+            } else if (event instanceof MqttSubscribedEvent) {
+                logger.info("MQTT subscribed: {}", ((MqttSubscribedEvent) event).getMessage());
+            } else {
+                logger.debug("MQTT event: {}", event.toString());
+            }
+        };
     }
 
     // === INBOUND CHANNELS ===
@@ -188,7 +209,8 @@ public class MqttConfiguration {
                 brokerUrl,
                 clientId + "-booking-bundle-" + System.currentTimeMillis(),
                 mqttClientFactory(),
-                "trip/+/booking_bundle"
+                // Listen only to inbound bundles from edge devices to avoid reply loop
+                "trip/+/booking_bundle/inbound"
             );
         adapter.setCompletionTimeout(10000);
         adapter.setConverter(new DefaultPahoMessageConverter());
@@ -270,6 +292,11 @@ public class MqttConfiguration {
         return message -> {
             String payload = (String) message.getPayload();
             String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
+            
+            // Guard against processing our own outbound publishes
+            if (topic != null && topic.contains("/booking_bundle/outbound")) {
+                return;
+            }
             
             System.out.println("📦 === RECEIVING BOOKING BUNDLE FROM MQTT ===");
             System.out.println("  - Topic: " + topic);

@@ -27,6 +27,7 @@ export interface Vehicle {
 
 // Driver snapshot
 export interface DriverSnapshot {
+  id: number;
   name: string;
   phone: string;
 }

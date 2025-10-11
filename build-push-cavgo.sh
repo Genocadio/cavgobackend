@@ -9,6 +9,20 @@ DOCKER_USERNAME="genoyves"
 DOCKER_REPOSITORY="cavgo-system"
 DOCKER_REGISTRY="docker.io"
 
+# Detect architecture and set build platforms
+ARCH=$(uname -m)
+if [[ "$ARCH" == "arm64" ]]; then
+    print_status() { echo -e "\033[0;34m[INFO]\033[0m $1"; }
+    print_status "Apple Silicon (ARM64) detected - will build for multiple architectures"
+    PLATFORMS="linux/amd64,linux/arm64"
+    USE_BUILDX=true
+else
+    print_status() { echo -e "\033[0;34m[INFO]\033[0m $1"; }
+    print_status "x86_64 architecture detected - will build for x86_64"
+    PLATFORMS="linux/amd64"
+    USE_BUILDX=false
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -39,7 +53,7 @@ build_and_push() {
     local context_path=$2
     local image_name="${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:${service_name}"
 
-    print_status "Building ${service_name}..."
+    print_status "Building ${service_name} for platforms: ${PLATFORMS}..."
 
     # Check if context directory exists
     if [ ! -d "$context_path" ]; then
@@ -47,21 +61,34 @@ build_and_push() {
         return 1
     fi
 
-    # Build the image
-    if docker build -t "${image_name}" "$context_path"; then
-        print_success "Successfully built ${image_name}"
+    # Build and push the image based on architecture
+    if [ "$USE_BUILDX" = true ]; then
+        # Use buildx for multi-platform builds (Apple Silicon)
+        print_status "Using Docker buildx for multi-platform build..."
+        if docker buildx build --platform "${PLATFORMS}" --push -t "${image_name}" "$context_path"; then
+            print_success "Successfully built and pushed multi-platform ${image_name}"
+        else
+            print_error "Failed to build multi-platform ${image_name}"
+            return 1
+        fi
     else
-        print_error "Failed to build ${image_name}"
-        return 1
-    fi
+        # Use regular docker build for x86_64
+        print_status "Using regular Docker build..."
+        if docker build -t "${image_name}" "$context_path"; then
+            print_success "Successfully built ${image_name}"
+        else
+            print_error "Failed to build ${image_name}"
+            return 1
+        fi
 
-    # Push the image
-    print_status "Pushing ${image_name}..."
-    if docker push "${image_name}"; then
-        print_success "Successfully pushed ${image_name}"
-    else
-        print_error "Failed to push ${image_name}"
-        return 1
+        # Push the image
+        print_status "Pushing ${image_name}..."
+        if docker push "${image_name}"; then
+            print_success "Successfully pushed ${image_name}"
+        else
+            print_error "Failed to push ${image_name}"
+            return 1
+        fi
     fi
 
     echo ""
@@ -73,7 +100,7 @@ build_and_push_postgres() {
     local image_name="${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:${service_name}"
     local temp_dir="./temp-postgres"
 
-    print_status "Building ${service_name} with init script..."
+    print_status "Building ${service_name} with init script for platforms: ${PLATFORMS}..."
 
     # Create temporary directory for PostgreSQL build
     mkdir -p "$temp_dir"
@@ -115,23 +142,37 @@ fi
 EOF
     fi
 
-    # Build the image
-    if docker build -t "${image_name}" "$temp_dir"; then
-        print_success "Successfully built ${image_name}"
+    # Build and push the image based on architecture
+    if [ "$USE_BUILDX" = true ]; then
+        # Use buildx for multi-platform builds (Apple Silicon)
+        print_status "Using Docker buildx for multi-platform PostgreSQL build..."
+        if docker buildx build --platform "${PLATFORMS}" --push -t "${image_name}" "$temp_dir"; then
+            print_success "Successfully built and pushed multi-platform ${image_name}"
+        else
+            print_error "Failed to build multi-platform ${image_name}"
+            rm -rf "$temp_dir"
+            return 1
+        fi
     else
-        print_error "Failed to build ${image_name}"
-        rm -rf "$temp_dir"
-        return 1
-    fi
+        # Use regular docker build for x86_64
+        print_status "Using regular Docker build for PostgreSQL..."
+        if docker build -t "${image_name}" "$temp_dir"; then
+            print_success "Successfully built ${image_name}"
+        else
+            print_error "Failed to build ${image_name}"
+            rm -rf "$temp_dir"
+            return 1
+        fi
 
-    # Push the image
-    print_status "Pushing ${image_name}..."
-    if docker push "${image_name}"; then
-        print_success "Successfully pushed ${image_name}"
-    else
-        print_error "Failed to push ${image_name}"
-        rm -rf "$temp_dir"
-        return 1
+        # Push the image
+        print_status "Pushing ${image_name}..."
+        if docker push "${image_name}"; then
+            print_success "Successfully pushed ${image_name}"
+        else
+            print_error "Failed to push ${image_name}"
+            rm -rf "$temp_dir"
+            return 1
+        fi
     fi
 
     # Clean up temporary directory
@@ -148,6 +189,31 @@ echo ""
 if ! docker info > /dev/null 2>&1; then
     print_error "Docker is not running. Please start Docker and try again."
     exit 1
+fi
+
+# Setup buildx if needed (for Apple Silicon)
+if [ "$USE_BUILDX" = true ]; then
+    print_status "Setting up Docker buildx for multi-platform builds..."
+    
+    # Check if buildx is available
+    if ! docker buildx version > /dev/null 2>&1; then
+        print_error "Docker buildx is not available. Please update Docker Desktop."
+        exit 1
+    fi
+    
+    # Create or use existing buildx builder
+    BUILDER_NAME="cavgo-builder"
+    if ! docker buildx ls | grep -q "$BUILDER_NAME"; then
+        print_status "Creating new buildx builder: $BUILDER_NAME"
+        docker buildx create --name "$BUILDER_NAME" --use
+    else
+        print_status "Using existing buildx builder: $BUILDER_NAME"
+        docker buildx use "$BUILDER_NAME"
+    fi
+    
+    # Bootstrap the builder
+    print_status "Bootstrapping buildx builder..."
+    docker buildx inspect --bootstrap
 fi
 
 # Check if logged in to Docker Hub
@@ -174,6 +240,12 @@ build_and_push "trips" "./cavgotrips"
 # build_and_push "ussd" "./ussdService"
 
 print_success "All images have been built and pushed successfully!"
+if [ "$USE_BUILDX" = true ]; then
+    print_success "Images built for multiple architectures: ${PLATFORMS}"
+    print_status "These images will work on both x86_64 and ARM64 systems!"
+else
+    print_status "Images built for: ${PLATFORMS}"
+fi
 print_status "You can now use the docker-compose-hub.yml file to deploy using the pushed images."
 
 # List all pushed images

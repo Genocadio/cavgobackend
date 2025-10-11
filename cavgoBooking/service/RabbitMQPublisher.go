@@ -56,9 +56,9 @@ func (p *RabbitMQPublisher) PublishBookingEvent(eventType string, bookingRespons
 	}
 
 	// Log publishing details and payload
-	fmt.Printf("[RabbitMQPublisher] Publishing event to exchange=%s contentType=%s payloadBytes=%d event=%s\n", p.exchangeName, "application/json", len(body), eventType)
-	fmt.Printf("[RabbitMQPublisher] Payload: %s\n", string(body))
-	return p.channel.Publish(
+    fmt.Printf("[RabbitMQPublisher] PUBLISHING fanout: exchange=%s event=%s bytes=%d\n", p.exchangeName, eventType, len(body))
+    fmt.Printf("[RabbitMQPublisher] Payload: %s\n", string(body))
+    err = p.channel.Publish(
 		p.exchangeName, // publish to the exchange
 		"",             // routing key is ignored for fanout exchanges
 		false,          // mandatory
@@ -68,6 +68,12 @@ func (p *RabbitMQPublisher) PublishBookingEvent(eventType string, bookingRespons
 			Body:        body,
 		},
 	)
+    if err != nil {
+        fmt.Printf("[RabbitMQPublisher] FAILED fanout publish: exchange=%s event=%s err=%v\n", p.exchangeName, eventType, err)
+        return err
+    }
+    fmt.Printf("[RabbitMQPublisher] PUBLISHED fanout: exchange=%s event=%s\n", p.exchangeName, eventType)
+    return nil
 }
 
 func (p *RabbitMQPublisher) Close() {

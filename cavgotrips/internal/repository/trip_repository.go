@@ -296,6 +296,20 @@ func (r *tripRepository) GetTripsByVehicleID(vehicleID int64) ([]models.Trip, er
 	return trips, nil
 }
 
+func (r *tripRepository) GetTripsByDriverID(driverID int64) ([]models.Trip, error) {
+	var trips []models.Trip
+	err := r.db.Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		Where("vehicle->>'driver'->>'id' = ?", driverID).
+		Order("created_at DESC").
+		Find(&trips).Error
+	if err != nil {
+		return nil, err
+	}
+	return trips, nil
+}
+
 func (r *tripRepository) GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error) {
 	var trips []models.Trip
 	err := r.db.Preload("Route.Origin").

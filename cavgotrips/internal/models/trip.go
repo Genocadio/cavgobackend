@@ -6,8 +6,9 @@ import (
 )
 
 // DriverSnapshot stores driver info at trip creation
-// Only name and phone are stored
+// Only name, phone, and id are stored
 type DriverSnapshot struct {
+	ID    int64  `json:"id"`
 	Name  string `json:"name"`
 	Phone string `json:"phone"`
 }

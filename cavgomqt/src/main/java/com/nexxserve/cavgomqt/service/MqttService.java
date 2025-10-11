@@ -226,7 +226,7 @@ public class MqttService {
             System.out.println("  - Payment ID: " + (bundle.payment != null ? bundle.payment.id : "null"));
             System.out.println("  - Ticket ID: " + (bundle.tickets != null ? bundle.tickets.toString(): "null"));
             
-            String topic = "trip/" + tripId + "/booking_bundle";
+            String topic = "trip/" + tripId + "/booking_bundle/outbound";
             System.out.println("  - MQTT Topic: " + topic);
             
             // Serialize to JSON

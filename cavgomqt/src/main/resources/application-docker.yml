@@ -33,9 +33,15 @@ logging:
   level:
     org:
       springframework:
-        mqtt: DEBUG
+        integration:
+          mqtt: INFO
+      eclipse:
+        paho:
+          client:
+            mqttv3: WARN
     com:
-      genoyves: DEBUG
+      nexxserve:
+        cavgomqt: INFO
 
 eureka:
   client:

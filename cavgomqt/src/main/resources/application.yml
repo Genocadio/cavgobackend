@@ -36,15 +36,14 @@ logging:
     org:
       springframework:
         integration:
-          mqtt: DEBUG
-        mqtt: DEBUG
+          mqtt: INFO
       eclipse:
         paho:
           client:
-            mqttv3: DEBUG
+            mqttv3: WARN
     com:
       nexxserve:
-        cavgomqt: DEBUG
+        cavgomqt: INFO
 
 
 app:

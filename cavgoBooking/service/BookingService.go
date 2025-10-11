@@ -751,25 +751,29 @@ func (s *bookingService) publishBookingEvents(eventType string, resp *models.Boo
 	}
 
 	// Only publish to bundle reply queue if booking didn't come from RabbitMQ
-	if !s.fromRabbitMQ && s.bundlePublisher != nil {
-		fmt.Printf("[BundlePublisher] Publishing bundle for %s event (fromRabbitMQ=false)\n", eventType)
+    if !s.fromRabbitMQ && s.bundlePublisher != nil {
+        // Extra diagnostics
+        queueName := s.bundlePublisher.QueueName()
+        fmt.Printf("[BundlePublisher] Preparing to publish bundle: event=%s fromRabbitMQ=%t queue=%s bookingId=%s paymentId=%s tickets=%d\n",
+            eventType, s.fromRabbitMQ, queueName, resp.Booking.ID, resp.Booking.Payment.ID, len(resp.Booking.Tickets))
 		bundle, err := s.CreateBookingBundle(context.Background(), resp.Booking, resp.Booking.Payment, resp.Booking.Tickets)
 		if err != nil {
 			fmt.Printf("[BundlePublisher] Failed to create bundle for %s event: %v\n", eventType, err)
 			return
 		}
 
-		err = s.bundlePublisher.PublishBundle(bundle)
+        fmt.Printf("[BundlePublisher] Bundle created, attempting publish to queue=%s sizeTickets=%d\n", queueName, len(bundle.Tickets))
+        err = s.bundlePublisher.PublishBundle(bundle)
 		if err != nil {
 			fmt.Printf("[BundlePublisher] Failed to publish bundle for %s event: %v\n", eventType, err)
 		} else {
-			fmt.Printf("[BundlePublisher] Successfully published bundle for %s event to reply queue\n", eventType)
+            fmt.Printf("[BundlePublisher] Successfully published bundle for %s event to reply queue=%s bookingId=%s\n", eventType, queueName, bundle.Booking.ID)
 		}
 	} else {
 		if s.fromRabbitMQ {
-			fmt.Printf("[BundlePublisher] Skipping bundle publish for %s event (fromRabbitMQ=true)\n", eventType)
+            fmt.Printf("[BundlePublisher] Skipping bundle publish: event=%s reason=fromRabbitMQ bookingId=%s\n", eventType, resp.Booking.ID)
 		} else {
-			fmt.Printf("[BundlePublisher] Warning: bundlePublisher is nil, skipping bundle reply queue publish\n")
+            fmt.Printf("[BundlePublisher] Skipping bundle publish: event=%s reason=bundlePublisher=nil\n", eventType)
 		}
 	}
 }
@@ -855,5 +859,7 @@ func (s *bookingService) CreateBookingBundle(ctx context.Context, booking *model
 
 // SetFromRabbitMQ sets the flag to indicate if booking came from RabbitMQ
 func (s *bookingService) SetFromRabbitMQ(fromRabbitMQ bool) {
+	prev := s.fromRabbitMQ
 	s.fromRabbitMQ = fromRabbitMQ
+	fmt.Printf("[BookingService] SetFromRabbitMQ changed: %t -> %t\n", prev, s.fromRabbitMQ)
 }
