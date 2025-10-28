@@ -2,10 +2,9 @@ package com.nexxserve.cavgomain.controller;
 
 import com.nexxserve.cavgomain.dto.request.VehicleRequestDto;
 import com.nexxserve.cavgomain.dto.request.VehicleLoginRequestDto;
+import com.nexxserve.cavgomain.dto.request.VehicleAssignmentRequestDto;
 import com.nexxserve.cavgomain.dto.response.VehicleAssignmentResponseDto;
 import com.nexxserve.cavgomain.dto.response.VehicleResponseDto;
-import com.nexxserve.cavgomain.entity.Vehicle;
-import com.nexxserve.cavgomain.entity.VehicleAssignment;
 import com.nexxserve.cavgomain.service.VehicleService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +26,11 @@ public class VehicleController {
         VehicleResponseDto body = result.response();
         body.setInitialPassword(result.initialPassword());
         return ResponseEntity.ok(body);
+    }
+
+    @GetMapping("/driver/{id}")
+    public VehicleResponseDto getVehicleByDriver(@PathVariable Long id) {
+        return vehicleService.getByDriver(id);
     }
 
     @GetMapping("/{id}")
@@ -62,6 +66,11 @@ public class VehicleController {
         return vehicleService.assignVehicleToDriver(vehicleId, driverId, notes);
     }
 
+    @PostMapping("/assign")
+    public VehicleAssignmentResponseDto assignVehicleToDriverWithDto(@Valid @RequestBody VehicleAssignmentRequestDto assignmentDto) {
+        return vehicleService.assignVehicleToDriverWithDto(assignmentDto);
+    }
+
     @PostMapping("/login")
     public VehicleResponseDto loginVehicle(@Valid @RequestBody VehicleLoginRequestDto request) {
         return vehicleService.loginVehicle(request.getCompanyCode(), request.getLicensePlate(), request.getPassword(), request.getPubKey());
@@ -71,5 +80,20 @@ public class VehicleController {
     public ResponseEntity<String> resetVehiclePassword(@PathVariable String licensePlate) {
         String newPassword = vehicleService.regenerateVehiclePassword(licensePlate);
         return ResponseEntity.ok(newPassword);
+    }
+
+    @DeleteMapping("/{vehicleId}/unassign")
+    public VehicleAssignmentResponseDto unassignVehicle(@PathVariable Long vehicleId) {
+        return vehicleService.unassignVehicle(vehicleId);
+    }
+
+    @PutMapping("/{vehicleId}/swap/{newDriverId}")
+    public VehicleAssignmentResponseDto swapAssignment(@PathVariable Long vehicleId, @PathVariable Long newDriverId) {
+        return vehicleService.swapAssignment(vehicleId, newDriverId);
+    }
+
+    @PutMapping("/driver/{currentDriverId}/swap/{newDriverId}")
+    public VehicleAssignmentResponseDto swapDriverAssignment(@PathVariable Long currentDriverId, @PathVariable Long newDriverId) {
+        return vehicleService.swapDriverAssignment(currentDriverId, newDriverId);
     }
 }

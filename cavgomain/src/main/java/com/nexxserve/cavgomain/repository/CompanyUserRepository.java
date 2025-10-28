@@ -13,7 +13,13 @@ import java.util.Optional;
 @Repository
 public interface CompanyUserRepository extends JpaRepository<CompanyUser, Long> {
     List<CompanyUser> findByCompanyId(Long companyId);
-    Optional<CompanyUser> findByEmail(String email);
+    
+    @Query("SELECT cu FROM CompanyUser cu WHERE cu.email = :email")
+    Optional<CompanyUser> findByEmail(@Param("email") String email);
+    
+    @Query("SELECT cu FROM CompanyUser cu WHERE cu.phone = :phone")
+    Optional<CompanyUser> findByPhone(@Param("phone") String phone);
+    
     List<CompanyUser> findByRole(CompanyUserRole role);
     List<CompanyUser> findByCompanyIdAndRole(Long companyId, CompanyUserRole role);
 
@@ -22,4 +28,10 @@ public interface CompanyUserRepository extends JpaRepository<CompanyUser, Long> 
 
     @Query("SELECT cu FROM CompanyUser cu WHERE cu.licenseExpiry < CURRENT_DATE")
     List<CompanyUser> findUsersWithExpiredLicense();
+
+    @Query("SELECT cu FROM CompanyUser cu WHERE cu.company.id = :companyId AND cu.role = 'DRIVER' AND " +
+           "(LOWER(cu.firstName) LIKE LOWER(CONCAT('%', :searchQuery, '%')) OR " +
+           "LOWER(cu.lastName) LIKE LOWER(CONCAT('%', :searchQuery, '%')) OR " +
+           "LOWER(CONCAT(cu.firstName, ' ', cu.lastName)) LIKE LOWER(CONCAT('%', :searchQuery, '%')))")
+    List<CompanyUser> searchDriversByCompanyAndName(@Param("companyId") Long companyId, @Param("searchQuery") String searchQuery);
 }

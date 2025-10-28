@@ -147,6 +147,41 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # Ridehail Service (Java)
+  ridehail:
+    image: genoyves/cavgo-system:ridehail
+    container_name: cavgo-ridehail
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ridehail
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
+    ports:
+      - "6070:6070"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eurekacavgo:
+        condition: service_healthy
+    networks:
+      - cavgo-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:6070/actuator/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
   # Trips Service (Go)
   cavgotrips:
     image: genoyves/cavgo-system:trips

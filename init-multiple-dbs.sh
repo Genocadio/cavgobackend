@@ -29,5 +29,6 @@ create_db_if_not_exists "cavgobooks"
 
 create_db_if_not_exists "cavgomqt"
 
+create_db_if_not_exists "ridehail"
 echo "Database initialization completed successfully!"
 

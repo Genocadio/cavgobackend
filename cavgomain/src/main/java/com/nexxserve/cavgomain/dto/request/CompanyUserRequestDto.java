@@ -22,10 +22,10 @@ public class CompanyUserRequestDto {
     @NotBlank(message = "Last name is required")
     private String lastName;
 
-    @NotBlank(message = "Email is required")
+
     @Email(message = "Email should be valid")
     private String email;
-
+    @NotBlank(message = "Email is required")
     private String phone;
 
     @NotBlank(message = "Password is required")

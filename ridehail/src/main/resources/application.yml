@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: ridehail
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ridehail
+    username: postgres
+    password: postgres
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        spatial:
+          dialect: org.hibernate.spatial.dialect.postgis.PostgisPG10Dialect
+
+security:
+  jwt:
+    secret: JfnzMqJ6O1E0UuPzSRe1G8HPLD+hhYlCEosR8A8v2z+rxpGPiAxiAgF1bDbU5xQq3YXl2SKyGi3gUb41zMWSxQ==
+    ttl-seconds: 86400
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${random.uuid}
+

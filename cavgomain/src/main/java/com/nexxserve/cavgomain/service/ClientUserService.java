@@ -6,6 +6,7 @@ import com.nexxserve.cavgomain.dto.response.ClientUserResponseDto;
 import com.nexxserve.cavgomain.entity.ClientUser;
 import com.nexxserve.cavgomain.enums.ClientType;
 import com.nexxserve.cavgomain.repository.ClientUserRepository;
+import com.nexxserve.cavgomain.repository.UserRepository;
 import com.nexxserve.cavgomain.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -23,10 +24,15 @@ public class ClientUserService {
     private final ClientUserRepository clientUserRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider tokenProvider;
+    private final UserRepository userRepository;
 
     public AuthResponseDto createClientUser(ClientUserRequestDto requestDto) {
-        if (clientUserRepository.findByEmail(requestDto.getEmail()).isPresent()) {
+        // Check across ALL user types (CompanyUser, ClientUser, etc.)
+        if (userRepository.findByEmail(requestDto.getEmail()).isPresent()) {
             throw new IllegalArgumentException("Email already exists");
+        }
+        if (userRepository.findByPhone(requestDto.getPhone()).isPresent()) {
+            throw new IllegalArgumentException("Phone already exists");
         }
 
         ClientUser user = requestDto.toEntity();

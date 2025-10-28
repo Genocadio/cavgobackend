@@ -26,6 +26,8 @@ public class CompanyUserController {
         return companyUserService.updateCompanyUser(id, user);
     }
 
+
+
     @GetMapping("/{id}")
     public CompanyUserResponseDto getCompanyUser(@PathVariable Long id) {
         return companyUserService.findById(id);
@@ -39,6 +41,11 @@ public class CompanyUserController {
     @GetMapping("/company/{companyId}/drivers")
     public List<CompanyUserResponseDto> getDriversByCompany(@PathVariable Long companyId) {
         return companyUserService.findDriversByCompany(companyId);
+    }
+
+    @GetMapping("/company/{companyId}/drivers/search")
+    public List<CompanyUserResponseDto> searchDriversByCompany(@PathVariable Long companyId, @RequestParam String query) {
+        return companyUserService.searchDriversByCompanyAndName(companyId, query);
     }
 
     @GetMapping("/expired-licenses")

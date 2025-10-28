@@ -467,6 +467,11 @@ func (s *TripService) StartTrip(id int64) (*models.Trip, error) {
 	// If reversed, swap route origin/destination for response consistency
 	adjustRouteForReversed(startedTrip)
 
+	// Publish event to RabbitMQ
+	if s.rabbitMQService != nil {
+		_ = s.rabbitMQService.PublishTripEvent("started", *startedTrip)
+	}
+
 	// Broadcast SSE event for trip start
 	if s.sseService != nil {
 		s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{
@@ -507,6 +512,11 @@ func (s *TripService) CompleteTrip(id int64) (*models.Trip, error) {
 	completedTrip.Route.Waypoints = nil
 	// If reversed, swap route origin/destination for response consistency
 	adjustRouteForReversed(completedTrip)
+
+	// Publish event to RabbitMQ
+	if s.rabbitMQService != nil {
+		_ = s.rabbitMQService.PublishTripEvent("completed", *completedTrip)
+	}
 
 	// Broadcast SSE event for trip completion
 	if s.sseService != nil {
@@ -638,6 +648,10 @@ func (s *TripService) GetTripsByDriverID(driverID int64) ([]models.Trip, error) 
 	return trips, nil
 }
 
+func (s *TripService) GetDriverMetrics(driverID int64) (*models.DriverMetrics, error) {
+	return s.tripRepo.GetDriverMetrics(driverID)
+}
+
 func (s *TripService) GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error) {
 	trips, err := s.tripRepo.GetTripsByCityRoute(cityRoute)
 	if err != nil {
@@ -691,10 +705,19 @@ func (s *TripService) DeleteTrip(id int64) error {
 			return err
 		}
 
-		// Get the updated trip for SSE broadcast
+		// Get the updated trip for events
 		updatedTrip, err := s.tripRepo.GetByIDWithRelations(id)
 		if err != nil {
 			return err
+		}
+
+		updatedTrip.Route.Waypoints = nil
+		// If reversed, swap route origin/destination for response consistency
+		adjustRouteForReversed(updatedTrip)
+
+		// Publish event to RabbitMQ
+		if s.rabbitMQService != nil {
+			_ = s.rabbitMQService.PublishTripEvent("cancelled", *updatedTrip)
 		}
 
 		// Broadcast SSE event for trip cancellation

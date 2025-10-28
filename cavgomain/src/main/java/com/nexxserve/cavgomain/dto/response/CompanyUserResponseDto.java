@@ -24,6 +24,7 @@ public class CompanyUserResponseDto {
     private LocalDate licenseExpiry;
     private String createdAt;
     private String updatedAt;
+    private VehicleResponseDto vehicle;
 
     public static CompanyUserResponseDto fromEntity(CompanyUser entity) {
         CompanyUserResponseDto dto = new CompanyUserResponseDto();

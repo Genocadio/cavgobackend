@@ -232,8 +232,10 @@ print_status "Building and pushing application services..."
 
 #Build and push each service
 # build_and_push "eureka" "./Eurekacavgo"
-#build_and_push "main" "./cavgomain"
-#build_and_push "gateway" "./Cavgogateway"
+# build_and_push "main" "./cavgomain"
+# build_and_push "gateway" "./Cavgogateway"
+# Add ridehail service
+# build_and_push "ridehail" "./ridehail"
 build_and_push "trips" "./cavgotrips"
 # build_and_push "booking" "./cavgoBooking"
 # build_and_push "cavgomqt" "./cavgomqt"

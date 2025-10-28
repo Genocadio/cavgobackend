@@ -544,20 +544,29 @@ func (h *TripHandler) GetTripsByDriverID(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// Create page response with session data
-	pageResponse := models.PageResponse{
-		Trips:  trips,
-		Total:  total,
-		Limit:  limit,
-		Offset: offset,
+	// Get driver metrics
+	metrics, err := h.service.GetDriverMetrics(driverID)
+	if err != nil {
+		log.Printf("[Trip] Failed to get driver metrics for driver %d: %v", driverID, err)
+		// Don't fail the entire request, just log the error and continue without metrics
+		metrics = &models.DriverMetrics{}
+	}
+
+	// Create driver trips response with metrics
+	driverResponse := models.DriverTripsResponse{
+		Trips:   trips,
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
+		Metrics: *metrics,
 	}
 
 	// Only include session UUID if it's a new session
 	if isNewSession {
-		pageResponse.SSEUUID = finalSessionUUID
+		driverResponse.SSEUUID = finalSessionUUID
 	}
 
-	utils.JSONResponse(w, pageResponse, http.StatusOK)
+	utils.JSONResponse(w, driverResponse, http.StatusOK)
 }
 
 func (h *TripHandler) DeleteTrip(w http.ResponseWriter, r *http.Request) {

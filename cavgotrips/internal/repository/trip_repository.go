@@ -3,10 +3,19 @@ package repository
 import (
 	"cavgotrips/internal/models"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
 )
+
+// driverIDCondition creates a WHERE condition that handles both integer and string driver IDs in JSON
+// Excludes trips with driver ID 0 (no driver assigned)
+func driverIDCondition(db *gorm.DB, driverID int64) *gorm.DB {
+	// Try integer cast first, if that fails, try string comparison
+	// Also exclude trips with driver ID 0 (no driver assigned)
+	return db.Where("((vehicle->'driver'->>'id')::int = ? OR vehicle->'driver'->>'id' = ?) AND (vehicle->'driver'->>'id')::int > 0", driverID, strconv.FormatInt(driverID, 10))
+}
 
 type tripRepository struct {
 	db *gorm.DB
@@ -298,16 +307,12 @@ func (r *tripRepository) GetTripsByVehicleID(vehicleID int64) ([]models.Trip, er
 
 func (r *tripRepository) GetTripsByDriverID(driverID int64) ([]models.Trip, error) {
 	var trips []models.Trip
-	err := r.db.Preload("Route.Origin").
+	err := driverIDCondition(r.db.Preload("Route.Origin").
 		Preload("Route.Destination").
-		Preload("Waypoints.Location").
-		Where("vehicle->>'driver'->>'id' = ?", driverID).
+		Preload("Waypoints.Location"), driverID).
 		Order("created_at DESC").
 		Find(&trips).Error
-	if err != nil {
-		return nil, err
-	}
-	return trips, nil
+	return trips, err
 }
 
 func (r *tripRepository) GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error) {
@@ -595,6 +600,70 @@ func sortTripsByMatchScore(trips []models.Trip, origin, destination, company str
 		result[i] = st.trip
 	}
 	return result
+}
+
+func (r *tripRepository) GetDriverMetrics(driverID int64) (*models.DriverMetrics, error) {
+	var totalTrips int64
+	var totalKilometers float64
+	var dailyTrips int64
+	var monthlyTrips int64
+	var currentActiveTrip *int64
+
+	// Get total trips count
+	err := driverIDCondition(r.db.Model(&models.Trip{}), driverID).Count(&totalTrips).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Get total kilometers (sum of route distances for completed trips)
+	err = driverIDCondition(r.db.Table("trips").
+		Select("COALESCE(SUM(routes.distance_meters), 0)").
+		Joins("JOIN routes ON trips.route_id = routes.id").
+		Where("trips.status = ?", "COMPLETED"), driverID).
+		Scan(&totalKilometers).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Get daily trips (trips created today)
+	err = driverIDCondition(r.db.Model(&models.Trip{}).
+		Where("DATE(created_at) = CURRENT_DATE"), driverID).
+		Count(&dailyTrips).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Get monthly trips (trips created this month)
+	err = driverIDCondition(r.db.Model(&models.Trip{}).
+		Where("DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)"), driverID).
+		Count(&monthlyTrips).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Get current active trip (SCHEDULED or IN_PROGRESS)
+	var activeTripID int64
+	err = driverIDCondition(r.db.Model(&models.Trip{}).
+		Select("id").
+		Where("status IN (?, ?)", "SCHEDULED", "IN_PROGRESS"), driverID).
+		Order("created_at DESC").
+		Limit(1).
+		Scan(&activeTripID).Error
+	if err != nil {
+		return nil, err
+	}
+
+	if activeTripID > 0 {
+		currentActiveTrip = &activeTripID
+	}
+
+	return &models.DriverMetrics{
+		TotalTrips:        totalTrips,
+		TotalKilometers:   totalKilometers,
+		DailyTrips:        dailyTrips,
+		MonthlyTrips:      monthlyTrips,
+		CurrentActiveTrip: currentActiveTrip,
+	}, nil
 }
 
 func (r *tripRepository) Delete(id int64) error {

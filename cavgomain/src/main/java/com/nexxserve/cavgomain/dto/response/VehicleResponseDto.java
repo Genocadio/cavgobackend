@@ -2,6 +2,7 @@ package com.nexxserve.cavgomain.dto.response;
 
 import com.nexxserve.cavgomain.entity.Vehicle;
 import com.nexxserve.cavgomain.entity.VehicleAssignment;
+import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.enums.AssignmentStatus;
 import com.nexxserve.cavgomain.enums.VehicleStatus;
 import com.nexxserve.cavgomain.enums.VehicleType;
@@ -25,7 +26,7 @@ public class VehicleResponseDto {
     private CompanyUserResponseDto driver;
     private String initialPassword; // only set on creation
 
-    public static VehicleResponseDto fromEntity(Vehicle entity) {
+    public static VehicleResponseDto fromEntity(Vehicle entity, CompanyUser driver) {
         VehicleResponseDto dto = new VehicleResponseDto();
         dto.setId(entity.getId());
         dto.setCompanyId(entity.getCompany().getId());
@@ -38,15 +39,24 @@ public class VehicleResponseDto {
         dto.setStatus(entity.getStatus());
         dto.setCreatedAt(entity.getCreatedAt().toString());
         dto.setUpdatedAt(entity.getUpdatedAt() != null ? entity.getUpdatedAt().toString() : null);
-        Optional<VehicleAssignment> activeAssignment = entity.getAssignments().stream()
-                .filter(assignment -> assignment.getStatus() == AssignmentStatus.ACTIVE)
-                .findFirst();
-        if (activeAssignment.isPresent()) {
-            VehicleAssignment assignment = activeAssignment.get();
-            dto.setDriver(CompanyUserResponseDto.fromEntity(assignment.getDriver()));
+        
+        // Only populate driver if provided (prevents recursion)
+        if (driver != null) {
+            dto.setDriver(CompanyUserResponseDto.fromEntity(driver));
         } else {
             dto.setDriver(null);
         }
+        
         return dto;
+    }
+
+    // Keep existing method for backward compatibility, auto-populate driver
+    public static VehicleResponseDto fromEntity(Vehicle entity) {
+        Optional<VehicleAssignment> activeAssignment = entity.getAssignments().stream()
+                .filter(assignment -> assignment.getStatus() == AssignmentStatus.ACTIVE)
+                .findFirst();
+        
+        CompanyUser driver = activeAssignment.map(VehicleAssignment::getDriver).orElse(null);
+        return fromEntity(entity, driver);
     }
 }

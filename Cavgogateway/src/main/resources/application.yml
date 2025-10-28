@@ -77,6 +77,17 @@ spring:
                   args:
                     name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
                     strategy: RETAIN_FIRST
+
+            - id: ridehail
+              uri: lb://ridehail
+              predicates:
+                - Path=/api/ride/**
+              filters:
+                - StripPrefix=2
+                - name: DedupeResponseHeader
+                  args:
+                    name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                    strategy: RETAIN_FIRST
           globalcors:
             cors-configurations:
                 '[/**]':

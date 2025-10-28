@@ -251,7 +251,28 @@ func (s *bookingService) GetBookingByReference(ctx context.Context, reference st
 }
 
 func (s *bookingService) GetBookingsByTripID(ctx context.Context, tripID int) ([]models.Booking, error) {
-	return s.bookingRepo.GetBookingsByTripID(ctx, tripID)
+	bookings, err := s.bookingRepo.GetBookingsByTripID(ctx, tripID)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range bookings {
+		// Load tickets
+		tickets, err := s.bookingRepo.GetTicketsByBookingID(ctx, bookings[i].ID)
+		if err == nil {
+			bookings[i].Tickets = tickets
+		}
+		// Load payment
+		payment, err := s.bookingRepo.GetPaymentByBookingID(ctx, bookings[i].ID)
+		if err == nil {
+			bookings[i].Payment = payment
+			if bookings[i].Status == models.BookingStatusCanceled && payment.Status == models.PaymentStatusFailed {
+				bookings[i].Tickets = nil
+			}
+		}
+	}
+
+	return bookings, nil
 }
 
 func (s *bookingService) GetBookingsByUserID(ctx context.Context, userID string) ([]models.Booking, error) {
@@ -751,29 +772,29 @@ func (s *bookingService) publishBookingEvents(eventType string, resp *models.Boo
 	}
 
 	// Only publish to bundle reply queue if booking didn't come from RabbitMQ
-    if !s.fromRabbitMQ && s.bundlePublisher != nil {
-        // Extra diagnostics
-        queueName := s.bundlePublisher.QueueName()
-        fmt.Printf("[BundlePublisher] Preparing to publish bundle: event=%s fromRabbitMQ=%t queue=%s bookingId=%s paymentId=%s tickets=%d\n",
-            eventType, s.fromRabbitMQ, queueName, resp.Booking.ID, resp.Booking.Payment.ID, len(resp.Booking.Tickets))
+	if !s.fromRabbitMQ && s.bundlePublisher != nil {
+		// Extra diagnostics
+		queueName := s.bundlePublisher.QueueName()
+		fmt.Printf("[BundlePublisher] Preparing to publish bundle: event=%s fromRabbitMQ=%t queue=%s bookingId=%s paymentId=%s tickets=%d\n",
+			eventType, s.fromRabbitMQ, queueName, resp.Booking.ID, resp.Booking.Payment.ID, len(resp.Booking.Tickets))
 		bundle, err := s.CreateBookingBundle(context.Background(), resp.Booking, resp.Booking.Payment, resp.Booking.Tickets)
 		if err != nil {
 			fmt.Printf("[BundlePublisher] Failed to create bundle for %s event: %v\n", eventType, err)
 			return
 		}
 
-        fmt.Printf("[BundlePublisher] Bundle created, attempting publish to queue=%s sizeTickets=%d\n", queueName, len(bundle.Tickets))
-        err = s.bundlePublisher.PublishBundle(bundle)
+		fmt.Printf("[BundlePublisher] Bundle created, attempting publish to queue=%s sizeTickets=%d\n", queueName, len(bundle.Tickets))
+		err = s.bundlePublisher.PublishBundle(bundle)
 		if err != nil {
 			fmt.Printf("[BundlePublisher] Failed to publish bundle for %s event: %v\n", eventType, err)
 		} else {
-            fmt.Printf("[BundlePublisher] Successfully published bundle for %s event to reply queue=%s bookingId=%s\n", eventType, queueName, bundle.Booking.ID)
+			fmt.Printf("[BundlePublisher] Successfully published bundle for %s event to reply queue=%s bookingId=%s\n", eventType, queueName, bundle.Booking.ID)
 		}
 	} else {
 		if s.fromRabbitMQ {
-            fmt.Printf("[BundlePublisher] Skipping bundle publish: event=%s reason=fromRabbitMQ bookingId=%s\n", eventType, resp.Booking.ID)
+			fmt.Printf("[BundlePublisher] Skipping bundle publish: event=%s reason=fromRabbitMQ bookingId=%s\n", eventType, resp.Booking.ID)
 		} else {
-            fmt.Printf("[BundlePublisher] Skipping bundle publish: event=%s reason=bundlePublisher=nil\n", eventType)
+			fmt.Printf("[BundlePublisher] Skipping bundle publish: event=%s reason=bundlePublisher=nil\n", eventType)
 		}
 	}
 }

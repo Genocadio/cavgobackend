@@ -260,3 +260,22 @@ type PageResponse struct {
 	Offset  int    `json:"offset"`
 	SSEUUID string `json:"sse_uuid"` // UUID for SSE subscription
 }
+
+// DriverMetrics represents metrics for a driver
+type DriverMetrics struct {
+	TotalTrips        int64   `json:"total_trips"`
+	TotalKilometers   float64 `json:"total_kilometers"`
+	DailyTrips        int64   `json:"daily_trips"`
+	MonthlyTrips      int64   `json:"monthly_trips"`
+	CurrentActiveTrip *int64  `json:"current_active_trip"` // ID of current SCHEDULED or IN_PROGRESS trip, null if none
+}
+
+// DriverTripsResponse represents the response for driver trips with metrics
+type DriverTripsResponse struct {
+	Trips   []Trip         `json:"trips"`
+	Total   int64          `json:"total"`
+	Limit   int            `json:"limit"`
+	Offset  int            `json:"offset"`
+	Metrics DriverMetrics  `json:"metrics"`
+	SSEUUID string         `json:"sse_uuid,omitempty"` // UUID for SSE subscription
+}

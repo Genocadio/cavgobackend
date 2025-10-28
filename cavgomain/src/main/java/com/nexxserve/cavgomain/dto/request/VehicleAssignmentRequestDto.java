@@ -18,7 +18,6 @@ public class VehicleAssignmentRequestDto {
     @NotNull(message = "Driver ID is required")
     private Long driverId;
 
-    @NotNull(message = "Assigned date is required")
     private LocalDateTime assignedDate;
 
     private LocalDateTime unassignedDate;
@@ -31,7 +30,7 @@ public class VehicleAssignmentRequestDto {
         VehicleAssignment assignment = new VehicleAssignment();
         assignment.setVehicle(vehicle);
         assignment.setDriver(driver);
-        assignment.setAssignedDate(this.assignedDate);
+        assignment.setAssignedDate(this.assignedDate != null ? this.assignedDate : LocalDateTime.now());
         assignment.setUnassignedDate(this.unassignedDate);
         assignment.setStatus(this.status);
         assignment.setNotes(this.notes);
