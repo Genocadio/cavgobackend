@@ -582,7 +582,7 @@ func (h *TripHandler) DeleteTrip(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "trip not found" {
 			utils.ErrorResponse(w, "Trip not found", http.StatusNotFound)
 			return
-		} else if err.Error() == "can only delete scheduled, cancelled, or in-progress trips" {
+		} else if err.Error() == "cannot delete completed or not-completed trips" {
 			utils.ErrorResponse(w, err.Error(), http.StatusBadRequest)
 			return
 		} else {

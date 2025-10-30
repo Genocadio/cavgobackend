@@ -694,8 +694,8 @@ func (s *TripService) DeleteTrip(id int64) error {
 	}
 
 	// Handle different trip statuses
-	if trip.Status == "IN_PROGRESS" {
-		// Cancel the trip instead of deleting it
+	if trip.Status == "SCHEDULED" || trip.Status == "IN_PROGRESS" {
+		// Cancel the trip instead of deleting it (first delete call)
 		updates := map[string]interface{}{
 			"status":     "CANCELLED",
 			"updated_at": time.Now(),
@@ -717,7 +717,7 @@ func (s *TripService) DeleteTrip(id int64) error {
 
 		// Publish event to RabbitMQ
 		if s.rabbitMQService != nil {
-			_ = s.rabbitMQService.PublishTripEvent("cancelled", *updatedTrip)
+			_ = s.rabbitMQService.PublishTripEvent("TRIP_CANCELLED", *updatedTrip)
 		}
 
 		// Broadcast SSE event for trip cancellation
@@ -729,8 +729,8 @@ func (s *TripService) DeleteTrip(id int64) error {
 		}
 
 		return nil
-	} else if trip.Status == "CANCELLED" || trip.Status == "SCHEDULED" {
-		// Allow deletion of CANCELLED and SCHEDULED trips
+	} else if trip.Status == "CANCELLED" {
+		// Allow deletion of CANCELLED trips (second delete call)
 		if err := s.tripRepo.Delete(id); err != nil {
 			return err
 		}
@@ -746,7 +746,7 @@ func (s *TripService) DeleteTrip(id int64) error {
 		return nil
 	} else {
 		// Cannot delete COMPLETED or NOT_COMPLETED trips
-		return errors.New("can only delete scheduled, cancelled, or in-progress trips")
+		return errors.New("cannot delete completed or not-completed trips")
 	}
 }
 

@@ -25,6 +25,9 @@ public class VehicleResponseDto {
     private String updatedAt;
     private CompanyUserResponseDto driver;
     private String initialPassword; // only set on creation
+    private VehicleLocationResponseDto lastLocation;
+    private Boolean isOnline;
+    private String lastOnlineAt;
 
     public static VehicleResponseDto fromEntity(Vehicle entity, CompanyUser driver) {
         VehicleResponseDto dto = new VehicleResponseDto();
@@ -46,6 +49,13 @@ public class VehicleResponseDto {
         } else {
             dto.setDriver(null);
         }
+        
+        // Populate online status and last online timestamp
+        dto.setIsOnline(entity.isOnline());
+        dto.setLastOnlineAt(entity.getLastOnlineAt() != null ? entity.getLastOnlineAt().toString() : null);
+        
+        // Note: lastLocation is not populated here to avoid performance issues
+        // Use the dedicated endpoint GET /vehicles/{id}/location/latest to fetch the latest location
         
         return dto;
     }

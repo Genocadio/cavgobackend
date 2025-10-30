@@ -1,19 +1,18 @@
 package com.nexxserve.cavgomain.service;
 
+import com.nexxserve.cavgomain.dto.message.VehicleSettingsMessage;
 import com.nexxserve.cavgomain.dto.request.VehicleRequestDto;
 import com.nexxserve.cavgomain.dto.request.VehicleAssignmentRequestDto;
+import com.nexxserve.cavgomain.dto.request.VehicleSettingsUpdateDto;
 import com.nexxserve.cavgomain.dto.response.VehicleAssignmentResponseDto;
+import com.nexxserve.cavgomain.dto.response.VehicleLocationResponseDto;
 import com.nexxserve.cavgomain.dto.response.VehicleResponseDto;
-import com.nexxserve.cavgomain.entity.Company;
-import com.nexxserve.cavgomain.entity.Vehicle;
-import com.nexxserve.cavgomain.entity.VehicleAssignment;
-import com.nexxserve.cavgomain.entity.CompanyUser;
+import com.nexxserve.cavgomain.dto.response.VehicleSettingsResponseDto;
+import com.nexxserve.cavgomain.entity.*;
 import com.nexxserve.cavgomain.enums.VehicleStatus;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
-import com.nexxserve.cavgomain.repository.CompanyRepository;
-import com.nexxserve.cavgomain.repository.VehicleRepository;
-import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
-import com.nexxserve.cavgomain.repository.CompanyUserRepository;
+import com.nexxserve.cavgomain.messaging.VehicleSettingsPublisher;
+import com.nexxserve.cavgomain.repository.*;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -34,6 +33,9 @@ public class VehicleService {
     private final CompanyUserRepository companyUserRepository;
     private final CompanyRepository companyRepository;
     private final PasswordEncoder passwordEncoder;
+    private final VehicleSettingsRepository settingsRepository;
+    private final VehicleLocationRepository locationRepository;
+    private final VehicleSettingsPublisher settingsPublisher;
 
 
     // CRUD methods
@@ -61,6 +63,17 @@ public class VehicleService {
         newVehicle.setPasswordHash(passwordEncoder.encode(initialPassword));
 
         Vehicle saved = vehicleRepository.save(newVehicle);
+        
+        // Initialize vehicle settings with defaults
+        VehicleSettings settings = new VehicleSettings();
+        settings.setVehicle(saved);
+        settings.setLogout(true);
+        settings.setDevmode(false);
+        settings.setDeactivate(false);
+        settings.setAppmode(false);
+        settings.setSimulate(false);
+        settingsRepository.save(settings);
+        
         return new VehicleCreateResult(VehicleResponseDto.fromEntity(saved), initialPassword);
     }
 
@@ -225,8 +238,21 @@ public class VehicleService {
            throw new IllegalArgumentException("Invalid password");
        }
 
+       // Check if logout is true (allowing login)
+       VehicleSettings settings = settingsRepository.findByVehicleId(vehicle.getId())
+               .orElseThrow(() -> new IllegalStateException("Vehicle settings not found"));
+       
+       if (!settings.getLogout()) {
+           throw new IllegalStateException("Vehicle is already logged in. Only one client per vehicle is allowed.");
+       }
+
        vehicle.setPubKey(newPubKey);
+       vehicle.setLastOnlineAt(LocalDateTime.now());
        vehicleRepository.save(vehicle);
+
+       // Set logout to false after successful login
+       settings.setLogout(false);
+       settingsRepository.save(settings);
 
        return VehicleResponseDto.fromEntity(vehicle);
    }
@@ -398,5 +424,59 @@ public class VehicleService {
        vehicleRepository.save(vehicle);
        
        return VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(newAssignment));
+   }
+
+   // Vehicle Settings Methods
+   public VehicleSettingsResponseDto getVehicleSettings(Long vehicleId) {
+       VehicleSettings settings = settingsRepository.findByVehicleId(vehicleId)
+               .orElseThrow(() -> new EntityNotFoundException("Vehicle settings not found"));
+       return VehicleSettingsResponseDto.fromEntity(settings);
+   }
+
+   @Transactional
+   public VehicleSettingsResponseDto updateVehicleSettings(Long vehicleId, VehicleSettingsUpdateDto updateDto) {
+       Vehicle vehicle = getVehicle(vehicleId);
+       VehicleSettings settings = settingsRepository.findByVehicleId(vehicleId)
+               .orElseThrow(() -> new EntityNotFoundException("Vehicle settings not found"));
+
+       // Update only non-null fields
+       if (updateDto.getLogout() != null) {
+           settings.setLogout(updateDto.getLogout());
+       }
+       if (updateDto.getDevmode() != null) {
+           settings.setDevmode(updateDto.getDevmode());
+       }
+       if (updateDto.getDeactivate() != null) {
+           settings.setDeactivate(updateDto.getDeactivate());
+       }
+       if (updateDto.getAppmode() != null) {
+           settings.setAppmode(updateDto.getAppmode());
+       }
+       if (updateDto.getSimulate() != null) {
+           settings.setSimulate(updateDto.getSimulate());
+       }
+
+       VehicleSettings saved = settingsRepository.save(settings);
+
+       // Publish settings update to RabbitMQ
+       VehicleSettingsMessage message = VehicleSettingsMessage.fromEntity(saved, vehicle.getLicensePlate());
+       settingsPublisher.publishSettingsUpdate(message, vehicleId);
+
+       return VehicleSettingsResponseDto.fromEntity(saved);
+   }
+
+   // Vehicle Location Methods
+   public List<VehicleLocationResponseDto> getVehicleLocations(Long vehicleId, LocalDateTime since) {
+       LocalDateTime cutoff = since != null ? since : LocalDateTime.now().minusHours(48);
+       return locationRepository.findByVehicleIdAndRecordedAtAfter(vehicleId, cutoff)
+               .stream()
+               .map(VehicleLocationResponseDto::fromEntity)
+               .toList();
+   }
+
+   public VehicleLocationResponseDto getLatestVehicleLocation(Long vehicleId) {
+       return locationRepository.findTopByVehicleIdOrderByRecordedAtDesc(vehicleId)
+               .map(VehicleLocationResponseDto::fromEntity)
+               .orElse(null);
    }
 }

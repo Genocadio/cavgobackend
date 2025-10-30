@@ -1,8 +1,8 @@
 package models
 
-// TripEventMessage is used for RabbitMQ trip events (created/updated)
+// TripEventMessage is used for RabbitMQ trip events (created/updated/started/completed/TRIP_CANCELLED)
 type TripEventMessage struct {
-	Event string `json:"event"` // "created" or "updated"
+	Event string `json:"event"` // "created", "updated", "started", "completed", or "TRIP_CANCELLED"
 	Data  Trip   `json:"data"`
 }
 
