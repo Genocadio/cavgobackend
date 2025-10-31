@@ -1,9 +1,8 @@
 package com.nexxserve.cavgomqt.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nexxserve.cavgomqt.dto.VehicleSettingsMessage;
-import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -22,22 +21,21 @@ public class RabbitMQVehicleSettingsListenerService {
     @Autowired
     private MqttService mqttService;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
     /**
      * Listen for vehicle settings messages from RabbitMQ
+     * Spring will automatically deserialize the message body to VehicleSettingsMessage
+     * using the configured Jackson2JsonMessageConverter with type inference.
      * 
-     * @param message The RabbitMQ message containing vehicle settings
+     * @param settings The deserialized vehicle settings message
+     * @param routingKey The routing key from RabbitMQ message headers (extracted via @Header annotation)
      */
     @RabbitListener(queues = "vehicle.settings.queue")
-    public void handleVehicleSettings(Message message) {
+    public void handleVehicleSettings(
+            VehicleSettingsMessage settings,
+            @Header("amqp_receivedRoutingKey") String routingKey) {
         try {
             System.out.println("📥 === RECEIVED VEHICLE SETTINGS FROM RABBITMQ ===");
             System.out.println("  - Timestamp: " + System.currentTimeMillis());
-            
-            // Get routing key to extract vehicle ID
-            String routingKey = message.getMessageProperties().getReceivedRoutingKey();
             System.out.println("  - Routing Key: " + routingKey);
             
             // Extract vehicle ID from routing key (vehicle.settings.{vehicleId})
@@ -48,12 +46,6 @@ public class RabbitMQVehicleSettingsListenerService {
             }
             
             System.out.println("  - Vehicle ID: " + vehicleId);
-            
-            // Parse message body
-            String payload = new String(message.getBody());
-            System.out.println("  - Payload: " + payload);
-            
-            VehicleSettingsMessage settings = objectMapper.readValue(payload, VehicleSettingsMessage.class);
             System.out.println("✅ Successfully parsed vehicle settings:");
             System.out.println("  - License Plate: " + settings.getLicensePlate());
             System.out.println("  - Logout: " + settings.getLogout());
@@ -69,7 +61,8 @@ public class RabbitMQVehicleSettingsListenerService {
         } catch (Exception e) {
             System.err.println("❌ FAILED to process vehicle settings from RabbitMQ:");
             System.err.println("  - Error: " + e.getMessage());
-            System.err.println("  - Message: " + new String(message.getBody()));
+            System.err.println("  - Routing Key: " + routingKey);
+            System.err.println("  - Settings: " + (settings != null ? settings.toString() : "null"));
             e.printStackTrace();
         }
     }
@@ -99,4 +92,5 @@ public class RabbitMQVehicleSettingsListenerService {
         return null;
     }
 }
+
 

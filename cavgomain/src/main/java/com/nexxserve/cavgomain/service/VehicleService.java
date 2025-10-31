@@ -427,9 +427,21 @@ public class VehicleService {
    }
 
    // Vehicle Settings Methods
+   @Transactional
    public VehicleSettingsResponseDto getVehicleSettings(Long vehicleId) {
+       Vehicle vehicle = getVehicle(vehicleId);
        VehicleSettings settings = settingsRepository.findByVehicleId(vehicleId)
-               .orElseThrow(() -> new EntityNotFoundException("Vehicle settings not found"));
+               .orElseGet(() -> {
+                   // Create new settings with defaults if they don't exist
+                   VehicleSettings newSettings = new VehicleSettings();
+                   newSettings.setVehicle(vehicle);
+                   newSettings.setLogout(true);
+                   newSettings.setDevmode(false);
+                   newSettings.setDeactivate(false);
+                   newSettings.setAppmode(false);
+                   newSettings.setSimulate(false);
+                   return settingsRepository.save(newSettings);
+               });
        return VehicleSettingsResponseDto.fromEntity(settings);
    }
 
@@ -437,7 +449,17 @@ public class VehicleService {
    public VehicleSettingsResponseDto updateVehicleSettings(Long vehicleId, VehicleSettingsUpdateDto updateDto) {
        Vehicle vehicle = getVehicle(vehicleId);
        VehicleSettings settings = settingsRepository.findByVehicleId(vehicleId)
-               .orElseThrow(() -> new EntityNotFoundException("Vehicle settings not found"));
+               .orElseGet(() -> {
+                   // Create new settings with defaults if they don't exist
+                   VehicleSettings newSettings = new VehicleSettings();
+                   newSettings.setVehicle(vehicle);
+                   newSettings.setLogout(true);
+                   newSettings.setDevmode(false);
+                   newSettings.setDeactivate(false);
+                   newSettings.setAppmode(false);
+                   newSettings.setSimulate(false);
+                   return settingsRepository.save(newSettings);
+               });
 
        // Update only non-null fields
        if (updateDto.getLogout() != null) {

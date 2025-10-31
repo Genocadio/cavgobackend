@@ -11,3 +11,5 @@ public interface VehicleSettingsRepository extends JpaRepository<VehicleSettings
     Optional<VehicleSettings> findByVehicleId(Long vehicleId);
 }
 
+
+

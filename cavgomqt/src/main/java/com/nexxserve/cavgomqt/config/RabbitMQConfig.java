@@ -133,7 +133,11 @@ public class RabbitMQConfig {
 
     @Bean
     public MessageConverter jsonMessageConverter() {
-        return new Jackson2JsonMessageConverter();
+        Jackson2JsonMessageConverter converter = new Jackson2JsonMessageConverter();
+        // Infer type from method signature instead of relying on __TypeId__ header
+        // This matches the publisher configuration in cavgomain service
+        converter.setAlwaysConvertToInferredType(true);
+        return converter;
     }
 
     @Bean

@@ -23,3 +23,5 @@ public interface VehicleLocationRepository extends JpaRepository<VehicleLocation
     int deleteByRecordedAtBefore(@Param("cutoffTime") LocalDateTime cutoffTime);
 }
 
+
+

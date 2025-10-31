@@ -238,7 +238,7 @@ build_and_push "main" "./cavgomain"
 # build_and_push "ridehail" "./ridehail"
 # build_and_push "trips" "./cavgotrips"
 # build_and_push "booking" "./cavgoBooking"
-# build_and_push "cavgomqt" "./cavgomqt"
+build_and_push "cavgomqt" "./cavgomqt"
 # build_and_push "ussd" "./ussdService"
 
 print_success "All images have been built and pushed successfully!"
