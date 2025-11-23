@@ -36,15 +36,16 @@ public class VehicleService {
     private final VehicleSettingsRepository settingsRepository;
     private final VehicleLocationRepository locationRepository;
     private final VehicleSettingsPublisher settingsPublisher;
+    private final AggregatorSyncService aggregatorSyncService;
 
 
     // CRUD methods
     public VehicleResponseDto createVehicle(VehicleRequestDto vehicle) {
         if (vehicleRepository.existsByLicensePlate(vehicle.getLicensePlate())) {
-            throw new IllegalArgumentException("Vehicle with this license plate already exists");
+            throw new IllegalArgumentException("A vehicle with license plate '" + vehicle.getLicensePlate() + "' already exists. Please use a different license plate.");
         }
         Company company = companyRepository.findByCompanyCode(vehicle.getCompanyCode())
-            .orElseThrow(() -> new IllegalArgumentException("Company with code '" + vehicle.getCompanyCode() + "' not found"));
+            .orElseThrow(() -> new IllegalArgumentException("Company with code '" + vehicle.getCompanyCode() + "' not found. Please check the company code and try again."));
         Vehicle newVehicle = vehicle.toEntity(company);
         return VehicleResponseDto.fromEntity(vehicleRepository.save(newVehicle));
     }
@@ -53,10 +54,10 @@ public class VehicleService {
 
     public VehicleCreateResult createVehicleWithPassword(VehicleRequestDto vehicle) {
         if (vehicleRepository.existsByLicensePlate(vehicle.getLicensePlate())) {
-            throw new IllegalArgumentException("Vehicle with this license plate already exists");
+            throw new IllegalArgumentException("A vehicle with license plate '" + vehicle.getLicensePlate() + "' already exists. Please use a different license plate.");
         }
         Company company = companyRepository.findByCompanyCode(vehicle.getCompanyCode())
-            .orElseThrow(() -> new IllegalArgumentException("Company with code '" + vehicle.getCompanyCode() + "' not found"));
+            .orElseThrow(() -> new IllegalArgumentException("Company with code '" + vehicle.getCompanyCode() + "' not found. Please check the company code and try again."));
         Vehicle newVehicle = vehicle.toEntity(company);
 
         String initialPassword = generateSixDigitPassword();
@@ -67,12 +68,25 @@ public class VehicleService {
         // Initialize vehicle settings with defaults
         VehicleSettings settings = new VehicleSettings();
         settings.setVehicle(saved);
-        settings.setLogout(true);
+        settings.setLogout(false);
         settings.setDevmode(false);
         settings.setDeactivate(false);
         settings.setAppmode(false);
         settings.setSimulate(false);
-        settingsRepository.save(settings);
+        VehicleSettings savedSettings = settingsRepository.save(settings);
+        
+        // Publish settings to RabbitMQ on vehicle registration
+        VehicleSettingsMessage message = VehicleSettingsMessage.fromEntity(savedSettings, saved.getLicensePlate());
+        settingsPublisher.publishSettingsUpdate(message, saved.getId());
+        
+        // Trigger immediate aggregator sync for vehicle creation
+        try {
+            aggregatorSyncService.syncCompanyDataImmediately(saved.getCompany().getId());
+        } catch (Exception e) {
+            // Log error but don't fail the creation
+            // Using System.err as fallback if logger not available
+            System.err.println("Error triggering aggregator sync after vehicle creation: " + e.getMessage());
+        }
         
         return new VehicleCreateResult(VehicleResponseDto.fromEntity(saved), initialPassword);
     }
@@ -227,34 +241,38 @@ public class VehicleService {
 
    public VehicleResponseDto loginVehicle(String companyCode, String licensePlate, String password, String newPubKey) {
        Vehicle vehicle = vehicleRepository.findByLicensePlateWithActiveAssignment(licensePlate)
-               .orElseThrow(() -> new EntityNotFoundException("Vehicle not found"));
+               .orElseThrow(() -> new EntityNotFoundException("Vehicle with license plate '" + licensePlate + "' not found. Please check the license plate and try again."));
 
        if (!vehicle.getCompany().getCompanyCode().equals(companyCode)) {
-           throw new IllegalArgumentException("Company code does not match vehicle");
+           throw new IllegalArgumentException("Company code does not match this vehicle. Please verify the company code and try again.");
        }
 
        String storedHash = vehicle.getPasswordHash();
        if (storedHash == null || !passwordEncoder.matches(password, storedHash)) {
-           throw new IllegalArgumentException("Invalid password");
+           throw new IllegalArgumentException("Invalid password. Please check your password and try again.");
        }
 
        // Check if logout is true (allowing login)
        VehicleSettings settings = settingsRepository.findByVehicleId(vehicle.getId())
-               .orElseThrow(() -> new IllegalStateException("Vehicle settings not found"));
+               .orElseThrow(() -> new IllegalStateException("Vehicle settings not found. Please contact support."));
        
        if (!settings.getLogout()) {
-           throw new IllegalStateException("Vehicle is already logged in. Only one client per vehicle is allowed.");
+           throw new IllegalStateException("This vehicle is already logged in. Only one device can be connected to a vehicle at a time. Please log out the current session first.");
        }
 
        vehicle.setPubKey(newPubKey);
        vehicle.setLastOnlineAt(LocalDateTime.now());
        vehicleRepository.save(vehicle);
 
-       // Set logout to false after successful login
-       settings.setLogout(false);
-       settingsRepository.save(settings);
+      // Set logout to false after successful login
+      settings.setLogout(false);
+      VehicleSettings savedSettings = settingsRepository.save(settings);
 
-       return VehicleResponseDto.fromEntity(vehicle);
+      // Publish settings update to RabbitMQ on logout state change
+      VehicleSettingsMessage message = VehicleSettingsMessage.fromEntity(savedSettings, vehicle.getLicensePlate());
+      settingsPublisher.publishSettingsUpdate(message, vehicle.getId());
+
+      return VehicleResponseDto.fromEntity(vehicle);
    }
 
    public String regenerateVehiclePassword(String licensePlate) {
@@ -435,7 +453,7 @@ public class VehicleService {
                    // Create new settings with defaults if they don't exist
                    VehicleSettings newSettings = new VehicleSettings();
                    newSettings.setVehicle(vehicle);
-                   newSettings.setLogout(true);
+                   newSettings.setLogout(false);
                    newSettings.setDevmode(false);
                    newSettings.setDeactivate(false);
                    newSettings.setAppmode(false);
@@ -453,7 +471,7 @@ public class VehicleService {
                    // Create new settings with defaults if they don't exist
                    VehicleSettings newSettings = new VehicleSettings();
                    newSettings.setVehicle(vehicle);
-                   newSettings.setLogout(true);
+                   newSettings.setLogout(false);
                    newSettings.setDevmode(false);
                    newSettings.setDeactivate(false);
                    newSettings.setAppmode(false);

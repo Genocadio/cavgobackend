@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -313,6 +314,78 @@ func (r *tripRepository) GetTripsByDriverID(driverID int64) ([]models.Trip, erro
 		Order("created_at DESC").
 		Find(&trips).Error
 	return trips, err
+}
+
+func (r *tripRepository) GetTripsByCompanyID(companyID int64, driverID *int64, vehicleID *int64, fromDate *time.Time, afterTripID *int64, limit, offset int) ([]models.Trip, int64, error) {
+	var trips []models.Trip
+	db := r.db.Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		Where("(trips.vehicle->>'company_id')::int = ?", companyID).
+		Where("DATE_TRUNC('month', trips.created_at) = DATE_TRUNC('month', CURRENT_DATE)").
+		Order("trips.updated_at DESC, trips.created_at DESC")
+
+	// Apply optional driver filter
+	if driverID != nil && *driverID > 0 {
+		db = driverIDCondition(db, *driverID)
+	}
+
+	// Apply optional vehicle filter
+	if vehicleID != nil && *vehicleID > 0 {
+		db = db.Where("trips.vehicle_id = ?", *vehicleID)
+	}
+
+	// Apply optional from_date filter
+	if fromDate != nil {
+		db = db.Where("trips.created_at >= ?", *fromDate)
+	}
+
+	// Apply optional after_trip_id filter - return trips updated after the specified trip
+	if afterTripID != nil && *afterTripID > 0 {
+		var afterTrip models.Trip
+		err := r.db.First(&afterTrip, *afterTripID).Error
+		if err == nil {
+			// Only apply filter if the trip exists and belongs to the same company
+			var afterTripCompanyID int64
+			err = r.db.Model(&models.Trip{}).
+				Select("(vehicle->>'company_id')::int").
+				Where("id = ?", *afterTripID).
+				Scan(&afterTripCompanyID).Error
+			if err == nil && afterTripCompanyID == companyID {
+				// Get the updated_at timestamp of the reference trip
+				var afterTripUpdatedAt time.Time
+				err = r.db.Model(&models.Trip{}).
+					Select("updated_at").
+					Where("id = ?", *afterTripID).
+					Scan(&afterTripUpdatedAt).Error
+				if err == nil {
+					// Return trips updated after this timestamp
+					db = db.Where("trips.updated_at > ?", afterTripUpdatedAt)
+				}
+			}
+		}
+	}
+
+	// Get total count before pagination (clone the query to avoid affecting the main query)
+	var total int64
+	countDB := db.Session(&gorm.Session{})
+	err := countDB.Model(&models.Trip{}).Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Apply pagination
+	if limit > 0 {
+		db = db.Limit(limit)
+	}
+	if offset > 0 {
+		db = db.Offset(offset)
+	}
+
+	if err = db.Find(&trips).Error; err != nil {
+		return nil, 0, err
+	}
+	return trips, total, nil
 }
 
 func (r *tripRepository) GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error) {

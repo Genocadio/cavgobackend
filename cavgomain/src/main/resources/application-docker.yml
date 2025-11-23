@@ -35,3 +35,6 @@ eureka:
 
 server:
   port: 6060
+
+aggregator:
+  base-url: ${AGGREGATOR_BASE_URL:}

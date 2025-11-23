@@ -25,3 +25,7 @@ public interface VehicleLocationRepository extends JpaRepository<VehicleLocation
 
 
 
+
+
+
+

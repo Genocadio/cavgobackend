@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.dao.DataIntegrityViolationException;
 
 
 import java.time.LocalDateTime;
@@ -195,6 +196,41 @@ public class GlobalExceptionHandler {
                 .build();
         
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDataIntegrityViolationException(
+            DataIntegrityViolationException ex, HttpServletRequest request) {
+        
+        // Log the exception for debugging
+        log.error("DataIntegrityViolationException: {}", ex.getMessage(), ex);
+        
+        String userMessage = "A data conflict occurred. Please check your input and try again.";
+        String errorMessage = ex.getMessage();
+        
+        // Provide user-friendly messages for common constraint violations
+        if (errorMessage != null) {
+            if (errorMessage.contains("license_plate") || errorMessage.contains("licensePlate")) {
+                userMessage = "A vehicle with this license plate already exists. Please use a different license plate.";
+            } else if (errorMessage.contains("email")) {
+                userMessage = "An account with this email already exists. Please use a different email.";
+            } else if (errorMessage.contains("phone")) {
+                userMessage = "An account with this phone number already exists. Please use a different phone number.";
+            } else if (errorMessage.contains("company_code") || errorMessage.contains("companyCode")) {
+                userMessage = "A company with this code already exists. Please use a different company code.";
+            } else if (errorMessage.contains("unique") || errorMessage.contains("duplicate")) {
+                userMessage = "This information is already in use. Please check your input and try again.";
+            }
+        }
+        
+        ErrorResponse errorResponse = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.CONFLICT.value())
+                .message(userMessage)
+                .path(request.getRequestURI())
+                .build();
+        
+        return new ResponseEntity<>(errorResponse, HttpStatus.CONFLICT);
     }
 
     @ExceptionHandler(Exception.class)

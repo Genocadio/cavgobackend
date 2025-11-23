@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"time"
 	"strings"
+	"time"
 
 	"cavgoBooking/models"
 
@@ -32,7 +32,7 @@ type BundlePublisher struct {
 
 // QueueName returns the reply queue name for logging/diagnostics
 func (p *BundlePublisher) QueueName() string {
-    return p.queueName
+	return p.queueName
 }
 
 // NewRabbitMQConsumer creates a new RabbitMQ consumer
@@ -116,6 +116,7 @@ func NewBundlePublisher(amqpURL, replyQueueName string) (*BundlePublisher, error
 
 // StartConsuming starts consuming messages from the queue
 func (c *RabbitMQConsumer) StartConsuming(ctx context.Context) error {
+	log.Printf("[RabbitMQConsumer] [QUEUE=%s] Starting to consume messages from queue", c.queueName)
 	msgs, err := c.channel.Consume(
 		c.queueName, // queue
 		"",          // consumer
@@ -126,8 +127,10 @@ func (c *RabbitMQConsumer) StartConsuming(ctx context.Context) error {
 		nil,         // args
 	)
 	if err != nil {
-		return fmt.Errorf("failed to register consumer: %w", err)
+		log.Printf("[RabbitMQConsumer] [QUEUE=%s] ERROR: Failed to register consumer: %v", c.queueName, err)
+		return fmt.Errorf("failed to register consumer for queue %s: %w", c.queueName, err)
 	}
+	log.Printf("[RabbitMQConsumer] [QUEUE=%s] Successfully registered consumer, waiting for messages...", c.queueName)
 
 	go func() {
 		for {
@@ -135,17 +138,20 @@ func (c *RabbitMQConsumer) StartConsuming(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case msg := <-msgs:
+				log.Printf("[RabbitMQConsumer] [QUEUE=%s] Processing message with delivery tag=%d", c.queueName, msg.DeliveryTag)
 				if err := c.processMessage(ctx, msg); err != nil {
-					log.Printf("[RabbitMQConsumer] Error processing message: %v", err)
+					log.Printf("[RabbitMQConsumer] [QUEUE=%s] Error processing message (tag=%d): %v", c.queueName, msg.DeliveryTag, err)
 					if isDuplicateKeyError(err) {
-						log.Printf("[RabbitMQConsumer] Duplicate detected; acknowledging to stop requeue loop")
+						log.Printf("[RabbitMQConsumer] [QUEUE=%s] Duplicate detected; acknowledging to stop requeue loop", c.queueName)
 						msg.Ack(false)
 					} else {
 						// Reject and requeue the message for transient errors
+						log.Printf("[RabbitMQConsumer] [QUEUE=%s] Rejecting and requeuing message (tag=%d)", c.queueName, msg.DeliveryTag)
 						msg.Nack(false, true)
 					}
 				} else {
 					// Acknowledge the message
+					log.Printf("[RabbitMQConsumer] [QUEUE=%s] Successfully processed message (tag=%d), acknowledging", c.queueName, msg.DeliveryTag)
 					msg.Ack(false)
 				}
 			}
@@ -157,8 +163,9 @@ func (c *RabbitMQConsumer) StartConsuming(ctx context.Context) error {
 
 // processMessage processes a single message from the queue
 func (c *RabbitMQConsumer) processMessage(ctx context.Context, msg amqp091.Delivery) error {
-	// Log full delivery metadata and payload for observability
-	log.Printf("[RabbitMQConsumer] Received delivery: tag=%d redelivered=%t exchange=%s routingKey=%s contentType=%s contentEncoding=%s correlationId=%s replyTo=%s messageId=%s appId=%s type=%s timestamp=%s",
+	// Log full delivery metadata and payload for observability with queue name
+	log.Printf("[RabbitMQConsumer] [QUEUE=%s] Received delivery: tag=%d redelivered=%t exchange=%s routingKey=%s contentType=%s contentEncoding=%s correlationId=%s replyTo=%s messageId=%s appId=%s type=%s timestamp=%s",
+		c.queueName,
 		msg.DeliveryTag,
 		msg.Redelivered,
 		msg.Exchange,
@@ -173,20 +180,30 @@ func (c *RabbitMQConsumer) processMessage(ctx context.Context, msg amqp091.Deliv
 		msg.Timestamp.Format(time.RFC3339),
 	)
 	if len(msg.Headers) > 0 {
-		log.Printf("[RabbitMQConsumer] Headers: %+v", msg.Headers)
+		log.Printf("[RabbitMQConsumer] [QUEUE=%s] Headers: %+v", c.queueName, msg.Headers)
 	}
-	log.Printf("[RabbitMQConsumer] Payload (%d bytes): %s", len(msg.Body), string(msg.Body))
+
+	// Check for empty messages
+	if len(msg.Body) == 0 {
+		log.Printf("[RabbitMQConsumer] [QUEUE=%s] WARNING: Received empty message (0 bytes). Skipping and acknowledging to prevent requeue loop.", c.queueName)
+		return nil // Return nil to acknowledge and prevent requeue
+	}
+
+	log.Printf("[RabbitMQConsumer] [QUEUE=%s] Payload (%d bytes): %s", c.queueName, len(msg.Body), string(msg.Body))
 
 	var bundle models.BookingBundle
 	if err := json.Unmarshal(msg.Body, &bundle); err != nil {
-		return fmt.Errorf("failed to unmarshal bundle: %w", err)
+		log.Printf("[RabbitMQConsumer] [QUEUE=%s] ERROR: Failed to unmarshal bundle: %v. Payload preview (first 200 chars): %s",
+			c.queueName, err, truncateString(string(msg.Body), 200))
+		return fmt.Errorf("failed to unmarshal bundle from queue %s: %w", c.queueName, err)
 	}
 
 	// Convert bundle to internal models
 	booking, payment, tickets := c.convertBundleToModels(&bundle)
 
 	// Log extracted key identifiers
-	log.Printf("[RabbitMQConsumer] Parsed bundle identifiers: tripId=%s bookingId=%s paymentId=%s tickets=%d",
+	log.Printf("[RabbitMQConsumer] [QUEUE=%s] Parsed bundle identifiers: tripId=%s bookingId=%s paymentId=%s tickets=%d",
+		c.queueName,
 		bundle.TripID,
 		bundle.Booking.ID,
 		bundle.Payment.ID,
@@ -194,9 +211,13 @@ func (c *RabbitMQConsumer) processMessage(ctx context.Context, msg amqp091.Deliv
 	)
 
 	// Save booking data (without generating new IDs)
+	log.Printf("[RabbitMQConsumer] [QUEUE=%s] Saving bundle data: bookingId=%s paymentId=%s tickets=%d",
+		c.queueName, booking.ID, payment.ID, len(tickets))
 	if err := c.saveBundleData(ctx, booking, payment, tickets); err != nil {
+		log.Printf("[RabbitMQConsumer] [QUEUE=%s] ERROR: Failed to save bundle data: %v", c.queueName, err)
 		return fmt.Errorf("failed to save bundle data: %w", err)
 	}
+	log.Printf("[RabbitMQConsumer] [QUEUE=%s] Successfully saved bundle data", c.queueName)
 
 	// Create booking response for publishing
 	booking.Tickets = tickets
@@ -212,8 +233,17 @@ func (c *RabbitMQConsumer) processMessage(ctx context.Context, msg amqp091.Deliv
 		log.Printf("[RabbitMQConsumer] Warning: Failed to publish bundle event: %v", err)
 	}
 
-	log.Printf("[RabbitMQConsumer] Successfully processed booking bundle for trip %s", bundle.TripID)
+	log.Printf("[RabbitMQConsumer] [QUEUE=%s] Successfully processed booking bundle for trip %s bookingId=%s",
+		c.queueName, bundle.TripID, bundle.Booking.ID)
 	return nil
+}
+
+// truncateString truncates a string to maxLen characters
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // convertBundleToModels converts BookingBundle to internal models
@@ -290,30 +320,43 @@ func (c *RabbitMQConsumer) saveBundleData(ctx context.Context, booking *models.B
 	defer c.bookingService.(*bookingService).SetFromRabbitMQ(false)
 
 	// Save booking
+	log.Printf("[RabbitMQConsumer] Saving booking: bookingId=%s tripId=%d status=%s", booking.ID, booking.TripID, booking.Status)
 	if err := repo.CreateBooking(ctx, booking); err != nil {
 		if isDuplicateKeyError(err) {
 			log.Printf("[RabbitMQConsumer] Booking already exists, continuing: bookingId=%s", booking.ID)
 		} else {
+			log.Printf("[RabbitMQConsumer] ERROR: Failed to save booking: bookingId=%s error=%v", booking.ID, err)
 			return fmt.Errorf("failed to save booking: %w", err)
 		}
+	} else {
+		log.Printf("[RabbitMQConsumer] Successfully saved booking: bookingId=%s", booking.ID)
 	}
 
 	// Save payment
+	log.Printf("[RabbitMQConsumer] Saving payment: paymentId=%s bookingId=%s amount=%.2f status=%s",
+		payment.ID, payment.BookingID, payment.Amount, payment.Status)
 	if err := repo.CreatePayment(ctx, payment); err != nil {
 		if isDuplicateKeyError(err) {
 			log.Printf("[RabbitMQConsumer] Payment already exists, continuing: paymentId=%s", payment.ID)
 		} else {
+			log.Printf("[RabbitMQConsumer] ERROR: Failed to save payment: paymentId=%s error=%v", payment.ID, err)
 			return fmt.Errorf("failed to save payment: %w", err)
 		}
+	} else {
+		log.Printf("[RabbitMQConsumer] Successfully saved payment: paymentId=%s", payment.ID)
 	}
 
 	// Save tickets
+	log.Printf("[RabbitMQConsumer] Saving %d tickets for bookingId=%s", len(tickets), booking.ID)
 	if err := repo.CreateTickets(ctx, tickets); err != nil {
 		if isDuplicateKeyError(err) {
 			log.Printf("[RabbitMQConsumer] One or more tickets already exist, continuing: bookingId=%s", booking.ID)
 		} else {
+			log.Printf("[RabbitMQConsumer] ERROR: Failed to save tickets: bookingId=%s error=%v", booking.ID, err)
 			return fmt.Errorf("failed to save tickets: %w", err)
 		}
+	} else {
+		log.Printf("[RabbitMQConsumer] Successfully saved %d tickets for bookingId=%s", len(tickets), booking.ID)
 	}
 
 	return nil
@@ -341,14 +384,15 @@ func (c *RabbitMQConsumer) publishBundleEvent(eventType string, resp *models.Boo
 		return fmt.Errorf("failed to publish to fanout exchange: %w", err)
 	}
 
-	log.Printf("[RabbitMQConsumer] Published bundle event '%s' to fanout exchange for booking %s", eventType, resp.Booking.ID)
+	log.Printf("[RabbitMQConsumer] [QUEUE=%s] Published bundle event '%s' to fanout exchange for booking %s",
+		c.queueName, eventType, resp.Booking.ID)
 	return nil
 }
 
 // PublishBundle publishes a booking bundle to the reply queue
 func (p *BundlePublisher) PublishBundle(bundle *models.BookingBundle) error {
-    fmt.Printf("[BundlePublisher] PUBLISHING reply: queue=%s tripId=%s bookingId=%s paymentId=%s tickets=%d\n",
-        p.queueName, bundle.TripID, bundle.Booking.ID, bundle.Payment.ID, len(bundle.Tickets))
+	fmt.Printf("[BundlePublisher] PUBLISHING reply: queue=%s tripId=%s bookingId=%s paymentId=%s tickets=%d\n",
+		p.queueName, bundle.TripID, bundle.Booking.ID, bundle.Payment.ID, len(bundle.Tickets))
 
 	body, err := json.Marshal(bundle)
 	if err != nil {
@@ -356,7 +400,7 @@ func (p *BundlePublisher) PublishBundle(bundle *models.BookingBundle) error {
 		return fmt.Errorf("failed to marshal bundle: %w", err)
 	}
 
-    fmt.Printf("[BundlePublisher] Payload bytes=%d\n", len(body))
+	fmt.Printf("[BundlePublisher] Payload bytes=%d\n", len(body))
 
 	err = p.channel.Publish(
 		"",          // exchange
@@ -369,12 +413,12 @@ func (p *BundlePublisher) PublishBundle(bundle *models.BookingBundle) error {
 		},
 	)
 
-    if err != nil {
-        fmt.Printf("[BundlePublisher] FAILED reply publish: queue=%s bookingId=%s err=%v\n", p.queueName, bundle.Booking.ID, err)
-        return err
-    }
+	if err != nil {
+		fmt.Printf("[BundlePublisher] FAILED reply publish: queue=%s bookingId=%s err=%v\n", p.queueName, bundle.Booking.ID, err)
+		return err
+	}
 
-    fmt.Printf("[BundlePublisher] PUBLISHED reply: queue=%s bookingId=%s\n", p.queueName, bundle.Booking.ID)
+	fmt.Printf("[BundlePublisher] PUBLISHED reply: queue=%s bookingId=%s\n", p.queueName, bundle.Booking.ID)
 	return nil
 }
 

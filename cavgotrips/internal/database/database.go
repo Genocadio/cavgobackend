@@ -21,6 +21,11 @@ func Initialize(databaseURL string) (*gorm.DB, error) {
 		&models.Trip{},
 		&models.TripWaypoint{},
 		&models.SSESession{},
+		&models.ChangeBatch{},
+		&models.Change{},
+		&models.MainHash{},
+		&models.TripLog{},
+		&models.TripWaypointLog{},
 	)
 	if err != nil {
 		return nil, err

@@ -1,9 +1,9 @@
 package com.nexxserve.cavgomqt.service;
 
 import com.nexxserve.cavgomqt.dto.BookingEventMessage;
-import com.nexxserve.cavgomqt.dto.BookingResponse;
 import com.nexxserve.cavgomqt.dto.Trip;
 import com.nexxserve.cavgomqt.dto.TripEventMessage;
+import com.nexxserve.cavgomqt.dto.TripStatus;
 import lombok.RequiredArgsConstructor;
 import com.nexxserve.cavgomqt.dto.mqtt.BookingBundle;
 import com.nexxserve.cavgomqt.config.RabbitMQConfig;
@@ -21,6 +21,10 @@ public class RabbitMQListenerService {
 
     @Autowired
     private MqttService mqttService;
+
+    @Autowired
+    private TripNotificationService tripNotificationService;
+
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQListenerService.class);
 
     @RabbitListener(queues = "bookings.queue")
@@ -64,24 +68,37 @@ public class RabbitMQListenerService {
             String event = message.getEvent();
             
             // Handle different trip event types
-            switch (event) {
-                case "TRIP_STARTED":
-                    handleTripStartedEvent(message, trip);
-                    break;
-                case "TRIP_COMPLETED":
-                    handleTripCompletedEvent(message, trip);
-                    break;
-                case "TRIP_CANCELLED":
-                    handleTripCancelledEvent(message, trip);
-                    break;
-                case "TRIP_UPDATED":
-                case "TRIP_PROGRESS_UPDATE":
-                    handleTripUpdatedEvent(message, trip);
-                    break;
-                default:
-                    logger.info("📋 Unhandled trip event type: {}, forwarding to MQTT", event);
-                    mqttService.publishTrip(message);
-                    break;
+            // Also check trip status in data, not just event type
+            if (trip.getStatus() == TripStatus.COMPLETED) {
+                // If trip is completed, always send completion notification regardless of event type
+                handleTripCompletedEvent(message, trip);
+            } else {
+                switch (event) {
+                    case "TRIP_STARTED":
+                    case "trip_started":
+                        handleTripStartedEvent(message, trip);
+                        break;
+                    case "TRIP_COMPLETED":
+                    case "trip_completed":
+                        handleTripCompletedEvent(message, trip);
+                        break;
+                    case "TRIP_CANCELLED":
+                    case "trip_cancelled":
+                        handleTripCancelledEvent(message, trip);
+                        break;
+                    case "TRIP_UPDATED":
+                    case "trip_updated":
+                    case "TRIP_PROGRESS_UPDATE":
+                    case "trip_progress_update":
+                    case "progress_update":
+                        handleTripUpdatedEvent(message, trip);
+                        break;
+                    default:
+                        logger.info("📋 Unhandled trip event type: {}, checking trip status", event);
+                        // For unhandled events, still check trip status and send notifications
+                        handleTripUpdatedEvent(message, trip);
+                        break;
+                }
             }
 
         } catch (Exception e) {
@@ -148,6 +165,9 @@ public class RabbitMQListenerService {
                    trip.getVehicle() != null ? trip.getVehicle().getCompanyName() : "unknown");
         logger.info("  - Completion Time: {}", trip.getCompletionTime());
         
+        // Send completion notification
+        tripNotificationService.sendCompletionNotification(trip);
+        
         // Forward to MQTT for other services
         mqttService.publishTrip(message);
         logger.info("✅ TRIP_COMPLETED event processed and forwarded to MQTT");
@@ -205,6 +225,16 @@ public class RabbitMQListenerService {
                 }
             });
         }
+        
+        // Check trip status - if completed, send completion notification
+        if (trip.getStatus() == TripStatus.COMPLETED) {
+            logger.info("📢 Trip status is COMPLETED, sending completion notification");
+            handleTripCompletedEvent(message, trip);
+            return;
+        }
+        
+        // Check and send "about to complete" notification if conditions are met
+        tripNotificationService.checkAndSendAboutToCompleteNotification(trip);
         
         // Forward to MQTT for other services
         mqttService.publishTrip(message);

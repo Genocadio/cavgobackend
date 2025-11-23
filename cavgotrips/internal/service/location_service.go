@@ -8,11 +8,15 @@ import (
 )
 
 type LocationService struct {
-	repo repository.LocationRepository
+	repo                repository.LocationRepository
+	changeTrackingService *ChangeTrackingService
 }
 
-func NewLocationService(repo repository.LocationRepository) *LocationService {
-	return &LocationService{repo: repo}
+func NewLocationService(repo repository.LocationRepository, changeTrackingService *ChangeTrackingService) *LocationService {
+	return &LocationService{
+		repo:                repo,
+		changeTrackingService: changeTrackingService,
+	}
 }
 
 // In internal/service/location_service.go
@@ -101,6 +105,15 @@ func (s *LocationService) CreateLocation(location *models.Location) error {
 	}
 
 	log.Printf("DEBUG: Service: Location created successfully in database with ID: %d", location.ID)
+	
+	// Record change for tracking
+	if s.changeTrackingService != nil {
+		if err := s.changeTrackingService.RecordChange("location", location.ID, false); err != nil {
+			log.Printf("ERROR: Service: Failed to record location change for ID: %d, error: %v", location.ID, err)
+			// Don't fail the operation, just log the error
+		}
+	}
+	
 	return nil
 }
 
@@ -274,6 +287,15 @@ func (s *LocationService) UpdateLocation(id int64, location *models.Location) er
 	}
 
 	log.Printf("DEBUG: Service: Location updated successfully in database for ID: %d", id)
+	
+	// Record change for tracking
+	if s.changeTrackingService != nil {
+		if err := s.changeTrackingService.RecordChange("location", id, false); err != nil {
+			log.Printf("ERROR: Service: Failed to record location change for ID: %d, error: %v", id, err)
+			// Don't fail the operation, just log the error
+		}
+	}
+	
 	return nil
 }
 
@@ -283,5 +305,18 @@ func (s *LocationService) DeleteLocation(id int64) error {
 		return err
 	}
 
-	return s.repo.Delete(id)
+	err := s.repo.Delete(id)
+	if err != nil {
+		return err
+	}
+
+	// Record change for tracking (deletion)
+	if s.changeTrackingService != nil {
+		if err := s.changeTrackingService.RecordChange("location", id, true); err != nil {
+			log.Printf("ERROR: Service: Failed to record location deletion for ID: %d, error: %v", id, err)
+			// Don't fail the operation, just log the error
+		}
+	}
+
+	return nil
 }

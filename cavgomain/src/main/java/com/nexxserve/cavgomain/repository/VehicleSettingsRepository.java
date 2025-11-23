@@ -13,3 +13,7 @@ public interface VehicleSettingsRepository extends JpaRepository<VehicleSettings
 
 
 
+
+
+
+

@@ -18,7 +18,7 @@ public class VehicleSettings extends BaseEntity {
     private Vehicle vehicle;
 
     @Column(name = "logout", nullable = false)
-    private Boolean logout = true;
+    private Boolean logout = false;
 
     @Column(name = "devmode", nullable = false)
     private Boolean devmode = false;

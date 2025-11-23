@@ -1,0 +1,76 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"os"
+)
+
+// Config holds deployment configuration
+type Config struct {
+	Host      string
+	DataDir   string
+	RemoteDir string
+	User      string
+}
+
+// Deployer handles deployment operations
+type Deployer struct {
+	config *Config
+}
+
+// NewDeployer creates a new deployer instance
+func NewDeployer(config *Config) *Deployer {
+	return &Deployer{config: config}
+}
+
+// Deploy executes the deployment
+func (d *Deployer) Deploy(services []string) error {
+	fmt.Printf("Deploying services: %v\n", services)
+	// Implementation here
+	return nil
+}
+
+func main() {
+	var (
+		deployAll  = flag.Bool("all", false, "Deploy all services")
+		selectMode = flag.Bool("choose", false, "Interactive selection")
+		cleanMode  = flag.Bool("clean", false, "Clean mode")
+		targetHost = flag.String("host", "api.gocavgo.com", "Target host")
+		user       = flag.String("user", "", "SSH username")
+	)
+	flag.Parse()
+
+	// Prompt for user if not provided
+	if *user == "" {
+		fmt.Print("Enter SSH username: ")
+		fmt.Scanln(user)
+	}
+
+	config := &Config{
+		Host:      *targetHost,
+		DataDir:   "/opt/cavgo-data",
+		RemoteDir: "/opt/cavgo-system",
+		User:      *user,
+	}
+
+	deployer := NewDeployer(config)
+
+	if *cleanMode {
+		fmt.Println("Clean mode enabled")
+		// Implement clean
+	}
+
+	// Select services
+	services := []string{"cavgomain", "cavgotrips"} // Placeholder
+	if *deployAll {
+		services = []string{"all"}
+	}
+
+	if err := deployer.Deploy(services); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+

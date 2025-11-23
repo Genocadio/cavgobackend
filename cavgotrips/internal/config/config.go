@@ -11,6 +11,8 @@ type Config struct {
 	VehicleServiceURL string
 	// Add RabbitMQ config
 	RabbitMQ RabbitMQConfig
+	StoreLogs bool
+	TripUpdateBaseURL string
 }
 
 type EurekaConfig struct {
@@ -49,6 +51,8 @@ func Load() *Config {
 			Queue:    getEnv("RABBITMQ_QUEUE", "trips.queue"),
 			Exchange: getEnv("RABBITMQ_EXCHANGE", "bookings.fanout"),
 		},
+		StoreLogs: getEnv("STORE_LOGS", "false") == "true",
+		TripUpdateBaseURL: getEnv("TRIP_UPDATE_BASE_URL", ""),
 	}
 }
 

@@ -1,0 +1,36 @@
+# Thin wrapper for deploy-cavgo-core
+# This script just calls the Go binary with all arguments
+
+$ErrorActionPreference = "Stop"
+
+# Get script directory
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$CoreDir = Join-Path $ScriptDir "core"
+
+# Detect platform
+$OS = "windows"
+$ARCH = "amd64"
+
+$BinaryName = "deploy-cavgo-core.exe"
+$CoreBinary = Join-Path $CoreDir $BinaryName
+
+# Build if binary doesn't exist
+if (-not (Test-Path $CoreBinary)) {
+    Write-Host "Building deployment core..."
+    
+    if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+        Write-Error "Error: Go is not installed. Please install Go to build the deployment tool."
+        exit 1
+    }
+    
+    Push-Location $CoreDir
+    $env:GOOS = $OS
+    $env:GOARCH = $ARCH
+    go build -o $BinaryName .
+    Pop-Location
+}
+
+# Execute the binary with all arguments
+& $CoreBinary $args
+
+

@@ -27,6 +27,8 @@ create_db_if_not_exists "cavgotrips"
 # Create database for cavgobooks (Go service)
 create_db_if_not_exists "cavgobooks"
 
+create_db_if_not_exists "cavgoaggrgate"
+
 create_db_if_not_exists "cavgomqt"
 
 create_db_if_not_exists "ridehail"

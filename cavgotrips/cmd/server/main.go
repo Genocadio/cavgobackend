@@ -71,10 +71,38 @@ func main() {
 	// Initialize SSE service
 	sseService := service.NewSSEService(sessionService)
 
+	// Initialize change tracking repository and service
+	changeTrackingRepo := repository.NewChangeTrackingRepository(db)
+	changeTrackingService := service.NewChangeTrackingService(changeTrackingRepo)
+	
+	// Start inactivity monitor for merge
+	changeTrackingService.StartInactivityMonitor()
+
+	// Initialize trip log repository and service
+	tripLogRepo := repository.NewTripLogRepository(db)
+	tripLogService := service.NewTripLogService(tripLogRepo, cfg.StoreLogs)
+
+	// Initialize trip update scheduler and poster only if baseURL is configured
+	var tripUpdateScheduler *service.TripUpdateScheduler
+	var tripUpdatePoster *service.TripUpdatePoster
+	if cfg.TripUpdateBaseURL != "" {
+		tripUpdateScheduler = service.NewTripUpdateScheduler()
+		tripUpdatePoster = service.NewTripUpdatePoster(cfg.TripUpdateBaseURL)
+		log.Printf("[TripUpdate] Trip update posting enabled with baseURL: %s", cfg.TripUpdateBaseURL)
+	} else {
+		log.Printf("[TripUpdate] Trip update posting disabled (TRIP_UPDATE_BASE_URL not set)")
+	}
+
 	// Initialize services
-	locationService := service.NewLocationService(locationRepo)
-	routeService := service.NewRouteService(routeRepo)
-	tripService := service.NewTripService(tripRepo, routeRepo, locationRepo, cfg.VehicleServiceURL, rabbitMQService, sseService, sessionService)
+	locationService := service.NewLocationService(locationRepo, changeTrackingService)
+	routeService := service.NewRouteService(routeRepo, changeTrackingService)
+	tripService := service.NewTripService(tripRepo, routeRepo, locationRepo, cfg.VehicleServiceURL, rabbitMQService, sseService, sessionService, tripLogService, tripUpdateScheduler, tripUpdatePoster)
+
+	// Start cleanup scheduler if logging is enabled
+	if cfg.StoreLogs {
+		tripLogService.StartCleanupScheduler()
+		log.Printf("[TripLogService] Cleanup scheduler started")
+	}
 
 	// Listen to booking events from fanout exchange
 	go func() {
@@ -273,11 +301,12 @@ func main() {
 	// Initialize handlers
 	locationHandler := handlers.NewLocationHandler(locationService)
 	routeHandler := handlers.NewRouteHandler(routeService)
-	tripHandler := handlers.NewTripHandler(tripService)
+	tripHandler := handlers.NewTripHandler(tripService, tripUpdateScheduler, tripUpdatePoster, cfg.TripUpdateBaseURL)
 	sseHandler := handlers.NewSSEHandler(sseService)
+	syncHandler := handlers.NewSyncHandler(changeTrackingService, routeService, locationService)
 
 	// Setup router
-	r := router.Setup(locationHandler, routeHandler, tripHandler, sseHandler)
+	r := router.Setup(locationHandler, routeHandler, tripHandler, sseHandler, syncHandler)
 
 	// Register with Eureka with retry mechanism
 	go func() {

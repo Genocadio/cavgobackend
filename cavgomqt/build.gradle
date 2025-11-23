@@ -26,6 +26,7 @@ repositories {
     mavenCentral()
 }
 dependencies {
+
     implementation 'org.springframework.boot:spring-boot-starter-integration'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.integration:spring-integration-http'
@@ -36,6 +37,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
     implementation 'org.springframework.integration:spring-integration-amqp'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'com.google.firebase:firebase-admin:9.7.0'
     implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
     testImplementation 'org.springframework.amqp:spring-rabbit-test'
     compileOnly 'org.projectlombok:lombok'

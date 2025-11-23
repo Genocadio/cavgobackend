@@ -1,0 +1,18 @@
+#!/bin/bash
+# Wrapper script to run deploy.py with virtual environment activated
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/venv"
+
+# Activate virtual environment
+if [ -d "$VENV_DIR" ]; then
+    source "$VENV_DIR/bin/activate"
+else
+    echo "Error: Virtual environment not found at $VENV_DIR"
+    echo "Please run: python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
+    exit 1
+fi
+
+# Run the deploy script with all arguments
+exec python3 "$SCRIPT_DIR/deploy.py" "$@"
+

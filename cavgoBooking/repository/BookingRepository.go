@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"cavgoBooking/models"
@@ -43,6 +44,8 @@ func NewBookingRepository(db *sqlx.DB) BookingRepository {
 }
 
 func (r *bookingRepository) CreateBooking(ctx context.Context, booking *models.Booking) error {
+	fmt.Printf("[BookingRepository] Creating booking: bookingId=%s tripId=%d status=%s bookingReference=%s\n", 
+		booking.ID, booking.TripID, booking.Status, booking.BookingReference)
 	query := `
 		INSERT INTO bookings (id, trip_id, user_id, user_email, user_phone, user_name, 
 					     pickup_location_id, dropoff_location_id, number_of_tickets, 
@@ -52,6 +55,11 @@ func (r *bookingRepository) CreateBooking(ctx context.Context, booking *models.B
 			:total_amount, :status, :booking_reference, :created_at, :updated_at)`
 
 	_, err := r.db.NamedExecContext(ctx, query, booking)
+	if err != nil {
+		fmt.Printf("[BookingRepository] ERROR: Failed to create booking: bookingId=%s error=%v\n", booking.ID, err)
+	} else {
+		fmt.Printf("[BookingRepository] Successfully created booking: bookingId=%s\n", booking.ID)
+	}
 	return err
 }
 
@@ -111,6 +119,12 @@ func (r *bookingRepository) UpdateBookingStatus(ctx context.Context, id string, 
 }
 
 func (r *bookingRepository) CreateTickets(ctx context.Context, tickets []models.Ticket) error {
+	if len(tickets) == 0 {
+		fmt.Printf("[BookingRepository] WARNING: No tickets to create\n")
+		return nil
+	}
+	bookingID := tickets[0].BookingID
+	fmt.Printf("[BookingRepository] Creating %d tickets: bookingId=%s\n", len(tickets), bookingID)
 	query := `
 		INSERT INTO tickets (id, booking_id, ticket_number, qr_code, is_used, created_at, updated_at,
 		                   pickup_location_name, dropoff_location_name, car_plate, car_company, pickup_time)
@@ -118,6 +132,11 @@ func (r *bookingRepository) CreateTickets(ctx context.Context, tickets []models.
 		        :pickup_location_name, :dropoff_location_name, :car_plate, :car_company, :pickup_time)`
 
 	_, err := r.db.NamedExecContext(ctx, query, tickets)
+	if err != nil {
+		fmt.Printf("[BookingRepository] ERROR: Failed to create tickets: bookingId=%s count=%d error=%v\n", bookingID, len(tickets), err)
+	} else {
+		fmt.Printf("[BookingRepository] Successfully created %d tickets: bookingId=%s\n", len(tickets), bookingID)
+	}
 	return err
 }
 
@@ -166,11 +185,18 @@ func (r *bookingRepository) ValidateTicket(ctx context.Context, ticketID string,
 }
 
 func (r *bookingRepository) CreatePayment(ctx context.Context, payment *models.Payment) error {
+	fmt.Printf("[BookingRepository] Creating payment: paymentId=%s bookingId=%s amount=%.2f status=%s method=%s\n", 
+		payment.ID, payment.BookingID, payment.Amount, payment.Status, payment.PaymentMethod)
 	query := `
 		INSERT INTO payments (id, booking_id, amount, payment_method, status, transaction_id, payment_data, created_at, updated_at)
 		VALUES (:id, :booking_id, :amount, :payment_method, :status, :transaction_id, :payment_data, :created_at, :updated_at)`
 
 	_, err := r.db.NamedExecContext(ctx, query, payment)
+	if err != nil {
+		fmt.Printf("[BookingRepository] ERROR: Failed to create payment: paymentId=%s error=%v\n", payment.ID, err)
+	} else {
+		fmt.Printf("[BookingRepository] Successfully created payment: paymentId=%s\n", payment.ID)
+	}
 	return err
 }
 

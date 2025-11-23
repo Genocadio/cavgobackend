@@ -1,9 +1,22 @@
 # Build and Push Script for CavGo System
 # Docker Hub Repository: genoyves/cavgo-system
+#
+# Usage:
+#   .\build-push-cavgo.ps1              # Build and push all services
+#   .\build-push-cavgo.ps1 -BuildOnly   # Build only (no push)
+#   .\build-push-cavgo.ps1 -PushOnly    # Push only (assumes images already built)
 
 param(
-    [switch]$SkipCleanup
+    [switch]$SkipCleanup,
+    [switch]$BuildOnly,
+    [switch]$PushOnly
 )
+
+# Validate flags
+if ($BuildOnly -and $PushOnly) {
+    Write-Error "Cannot use -BuildOnly and -PushOnly together"
+    exit 1
+}
 
 # Set error action preference
 $ErrorActionPreference = "Stop"
@@ -49,41 +62,46 @@ function Build-AndPush {
     
     $ImageName = "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:${ServiceName}"
     
-    Write-Status "Building ${ServiceName}..."
-    
-    # Check if context directory exists
-    if (-not (Test-Path $ContextPath -PathType Container)) {
-        Write-Error "Context directory $ContextPath does not exist for $ServiceName"
-        return $false
-    }
-    
-    # Build the image
-    try {
-        docker build -t $ImageName $ContextPath
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Successfully built $ImageName"
-        } else {
+    # Build phase
+    if (-not $PushOnly) {
+        Write-Status "Building ${ServiceName}..."
+        
+        # Check if context directory exists
+        if (-not (Test-Path $ContextPath -PathType Container)) {
+            Write-Error "Context directory $ContextPath does not exist for $ServiceName"
+            return $false
+        }
+        
+        # Build the image
+        try {
+            docker build -t $ImageName $ContextPath
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "Successfully built $ImageName"
+            } else {
+                Write-Error "Failed to build $ImageName"
+                return $false
+            }
+        } catch {
             Write-Error "Failed to build $ImageName"
             return $false
         }
-    } catch {
-        Write-Error "Failed to build $ImageName"
-        return $false
     }
     
-    # Push the image
-    Write-Status "Pushing $ImageName..."
-    try {
-        docker push $ImageName
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Successfully pushed $ImageName"
-        } else {
+    # Push phase
+    if (-not $BuildOnly) {
+        Write-Status "Pushing $ImageName..."
+        try {
+            docker push $ImageName
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "Successfully pushed $ImageName"
+            } else {
+                Write-Error "Failed to push $ImageName"
+                return $false
+            }
+        } catch {
             Write-Error "Failed to push $ImageName"
             return $false
         }
-    } catch {
-        Write-Error "Failed to push $ImageName"
-        return $false
     }
     
     Write-Host ""
@@ -144,37 +162,43 @@ fi
         $InitScriptContent | Out-File -FilePath "$TempDir/init-multiple-dbs.sh" -Encoding UTF8
     }
     
-    # Build the image
-    try {
-        docker build -t $ImageName $TempDir
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Successfully built $ImageName"
-        } else {
+    # Build phase
+    if (-not $PushOnly) {
+        # Build the image
+        try {
+            docker build -t $ImageName $TempDir
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "Successfully built $ImageName"
+            } else {
+                Write-Error "Failed to build $ImageName"
+                Remove-Item $TempDir -Recurse -Force
+                return $false
+            }
+        } catch {
             Write-Error "Failed to build $ImageName"
             Remove-Item $TempDir -Recurse -Force
             return $false
         }
-    } catch {
-        Write-Error "Failed to build $ImageName"
-        Remove-Item $TempDir -Recurse -Force
-        return $false
     }
     
-    # Push the image
-    Write-Status "Pushing $ImageName..."
-    try {
-        docker push $ImageName
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Successfully pushed $ImageName"
-        } else {
+    # Push phase
+    if (-not $BuildOnly) {
+        # Push the image
+        Write-Status "Pushing $ImageName..."
+        try {
+            docker push $ImageName
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "Successfully pushed $ImageName"
+            } else {
+                Write-Error "Failed to push $ImageName"
+                Remove-Item $TempDir -Recurse -Force
+                return $false
+            }
+        } catch {
             Write-Error "Failed to push $ImageName"
             Remove-Item $TempDir -Recurse -Force
             return $false
         }
-    } catch {
-        Write-Error "Failed to push $ImageName"
-        Remove-Item $TempDir -Recurse -Force
-        return $false
     }
     
     # Clean up temporary directory
@@ -186,6 +210,13 @@ fi
 # Main execution
 Write-Status "Starting build and push process for CavGo System"
 Write-Status "Docker Hub Repository: $DOCKER_USERNAME/$DOCKER_REPOSITORY"
+if ($BuildOnly) {
+    Write-Status "Mode: BUILD ONLY (images will not be pushed)"
+} elseif ($PushOnly) {
+    Write-Status "Mode: PUSH ONLY (assuming images are already built)"
+} else {
+    Write-Status "Mode: BUILD AND PUSH"
+}
 Write-Host ""
 
 # Check if Docker is running
@@ -199,35 +230,39 @@ try {
     exit 1
 }
 
-# Check if logged in to Docker Hub
-try {
-    $DockerInfo = docker info 2>$null
-    if ($DockerInfo -notmatch "Username: $DOCKER_USERNAME") {
-        Write-Warning "You may not be logged in to Docker Hub as $DOCKER_USERNAME"
+# Check if logged in to Docker Hub (only needed for push operations)
+if (-not $BuildOnly) {
+    try {
+        $DockerInfo = docker info 2>$null
+        if ($DockerInfo -notmatch "Username: $DOCKER_USERNAME") {
+            Write-Warning "You may not be logged in to Docker Hub as $DOCKER_USERNAME"
+            Write-Status "Attempting to login..."
+            docker login
+        }
+    } catch {
+        Write-Warning "Could not verify Docker Hub login status"
         Write-Status "Attempting to login..."
         docker login
     }
-} catch {
-    Write-Warning "Could not verify Docker Hub login status"
-    Write-Status "Attempting to login..."
-    docker login
 }
 
 # Build and push PostgreSQL with init script
 Write-Status "Building and pushing PostgreSQL with init script..."
-# Build-AndPush-Postgres
+Build-AndPush-Postgres
 
 # Build and push application services
 Write-Status "Building and pushing application services..."
 
 # Build and push each service
-# Build-AndPush "eureka" "./Eurekacavgo"
-# Build-AndPush "main" "./cavgomain"
-# Build-AndPush "gateway" "./Cavgogateway"
-# Build-AndPush "trips" "./cavgotrips"
+Build-AndPush "eureka" "./Eurekacavgo"
+Build-AndPush "main" "./cavgomain"
+Build-AndPush "gateway" "./Cavgogateway"
+Build-AndPush "ridehail" "./ridehail"
+Build-AndPush "trips" "./cavgotrips"
 Build-AndPush "booking" "./cavgoBooking"
-# Build-AndPush "cavgomqt" "./cavgomqt"
-# Build-AndPush "ussd" "./ussdService"
+Build-AndPush "cavgomqt" "./cavgomqt"
+Build-AndPush "ussd" "./ussdService"
+Build-AndPush "adminaggre" "./adminaggre"
 
 Write-Success "All images have been built and pushed successfully!"
 Write-Status "You can now use the docker-compose-hub.yml file to deploy using the pushed images."
@@ -238,9 +273,12 @@ Write-Host "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:postgres"
 Write-Host "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:eureka"
 Write-Host "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:main"
 Write-Host "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:gateway"
+Write-Host "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ridehail"
 Write-Host "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:trips"
 Write-Host "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:booking"
+Write-Host "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:cavgomqt"
 Write-Host "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ussd"
+Write-Host "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:adminaggre"
 
 # Optional: Clean up local images to save space
 if (-not $SkipCleanup) {
@@ -254,9 +292,12 @@ if (-not $SkipCleanup) {
             "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:eureka",
             "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:main",
             "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:gateway",
+            "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ridehail",
             "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:trips",
             "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:booking",
-            "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ussd"
+            "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:cavgomqt",
+            "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ussd",
+            "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:adminaggre"
         )
         
         foreach ($Image in $ImagesToRemove) {
