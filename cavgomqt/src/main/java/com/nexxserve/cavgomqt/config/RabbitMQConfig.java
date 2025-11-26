@@ -19,6 +19,9 @@ public class RabbitMQConfig {
     public static final String TRIPS_PUBLISHER_QUEUE = "trips.publisher.queue";
     public static final String BOOKINGS_BUNDLE_QUEUE = "bookingbundles.queue";
     public static final String BOOKINGS_BUNDLE_REPLY_QUEUE = "bookingbundles.reply.queue";
+    public static final String VEHICLE_LOCATION_UPDATES_QUEUE = "vehicle.location.updates";
+    public static final String VEHICLE_SETTINGS_QUEUE = "vehicle.settings.queue";
+    public static final String VEHICLE_SETTINGS_EXCHANGE = "vehicle.settings.exchange";
 
     @Bean
     public FanoutExchange bookingsFanoutExchange() {
@@ -96,8 +99,45 @@ public class RabbitMQConfig {
     }
 
     @Bean
+    public Queue vehicleLocationUpdatesQueue() {
+        // Queue already exists without DLQ in RabbitMQ (created by another service)
+        // Just declare it as durable without additional arguments to avoid mismatch
+        return QueueBuilder.durable(VEHICLE_LOCATION_UPDATES_QUEUE).build();
+    }
+
+    @Bean
+    public TopicExchange vehicleSettingsExchange() {
+        return new TopicExchange(VEHICLE_SETTINGS_EXCHANGE);
+    }
+
+    @Bean
+    public Queue vehicleSettingsQueue() {
+        return QueueBuilder.durable(VEHICLE_SETTINGS_QUEUE)
+                .withArgument("x-dead-letter-exchange", "")
+                .withArgument("x-dead-letter-routing-key", VEHICLE_SETTINGS_QUEUE + ".dlq")
+                .build();
+    }
+
+    @Bean
+    public Queue vehicleSettingsDeadLetterQueue() {
+        return QueueBuilder.durable(VEHICLE_SETTINGS_QUEUE + ".dlq").build();
+    }
+
+    @Bean
+    public Binding vehicleSettingsBinding(Queue vehicleSettingsQueue, TopicExchange vehicleSettingsExchange) {
+        // Bind with wildcard to receive settings for all vehicles
+        return BindingBuilder.bind(vehicleSettingsQueue)
+                .to(vehicleSettingsExchange)
+                .with("vehicle.settings.*");
+    }
+
+    @Bean
     public MessageConverter jsonMessageConverter() {
-        return new Jackson2JsonMessageConverter();
+        Jackson2JsonMessageConverter converter = new Jackson2JsonMessageConverter();
+        // Infer type from method signature instead of relying on __TypeId__ header
+        // This matches the publisher configuration in cavgomain service
+        converter.setAlwaysConvertToInferredType(true);
+        return converter;
     }
 
     @Bean

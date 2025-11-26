@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -23,18 +24,26 @@ func NewBookingHandler(bookingService service.BookingService) *BookingHandler {
 
 // CreateBooking handles POST /bookings
 func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("[BookingHandler] Received POST /bookings request from %s\n", r.RemoteAddr)
+
 	var req models.BookingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fmt.Printf("[BookingHandler] ERROR: Failed to decode request body: %v\n", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	fmt.Printf("[BookingHandler] Request decoded: tripId=%d numberOfTickets=%d userName=%s\n",
+		req.TripID, req.NumberOfTickets, req.UserName)
 
 	response, err := h.bookingService.CreateBooking(r.Context(), &req)
 	if err != nil {
+		fmt.Printf("[BookingHandler] ERROR: Booking creation failed: %v\n", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	fmt.Printf("[BookingHandler] Booking created successfully: bookingId=%s bookingReference=%s\n",
+		response.Booking.ID, response.Booking.BookingReference)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)

@@ -1,0 +1,41 @@
+#!/bin/bash
+# Build deploy-cavgo-core for all platforms
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORE_DIR="$SCRIPT_DIR/core"
+OUTPUT_DIR="$SCRIPT_DIR/bin"
+
+# Create output directory
+mkdir -p "$OUTPUT_DIR"
+
+echo "Building deploy-cavgo-core for all platforms..."
+
+cd "$CORE_DIR"
+
+# Linux
+echo "Building for Linux (amd64)..."
+GOOS=linux GOARCH=amd64 go build -o "$OUTPUT_DIR/deploy-cavgo-core-linux-amd64" .
+
+# Linux ARM64
+echo "Building for Linux (arm64)..."
+GOOS=linux GOARCH=arm64 go build -o "$OUTPUT_DIR/deploy-cavgo-core-linux-arm64" .
+
+# macOS Intel
+echo "Building for macOS (amd64)..."
+GOOS=darwin GOARCH=amd64 go build -o "$OUTPUT_DIR/deploy-cavgo-core-darwin-amd64" .
+
+# macOS Apple Silicon
+echo "Building for macOS (arm64)..."
+GOOS=darwin GOARCH=arm64 go build -o "$OUTPUT_DIR/deploy-cavgo-core-darwin-arm64" .
+
+# Windows
+echo "Building for Windows (amd64)..."
+GOOS=windows GOARCH=amd64 go build -o "$OUTPUT_DIR/deploy-cavgo-core-windows-amd64.exe" .
+
+echo ""
+echo "✅ Build complete! Binaries are in: $OUTPUT_DIR"
+ls -lh "$OUTPUT_DIR"
+
+

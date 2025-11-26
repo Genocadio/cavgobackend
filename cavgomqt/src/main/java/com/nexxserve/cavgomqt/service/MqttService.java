@@ -11,7 +11,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class MqttService {
@@ -30,6 +29,9 @@ public class MqttService {
 
     @Autowired
     private MessageChannel bookingBundleOutboundChannel;
+
+    @Autowired
+    private MessageChannel vehicleSettingsOutboundChannel;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -186,20 +188,70 @@ public class MqttService {
      */
     public void pingAllCars() {
         // Note: This uses wildcard topic, cars should subscribe to car/{their_id}/ping
+        // You might want to maintain a list of active car IDs and ping them individually
+        // This is just an example of how you could structure a broadcast
+        System.out.println("🏓 Broadcast ping initiated (not implemented - ping cars individually instead)");
+    }
+
+    public void publishVehicleSettings(Long vehicleId, com.nexxserve.cavgomqt.dto.VehicleSettingsMessage settings) {
+        System.out.println("⚙️  === PUBLISHING VEHICLE SETTINGS TO MQTT ===");
+        System.out.println("  - Timestamp: " + System.currentTimeMillis());
+        
         try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("broadcast", true);
-            payload.put("ping_time", System.currentTimeMillis());
-            payload.put("expected_response", "pong");
-
-            String jsonPayload = objectMapper.writeValueAsString(payload);
-
-            // You might want to maintain a list of active car IDs and ping them individually
-            // This is just an example of how you could structure a broadcast
-            System.out.println("🏓 Broadcast ping initiated");
-
+            // Validate input
+            if (settings == null) {
+                System.err.println("❌ Vehicle settings is null - cannot publish to MQTT");
+                return;
+            }
+            
+            if (vehicleId == null) {
+                System.err.println("❌ Vehicle ID is null - cannot publish settings to MQTT");
+                return;
+            }
+            
+            System.out.println("  - Vehicle ID: " + vehicleId);
+            System.out.println("  - License Plate: " + settings.getLicensePlate());
+            System.out.println("  - Logout: " + settings.getLogout());
+            System.out.println("  - Devmode: " + settings.getDevmode());
+            System.out.println("  - Deactivate: " + settings.getDeactivate());
+            System.out.println("  - Appmode: " + settings.getAppmode());
+            System.out.println("  - Simulate: " + settings.getSimulate());
+            
+            String topic = "car/" + vehicleId + "/settings";
+            System.out.println("  - MQTT Topic: " + topic);
+            
+            // Serialize to JSON
+            String jsonPayload = objectMapper.writeValueAsString(settings);
+            System.out.println("  - Payload length: " + jsonPayload.length());
+            System.out.println("  - Payload: " + jsonPayload);
+            
+            // Send to MQTT
+            System.out.println("📤 Sending vehicle settings to MQTT...");
+            vehicleSettingsOutboundChannel.send(
+                    MessageBuilder.withPayload(jsonPayload)
+                            .setHeader("mqtt_topic", topic)
+                            .setHeader("mqtt_qos", 1)
+                            .setHeader("mqtt_retained", true) // Retain so vehicle gets settings on reconnect
+                            .build()
+            );
+            
+            System.out.println("✅ SUCCESS: Vehicle settings published to MQTT");
+            System.out.println("  - Topic: " + topic);
+            System.out.println("  - Vehicle ID: " + vehicleId);
+            System.out.println("  - License Plate: " + settings.getLicensePlate());
+            
         } catch (JsonProcessingException e) {
-            System.err.println("❌ Failed to serialize broadcast ping: " + e.getMessage());
+            System.err.println("❌ FAILED to serialize vehicle settings for MQTT:");
+            System.err.println("  - Error: " + e.getMessage());
+            System.err.println("  - Vehicle ID: " + vehicleId);
+            System.err.println("  - Settings: " + (settings != null ? settings.toString() : "null"));
+            e.printStackTrace();
+        } catch (Exception e) {
+            System.err.println("❌ FAILED to publish vehicle settings to MQTT:");
+            System.err.println("  - Error: " + e.getMessage());
+            System.err.println("  - Vehicle ID: " + vehicleId);
+            System.err.println("  - Exception type: " + e.getClass().getSimpleName());
+            e.printStackTrace();
         }
     }
 

@@ -1,0 +1,43 @@
+#!/bin/bash
+# Thin wrapper for deploy-cavgo-core
+# This script just calls the Go binary with all arguments
+
+set -e
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORE_DIR="$SCRIPT_DIR/core"
+
+# Detect platform and set binary name
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+
+case "$ARCH" in
+    x86_64) ARCH="amd64" ;;
+    arm64|aarch64) ARCH="arm64" ;;
+esac
+
+BINARY_NAME="deploy-cavgo-core"
+if [ "$OS" = "windows" ] || [ "$OS" = "mingw" ]; then
+    BINARY_NAME="deploy-cavgo-core.exe"
+fi
+
+CORE_BINARY="$CORE_DIR/$BINARY_NAME"
+
+# Build if binary doesn't exist
+if [ ! -f "$CORE_BINARY" ]; then
+    echo "Building deployment core..."
+    if ! command -v go &> /dev/null; then
+        echo "Error: Go is not installed. Please install Go to build the deployment tool."
+        exit 1
+    fi
+    
+    cd "$CORE_DIR"
+    GOOS="$OS" GOARCH="$ARCH" go build -o "$BINARY_NAME" .
+    cd - > /dev/null
+fi
+
+# Execute the binary with all arguments
+exec "$CORE_BINARY" "$@"
+
+

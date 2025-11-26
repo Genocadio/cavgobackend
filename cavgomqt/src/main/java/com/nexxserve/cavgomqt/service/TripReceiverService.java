@@ -30,6 +30,9 @@ public class TripReceiverService {
     @Autowired
     private RabbitMQTripPublisherService rabbitMQTripPublisherService;
 
+    @Autowired
+    private TripNotificationService tripNotificationService;
+
     /**
      * Process incoming trip event message from MQTT
      * @param topic MQTT topic (e.g., "car/3/trip/updates")
@@ -303,22 +306,28 @@ public class TripReceiverService {
         
         switch (event) {
             case "TRIP_STARTED":
+            case "trip_started":
                 handleTripStarted(carId, tripData);
                 break;
             case "TRIP_COMPLETED":
+            case "trip_completed":
                 handleTripCompleted(carId, tripData);
                 break;
             case "TRIP_CANCELLED":
+            case "trip_cancelled":
                 handleTripCancelled(carId, tripData);
                 break;
             case "TRIP_UPDATED":
-                handleTripUpdated(carId, tripData);
-                break;
+            case "trip_updated":
             case "TRIP_PROGRESS_UPDATE":
+            case "trip_progress_update":
+            case "progress_update":
                 handleTripUpdated(carId, tripData);
                 break;
             default:
                 logger.info("Unhandled trip event: {}", event);
+                // Even for unhandled events, check trip status and send notifications if needed
+                handleTripUpdated(carId, tripData);
                 break;
         }
     }
@@ -335,6 +344,8 @@ public class TripReceiverService {
         logger.info("✅ Trip completed for car: {}, trip ID: {}", carId, tripData.getId());
         // Clear active trip from vehicle registry
         vehicleRegistryService.clearActiveTrip(Long.valueOf(carId));
+        // Send completion notification
+        tripNotificationService.sendCompletionNotification(tripData);
     }
 
     private void handleTripCancelled(String carId, Trip tripData) {
@@ -345,8 +356,21 @@ public class TripReceiverService {
 
     private void handleTripUpdated(String carId, Trip tripData) {
         logger.info("🔄 Trip updated for car: {}, trip ID: {}", carId, tripData.getId());
+        logger.info("📊 Trip status: {}, Remaining distance: {}m", 
+                   tripData.getStatus(), tripData.getRemainingDistanceToDestination());
+        
+        // Check trip status first - if completed, send completion notification
+        if (tripData.getStatus() == TripStatus.COMPLETED) {
+            logger.info("📢 Trip status is COMPLETED, sending completion notification");
+            handleTripCompleted(carId, tripData);
+            return;
+        }
+        
         // Update trip information in registry or database
         // This could include location updates, status changes, etc.
+        // Check and send "about to complete" notification if conditions are met
+        logger.info("🔔 Checking if 'about to complete' notification should be sent...");
+        tripNotificationService.checkAndSendAboutToCompleteNotification(tripData);
     }
 
     /**

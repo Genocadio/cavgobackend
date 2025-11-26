@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"cavgoBooking/models"
+
 	"github.com/rabbitmq/amqp091-go"
 )
 
@@ -46,19 +48,30 @@ func NewRabbitMQPublisher(amqpURL, exchangeName string) (*RabbitMQPublisher, err
 }
 
 func (p *RabbitMQPublisher) PublishBookingEvent(eventType string, bookingResponse interface{}) error {
+	// Try to extract booking ID for logging
+	bookingID := "unknown"
+	if resp, ok := bookingResponse.(*models.BookingResponse); ok && resp != nil && resp.Booking != nil {
+		bookingID = resp.Booking.ID
+	}
+	
 	msg := map[string]interface{}{
 		"event": eventType,
 		"data":  bookingResponse,
 	}
 	body, err := json.Marshal(msg)
 	if err != nil {
+		fmt.Printf("[RabbitMQPublisher] [EXCHANGE=%s] ERROR: Failed to marshal message: event=%s bookingId=%s error=%v\n", 
+			p.exchangeName, eventType, bookingID, err)
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
 	// Log publishing details and payload
-    fmt.Printf("[RabbitMQPublisher] PUBLISHING fanout: exchange=%s event=%s bytes=%d\n", p.exchangeName, eventType, len(body))
-    fmt.Printf("[RabbitMQPublisher] Payload: %s\n", string(body))
-    err = p.channel.Publish(
+	fmt.Printf("[RabbitMQPublisher] [EXCHANGE=%s] PUBLISHING fanout: event=%s bookingId=%s bytes=%d\n", 
+		p.exchangeName, eventType, bookingID, len(body))
+	fmt.Printf("[RabbitMQPublisher] [EXCHANGE=%s] Payload preview (first 500 chars): %s\n", 
+		p.exchangeName, truncateStringForLog(string(body), 500))
+	
+	err = p.channel.Publish(
 		p.exchangeName, // publish to the exchange
 		"",             // routing key is ignored for fanout exchanges
 		false,          // mandatory
@@ -68,12 +81,22 @@ func (p *RabbitMQPublisher) PublishBookingEvent(eventType string, bookingRespons
 			Body:        body,
 		},
 	)
-    if err != nil {
-        fmt.Printf("[RabbitMQPublisher] FAILED fanout publish: exchange=%s event=%s err=%v\n", p.exchangeName, eventType, err)
-        return err
-    }
-    fmt.Printf("[RabbitMQPublisher] PUBLISHED fanout: exchange=%s event=%s\n", p.exchangeName, eventType)
-    return nil
+	if err != nil {
+		fmt.Printf("[RabbitMQPublisher] [EXCHANGE=%s] FAILED fanout publish: event=%s bookingId=%s err=%v\n", 
+			p.exchangeName, eventType, bookingID, err)
+		return err
+	}
+	fmt.Printf("[RabbitMQPublisher] [EXCHANGE=%s] PUBLISHED fanout: event=%s bookingId=%s\n", 
+		p.exchangeName, eventType, bookingID)
+	return nil
+}
+
+// truncateStringForLog truncates a string to maxLen characters for logging
+func truncateStringForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func (p *RabbitMQPublisher) Close() {

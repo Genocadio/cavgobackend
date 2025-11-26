@@ -1,6 +1,9 @@
 package repository
 
-import "cavgotrips/internal/models"
+import (
+	"cavgotrips/internal/models"
+	"time"
+)
 
 type LocationRepository interface {
 	Create(location *models.Location) error
@@ -60,6 +63,14 @@ type TripRepository interface {
 	GetTripsByDriverID(driverID int64) ([]models.Trip, error)
 	GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error)
 	GetTripsByFiltersWithCityRoute(origin, destination, company string, cityRoute bool, limit, offset int) ([]models.Trip, int64, error)
+	GetTripsByCompanyID(companyID int64, driverID *int64, vehicleID *int64, fromDate *time.Time, afterTripID *int64, limit, offset int) ([]models.Trip, int64, error)
 	GetDriverMetrics(driverID int64) (*models.DriverMetrics, error)
 	Delete(id int64) error
+}
+
+type TripLogRepository interface {
+	Create(log *models.TripLog) error
+	CreateWaypointLog(log *models.TripWaypointLog) error
+	GetByTripID(tripID int64) ([]models.TripLog, error)
+	DeleteLogsByDateRange(startDate, endDate time.Time) error
 }

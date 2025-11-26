@@ -55,11 +55,26 @@ public class Vehicle extends BaseEntity {
     @ToString.Exclude
     private List<VehicleAssignment> assignments = new ArrayList<>();
 
+    @OneToOne(mappedBy = "vehicle", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ToString.Exclude
+    private VehicleSettings settings;
+
+    @Column(name = "last_online_at")
+    private java.time.LocalDateTime lastOnlineAt;
+
     public void setPubKey(String pubKey) {
         // Only update keysetTime if pubKey actually changes
         if (pubKey != null && !pubKey.equals(this.pubKey)) {
             this.keysetTime = Instant.now();
         }
         this.pubKey = pubKey;
+    }
+
+    public boolean isOnline() {
+        if (lastOnlineAt == null) {
+            return false;
+        }
+        // Consider vehicle online if last update was within 30 minutes
+        return lastOnlineAt.isAfter(java.time.LocalDateTime.now().minusMinutes(30));
     }
 }

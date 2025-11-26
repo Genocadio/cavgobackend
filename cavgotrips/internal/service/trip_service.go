@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -22,10 +23,15 @@ type TripService struct {
 	rabbitMQService   *RabbitMQService // Add RabbitMQService
 	sseService        *SSEService      // Add SSE service
 	SessionService    *SessionService  // Add Session service
+	tripLogService    *TripLogService  // Add TripLogService
+	scheduler         *TripUpdateScheduler
+	poster            *TripUpdatePoster
+	batchQueues       map[int64][]models.Trip // Company ID -> queue of trips for batch updates
+	batchQueueMu      sync.RWMutex
 }
 
-func NewTripService(tripRepo repository.TripRepository, routeRepo repository.RouteRepository, locationRepo repository.LocationRepository, vehicleServiceURL string, rabbitMQService *RabbitMQService, sseService *SSEService, sessionService *SessionService) *TripService {
-	return &TripService{
+func NewTripService(tripRepo repository.TripRepository, routeRepo repository.RouteRepository, locationRepo repository.LocationRepository, vehicleServiceURL string, rabbitMQService *RabbitMQService, sseService *SSEService, sessionService *SessionService, tripLogService *TripLogService, scheduler *TripUpdateScheduler, poster *TripUpdatePoster) *TripService {
+	service := &TripService{
 		tripRepo:          tripRepo,
 		routeRepo:         routeRepo,
 		locationRepo:      locationRepo,
@@ -33,7 +39,18 @@ func NewTripService(tripRepo repository.TripRepository, routeRepo repository.Rou
 		rabbitMQService:   rabbitMQService,
 		sseService:        sseService,
 		SessionService:    sessionService,
+		tripLogService:    tripLogService,
+		scheduler:         scheduler,
+		poster:            poster,
+		batchQueues:       make(map[int64][]models.Trip),
 	}
+	
+	// Start batch processor if poster is available
+	if poster != nil {
+		go service.processBatchQueues()
+	}
+	
+	return service
 }
 
 func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Trip, error) {
@@ -315,6 +332,15 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 	// If reversed, swap route origin/destination for response consistency
 	adjustRouteForReversed(createdTrip)
 
+	// Log trip creation
+	if s.tripLogService != nil {
+		tripLogID, _ := s.tripLogService.LogTripUpdate(createdTrip, "created")
+		// Log waypoint creations, using the trip log ID we just created
+		for _, wp := range createdTrip.Waypoints {
+			_ = s.tripLogService.LogWaypointUpdate(&wp, createdTrip.ID, "created", tripLogID)
+		}
+	}
+
 	// Publish event to RabbitMQ
 	if s.rabbitMQService != nil {
 		_ = s.rabbitMQService.PublishTripEvent("created", *createdTrip)
@@ -326,6 +352,14 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 			Event: "created",
 			Data:  *createdTrip,
 		})
+	}
+
+	// Post trip update immediately for creation
+	if s.poster != nil && s.scheduler != nil {
+		companyID := createdTrip.Vehicle.CompanyID
+		if s.scheduler.IsTimerActive(companyID) {
+			s.poster.PostTripUpdate(companyID, createdTrip)
+		}
 	}
 
 	return createdTrip, nil
@@ -417,6 +451,32 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 	// If reversed, swap route origin/destination for response consistency
 	adjustRouteForReversed(updatedTrip)
 
+	// Log trip update
+	if s.tripLogService != nil {
+		tripLogID, _ := s.tripLogService.LogTripUpdate(updatedTrip, "updated")
+		// Log waypoint updates if any were provided
+		if len(update.WaypointUpdates) > 0 {
+			for _, wpUpdate := range update.WaypointUpdates {
+				// Find the waypoint in the updated trip
+				for _, wp := range updatedTrip.Waypoints {
+					if wp.ID == wpUpdate.WaypointID {
+						_ = s.tripLogService.LogWaypointUpdate(&wp, updatedTrip.ID, "updated", tripLogID)
+						break
+					}
+				}
+			}
+		}
+		// Log passed waypoint if provided
+		if update.PassedWaypointID != nil {
+			for _, wp := range updatedTrip.Waypoints {
+				if wp.ID == *update.PassedWaypointID {
+					_ = s.tripLogService.LogWaypointUpdate(&wp, updatedTrip.ID, "passed", tripLogID)
+					break
+				}
+			}
+		}
+	}
+
 	// Publish event to RabbitMQ
 	if s.rabbitMQService != nil {
 		_ = s.rabbitMQService.PublishTripEvent("updated", *updatedTrip)
@@ -428,6 +488,24 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 			Event: "updated",
 			Data:  *updatedTrip,
 		})
+	}
+
+	// Handle trip update posting
+	if s.poster != nil && s.scheduler != nil {
+		companyID := updatedTrip.Vehicle.CompanyID
+		if s.scheduler.IsTimerActive(companyID) {
+			// Check if this is a status change that requires immediate posting
+			isStatusChange := update.Status != nil && 
+				(*update.Status == "IN_PROGRESS" || *update.Status == "CANCELLED" || *update.Status == "COMPLETED")
+			
+			if isStatusChange {
+				// Post immediately for status changes
+				s.poster.PostTripUpdate(companyID, updatedTrip)
+			} else {
+				// Queue for batch update (1 minute interval)
+				s.queueTripForBatch(companyID, *updatedTrip)
+			}
+		}
 	}
 
 	return updatedTrip, nil
@@ -467,6 +545,11 @@ func (s *TripService) StartTrip(id int64) (*models.Trip, error) {
 	// If reversed, swap route origin/destination for response consistency
 	adjustRouteForReversed(startedTrip)
 
+	// Log trip start
+	if s.tripLogService != nil {
+		_, _ = s.tripLogService.LogTripUpdate(startedTrip, "started")
+	}
+
 	// Publish event to RabbitMQ
 	if s.rabbitMQService != nil {
 		_ = s.rabbitMQService.PublishTripEvent("started", *startedTrip)
@@ -478,6 +561,14 @@ func (s *TripService) StartTrip(id int64) (*models.Trip, error) {
 			Event: "started",
 			Data:  *startedTrip,
 		})
+	}
+
+	// Post trip update immediately for start
+	if s.poster != nil && s.scheduler != nil {
+		companyID := startedTrip.Vehicle.CompanyID
+		if s.scheduler.IsTimerActive(companyID) {
+			s.poster.PostTripUpdate(companyID, startedTrip)
+		}
 	}
 
 	return startedTrip, nil
@@ -513,6 +604,11 @@ func (s *TripService) CompleteTrip(id int64) (*models.Trip, error) {
 	// If reversed, swap route origin/destination for response consistency
 	adjustRouteForReversed(completedTrip)
 
+	// Log trip completion
+	if s.tripLogService != nil {
+		_, _ = s.tripLogService.LogTripUpdate(completedTrip, "completed")
+	}
+
 	// Publish event to RabbitMQ
 	if s.rabbitMQService != nil {
 		_ = s.rabbitMQService.PublishTripEvent("completed", *completedTrip)
@@ -524,6 +620,14 @@ func (s *TripService) CompleteTrip(id int64) (*models.Trip, error) {
 			Event: "completed",
 			Data:  *completedTrip,
 		})
+	}
+
+	// Post trip update immediately for completion
+	if s.poster != nil && s.scheduler != nil {
+		companyID := completedTrip.Vehicle.CompanyID
+		if s.scheduler.IsTimerActive(companyID) {
+			s.poster.PostTripUpdate(companyID, completedTrip)
+		}
 	}
 
 	return completedTrip, nil
@@ -648,6 +752,18 @@ func (s *TripService) GetTripsByDriverID(driverID int64) ([]models.Trip, error) 
 	return trips, nil
 }
 
+func (s *TripService) GetTripsByCompanyID(companyID int64, driverID *int64, vehicleID *int64, fromDate *time.Time, afterTripID *int64, limit, offset int) ([]models.Trip, int64, error) {
+	trips, total, err := s.tripRepo.GetTripsByCompanyID(companyID, driverID, vehicleID, fromDate, afterTripID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range trips {
+		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
+	}
+	return trips, total, nil
+}
+
 func (s *TripService) GetDriverMetrics(driverID int64) (*models.DriverMetrics, error) {
 	return s.tripRepo.GetDriverMetrics(driverID)
 }
@@ -694,8 +810,8 @@ func (s *TripService) DeleteTrip(id int64) error {
 	}
 
 	// Handle different trip statuses
-	if trip.Status == "IN_PROGRESS" {
-		// Cancel the trip instead of deleting it
+	if trip.Status == "SCHEDULED" || trip.Status == "IN_PROGRESS" {
+		// Cancel the trip instead of deleting it (first delete call)
 		updates := map[string]interface{}{
 			"status":     "CANCELLED",
 			"updated_at": time.Now(),
@@ -715,9 +831,14 @@ func (s *TripService) DeleteTrip(id int64) error {
 		// If reversed, swap route origin/destination for response consistency
 		adjustRouteForReversed(updatedTrip)
 
+		// Log trip cancellation
+		if s.tripLogService != nil {
+			_, _ = s.tripLogService.LogTripUpdate(updatedTrip, "cancelled")
+		}
+
 		// Publish event to RabbitMQ
 		if s.rabbitMQService != nil {
-			_ = s.rabbitMQService.PublishTripEvent("cancelled", *updatedTrip)
+			_ = s.rabbitMQService.PublishTripEvent("TRIP_CANCELLED", *updatedTrip)
 		}
 
 		// Broadcast SSE event for trip cancellation
@@ -728,9 +849,23 @@ func (s *TripService) DeleteTrip(id int64) error {
 			})
 		}
 
+		// Post trip update immediately for cancellation
+		if s.poster != nil && s.scheduler != nil {
+			companyID := updatedTrip.Vehicle.CompanyID
+			if s.scheduler.IsTimerActive(companyID) {
+				s.poster.PostTripUpdate(companyID, updatedTrip)
+			}
+		}
+
 		return nil
-	} else if trip.Status == "CANCELLED" || trip.Status == "SCHEDULED" {
-		// Allow deletion of CANCELLED and SCHEDULED trips
+	} else if trip.Status == "CANCELLED" {
+		// Get trip with relations for logging before deletion
+		tripForLog, err := s.tripRepo.GetByIDWithRelations(id)
+		if err == nil && s.tripLogService != nil {
+			_, _ = s.tripLogService.LogTripUpdate(tripForLog, "deleted")
+		}
+
+		// Allow deletion of CANCELLED trips (second delete call)
 		if err := s.tripRepo.Delete(id); err != nil {
 			return err
 		}
@@ -746,7 +881,7 @@ func (s *TripService) DeleteTrip(id int64) error {
 		return nil
 	} else {
 		// Cannot delete COMPLETED or NOT_COMPLETED trips
-		return errors.New("can only delete scheduled, cancelled, or in-progress trips")
+		return errors.New("cannot delete completed or not-completed trips")
 	}
 }
 
@@ -877,12 +1012,51 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 		return nil, fmt.Errorf("failed to get updated trip: %w", err)
 	}
 
+	// Log trip update from MQTT
+	if s.tripLogService != nil {
+		tripLogID, _ := s.tripLogService.LogTripUpdate(updatedTrip, "updated")
+		// Log waypoint updates if any were provided
+		if len(mqttTrip.Waypoints) > 0 {
+			for _, wpUpdate := range mqttTrip.Waypoints {
+				// Find the waypoint in the updated trip
+				for _, wp := range updatedTrip.Waypoints {
+					if wp.ID == wpUpdate.ID {
+						updateType := "updated"
+						if wpUpdate.IsPassed {
+							updateType = "passed"
+						}
+						_ = s.tripLogService.LogWaypointUpdate(&wp, updatedTrip.ID, updateType, tripLogID)
+						break
+					}
+				}
+			}
+		}
+	}
+
 	// Broadcast SSE event for real-time updates (but don't publish to RabbitMQ)
 	if s.sseService != nil {
 		s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{
 			Event: "updated",
 			Data:  *updatedTrip,
 		})
+	}
+
+	// Handle trip update posting for MQTT updates
+	if s.poster != nil && s.scheduler != nil {
+		companyID := updatedTrip.Vehicle.CompanyID
+		if s.scheduler.IsTimerActive(companyID) {
+			// Check if this is a status change that requires immediate posting
+			isStatusChange := mqttTrip.Status != "" && 
+				(mqttTrip.Status == "IN_PROGRESS" || mqttTrip.Status == "CANCELLED" || mqttTrip.Status == "COMPLETED")
+			
+			if isStatusChange {
+				// Post immediately for status changes
+				s.poster.PostTripUpdate(companyID, updatedTrip)
+			} else {
+				// Queue for batch update (1 minute interval)
+				s.queueTripForBatch(companyID, *updatedTrip)
+			}
+		}
 	}
 
 	return updatedTrip, nil
@@ -931,6 +1105,61 @@ func (s *TripService) updateWaypointProgress(tripID int64) error {
 
 	log.Printf("[updateWaypointProgress] Updated waypoint progress for trip %d, next waypoint: %d", tripID, nextWaypointID)
 	return nil
+}
+
+// GetTripLogs retrieves all logs for a specific trip
+func (s *TripService) GetTripLogs(tripID int64) ([]models.TripLog, error) {
+	if s.tripLogService == nil {
+		return nil, nil
+	}
+	return s.tripLogService.GetTripLogs(tripID)
+}
+
+// queueTripForBatch adds a trip to the batch queue for a company
+func (s *TripService) queueTripForBatch(companyID int64, trip models.Trip) {
+	s.batchQueueMu.Lock()
+	defer s.batchQueueMu.Unlock()
+	
+	// Use trip ID as key to avoid duplicates - keep only the latest version
+	// Find and replace if exists, otherwise append
+	found := false
+	for i, queuedTrip := range s.batchQueues[companyID] {
+		if queuedTrip.ID == trip.ID {
+			s.batchQueues[companyID][i] = trip
+			found = true
+			break
+		}
+	}
+	if !found {
+		s.batchQueues[companyID] = append(s.batchQueues[companyID], trip)
+	}
+}
+
+// processBatchQueues processes batch queues every 1 minute
+func (s *TripService) processBatchQueues() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		s.batchQueueMu.Lock()
+		queues := make(map[int64][]models.Trip)
+		for companyID, trips := range s.batchQueues {
+			if len(trips) > 0 {
+				queues[companyID] = trips
+				// Clear the queue after copying
+				s.batchQueues[companyID] = []models.Trip{}
+			}
+		}
+		s.batchQueueMu.Unlock()
+		
+		// Process each company's queue
+		for companyID, trips := range queues {
+			if s.scheduler != nil && s.scheduler.IsTimerActive(companyID) && s.poster != nil {
+				// Post batch updates
+				s.poster.PostBatchUpdates(companyID, trips)
+			}
+		}
+	}
 }
 
 // adjustRouteForReversed swaps the route origin and destination (and their IDs)

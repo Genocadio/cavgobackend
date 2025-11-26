@@ -29,6 +29,7 @@ public class CompanyUserService {
     private final CompanyRepository companyRepository;
     private final VehicleAssignmentRepository assignmentRepository;
     private final UserRepository userRepository;
+    private final AggregatorSyncService aggregatorSyncService;
 
     public CompanyUserResponseDto createCompanyUser(CompanyUserRequestDto user) {
         // Check across ALL user types (CompanyUser, ClientUser, etc.)
@@ -57,6 +58,15 @@ public class CompanyUserService {
             } else {
                 dto.setVehicle(null);
             }
+        }
+        
+        // Trigger immediate aggregator sync for company user creation
+        try {
+            aggregatorSyncService.syncCompanyDataImmediately(saved.getCompany().getId());
+        } catch (Exception e) {
+            // Log error but don't fail the creation
+            // Using System.err as fallback if logger not available
+            System.err.println("Error triggering aggregator sync after company user creation: " + e.getMessage());
         }
         
         return dto;

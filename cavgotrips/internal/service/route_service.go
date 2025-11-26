@@ -6,11 +6,15 @@ import (
 )
 
 type RouteService struct {
-	repo repository.RouteRepository
+	repo                repository.RouteRepository
+	changeTrackingService *ChangeTrackingService
 }
 
-func NewRouteService(repo repository.RouteRepository) *RouteService {
-	return &RouteService{repo: repo}
+func NewRouteService(repo repository.RouteRepository, changeTrackingService *ChangeTrackingService) *RouteService {
+	return &RouteService{
+		repo:                repo,
+		changeTrackingService: changeTrackingService,
+	}
 }
 
 func (s *RouteService) CreateRoute(route *models.Route) error {
@@ -22,7 +26,19 @@ func (s *RouteService) CreateRoute(route *models.Route) error {
 		return models.NewConflictError(err.Error())
 	}
 
-	return s.repo.Create(route)
+	err := s.repo.Create(route)
+	if err != nil {
+		return err
+	}
+
+	// Record change for tracking
+	if s.changeTrackingService != nil {
+		if err := s.changeTrackingService.RecordChange("route", route.ID, false); err != nil {
+			// Don't fail the operation, just log the error
+		}
+	}
+
+	return nil
 }
 
 func (s *RouteService) GetAllRoutes() ([]models.Route, error) {
@@ -82,11 +98,35 @@ func (s *RouteService) UpdateRoute(route *models.Route) error {
 		return models.NewConflictError(err.Error())
 	}
 
-	return s.repo.Update(route)
+	err := s.repo.Update(route)
+	if err != nil {
+		return err
+	}
+
+	// Record change for tracking
+	if s.changeTrackingService != nil {
+		if err := s.changeTrackingService.RecordChange("route", route.ID, false); err != nil {
+			// Don't fail the operation, just log the error
+		}
+	}
+
+	return nil
 }
 
 func (s *RouteService) DeleteRoute(id int64) error {
-	return s.repo.Delete(id)
+	err := s.repo.Delete(id)
+	if err != nil {
+		return err
+	}
+
+	// Record change for tracking (deletion)
+	if s.changeTrackingService != nil {
+		if err := s.changeTrackingService.RecordChange("route", id, true); err != nil {
+			// Don't fail the operation, just log the error
+		}
+	}
+
+	return nil
 }
 
 func (s *RouteService) GetRoutesByPriceRange(minPrice, maxPrice float64) ([]models.Route, error) {

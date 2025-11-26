@@ -3,7 +3,10 @@ package com.nexxserve.cavgomqt.config;
 import com.nexxserve.cavgomqt.service.VehicleRegistryService;
 import com.nexxserve.cavgomqt.service.TripReceiverService;
 import com.nexxserve.cavgomqt.service.RabbitMQBookingBundlePublisherService;
+import com.nexxserve.cavgomqt.service.RabbitMQVehicleLocationPublisherService;
 import com.nexxserve.cavgomqt.dto.mqtt.BookingBundle;
+import com.nexxserve.cavgomqt.dto.incoming.IncomingVehicleStatusData;
+import com.nexxserve.cavgomqt.dto.VehicleLocationUpdateMessage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +43,9 @@ public class MqttConfiguration {
 
     @Autowired
     private RabbitMQBookingBundlePublisherService bookingBundlePublisherService;
+
+    @Autowired
+    private RabbitMQVehicleLocationPublisherService vehicleLocationPublisherService;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -126,6 +132,11 @@ public class MqttConfiguration {
     }
 
     @Bean
+    public MessageChannel heartbeatInboundChannel() {
+        return new DirectChannel();
+    }
+
+    @Bean
     public MessageChannel bookingBundleChannel() {
         return new DirectChannel();
     }
@@ -149,6 +160,11 @@ public class MqttConfiguration {
 
     @Bean
     public MessageChannel bookingBundleOutboundChannel() {
+        return new DirectChannel();
+    }
+
+    @Bean
+    public MessageChannel vehicleSettingsOutboundChannel() {
         return new DirectChannel();
     }
 
@@ -203,6 +219,22 @@ public class MqttConfiguration {
     }
 
     @Bean
+    public MessageProducer vehicleHeartbeatInbound() {
+        MqttPahoMessageDrivenChannelAdapter adapter =
+            new MqttPahoMessageDrivenChannelAdapter(
+                brokerUrl,
+                clientId + "-vehicle-heartbeat-" + System.currentTimeMillis(),
+                mqttClientFactory(),
+                "car/+/heartbeat"
+            );
+        adapter.setCompletionTimeout(10000); // Increased timeout for SSL
+        adapter.setConverter(new DefaultPahoMessageConverter());
+        adapter.setQos(1);
+        adapter.setOutputChannel(heartbeatInboundChannel());
+        return adapter;
+    }
+
+    @Bean
     public MessageProducer bookingBundleInbound() {
         MqttPahoMessageDrivenChannelAdapter adapter =
             new MqttPahoMessageDrivenChannelAdapter(
@@ -229,18 +261,67 @@ public class MqttConfiguration {
             String topic = (String) message
                 .getHeaders()
                 .get("mqtt_receivedTopic");
-            Long carId = Long.valueOf(extractCarIdFromTopic(topic));
+            String carId = extractCarIdFromTopic(topic);
 
             System.out.println("=== CAR STATUS UPDATE ===");
             System.out.println("Car ID: " + carId);
-            System.out.println("Status: " + payload);
+            System.out.println("Topic: " + topic);
+            System.out.println("Payload: " + payload);
 
-            // Update vehicle online status
-            vehicleRegistryService.updateVehicleStatus(
-                carId,
-                true,
-                System.currentTimeMillis()
-            );
+            try {
+                // Try to parse as JSON first
+                IncomingVehicleStatusData statusData = objectMapper.readValue(payload, IncomingVehicleStatusData.class);
+                
+                // Use car_id from payload if provided, otherwise use extracted from topic
+                String effectiveCarId = statusData.getCarId() != null ? statusData.getCarId() : carId;
+                String effectiveStatus = statusData.getStatus() != null ? statusData.getStatus() : "ONLINE";
+                Long effectiveTimestamp = statusData.getTimestamp() != null ? statusData.getTimestamp() : System.currentTimeMillis();
+                
+                // Log what data we received
+                System.out.println("  - Status: " + effectiveStatus);
+                System.out.println("  - Has Location: " + (statusData.getCurrentLatitude() != null && statusData.getCurrentLongitude() != null));
+                System.out.println("  - Has Speed: " + (statusData.getCurrentSpeed() != null));
+                System.out.println("  - Has Accuracy: " + (statusData.getAccuracy() != null));
+                System.out.println("  - Has Bearing: " + (statusData.getBearing() != null));
+                
+                // Update local vehicle registry
+                // Consider both ONLINE and READY as active statuses
+                boolean isOnline = "ONLINE".equalsIgnoreCase(effectiveStatus) || 
+                                   "READY".equalsIgnoreCase(effectiveStatus);
+                vehicleRegistryService.updateVehicleStatus(
+                    Long.valueOf(effectiveCarId),
+                    isOnline,
+                    effectiveTimestamp
+                );
+                
+                // Create message for RabbitMQ (all fields are optional except status, car_id, timestamp)
+                VehicleLocationUpdateMessage locationMsg = new VehicleLocationUpdateMessage();
+                locationMsg.setCarId(effectiveCarId);
+                locationMsg.setStatus(effectiveStatus);
+                locationMsg.setTimestamp(effectiveTimestamp);
+                locationMsg.setCurrentLatitude(statusData.getCurrentLatitude()); // Can be null
+                locationMsg.setCurrentLongitude(statusData.getCurrentLongitude()); // Can be null
+                locationMsg.setCurrentSpeed(statusData.getCurrentSpeed()); // Can be null
+                locationMsg.setAccuracy(statusData.getAccuracy()); // Can be null
+                locationMsg.setBearing(statusData.getBearing()); // Can be null
+                
+                // Publish to RabbitMQ
+                vehicleLocationPublisherService.publish(locationMsg);
+                
+            } catch (Exception e) {
+                // If JSON parsing fails, treat as simple status update
+                System.out.println("  - Unable to parse as JSON, treating as simple status: " + e.getMessage());
+                
+                // Update vehicle online status
+                vehicleRegistryService.updateVehicleStatus(
+                    Long.valueOf(carId),
+                    true,
+                    System.currentTimeMillis()
+                );
+                
+                // Publish simple ONLINE status to RabbitMQ
+                vehicleLocationPublisherService.publishStatus(carId, "ONLINE", System.currentTimeMillis());
+            }
         };
     }
 
@@ -283,6 +364,78 @@ public class MqttConfiguration {
                 true,
                 System.currentTimeMillis()
             );
+        };
+    }
+
+    @Bean
+    @ServiceActivator(inputChannel = "heartbeatInboundChannel")
+    public MessageHandler vehicleHeartbeatHandler() {
+        return message -> {
+            String payload = (String) message.getPayload();
+            String topic = (String) message
+                .getHeaders()
+                .get("mqtt_receivedTopic");
+            String carId = extractCarIdFromTopic(topic);
+
+            System.out.println("=== VEHICLE HEARTBEAT ===");
+            System.out.println("Car ID: " + carId);
+            System.out.println("Topic: " + topic);
+            System.out.println("Payload: " + payload);
+
+            try {
+                // Try to parse as JSON first
+                IncomingVehicleStatusData statusData = objectMapper.readValue(payload, IncomingVehicleStatusData.class);
+                
+                // Use car_id from payload if provided, otherwise use extracted from topic
+                String effectiveCarId = statusData.getCarId() != null ? statusData.getCarId() : carId;
+                String effectiveStatus = statusData.getStatus() != null ? statusData.getStatus() : "ONLINE";
+                Long effectiveTimestamp = statusData.getTimestamp() != null ? statusData.getTimestamp() : System.currentTimeMillis();
+                
+                // Log what data we received
+                System.out.println("  - Status: " + effectiveStatus);
+                System.out.println("  - Has Location: " + (statusData.getCurrentLatitude() != null && statusData.getCurrentLongitude() != null));
+                System.out.println("  - Has Speed: " + (statusData.getCurrentSpeed() != null));
+                System.out.println("  - Has Accuracy: " + (statusData.getAccuracy() != null));
+                System.out.println("  - Has Bearing: " + (statusData.getBearing() != null));
+                
+                // Update local vehicle registry
+                // Consider both ONLINE and READY as active statuses
+                boolean isOnline = "ONLINE".equalsIgnoreCase(effectiveStatus) || 
+                                   "READY".equalsIgnoreCase(effectiveStatus);
+                vehicleRegistryService.updateVehicleStatus(
+                    Long.valueOf(effectiveCarId),
+                    isOnline,
+                    effectiveTimestamp
+                );
+                
+                // Create message for RabbitMQ (all fields are optional except status, car_id, timestamp)
+                VehicleLocationUpdateMessage locationMsg = new VehicleLocationUpdateMessage();
+                locationMsg.setCarId(effectiveCarId);
+                locationMsg.setStatus(effectiveStatus);
+                locationMsg.setTimestamp(effectiveTimestamp);
+                locationMsg.setCurrentLatitude(statusData.getCurrentLatitude()); // Can be null
+                locationMsg.setCurrentLongitude(statusData.getCurrentLongitude()); // Can be null
+                locationMsg.setCurrentSpeed(statusData.getCurrentSpeed()); // Can be null
+                locationMsg.setAccuracy(statusData.getAccuracy()); // Can be null
+                locationMsg.setBearing(statusData.getBearing()); // Can be null
+                
+                // Publish to RabbitMQ
+                vehicleLocationPublisherService.publish(locationMsg);
+                
+            } catch (Exception e) {
+                // If JSON parsing fails, treat as simple heartbeat (always ONLINE)
+                System.out.println("  - Unable to parse as JSON, treating as simple heartbeat: " + e.getMessage());
+                
+                // Update vehicle status in registry to mark as online
+                vehicleRegistryService.updateVehicleStatus(
+                    Long.valueOf(carId),
+                    true,
+                    System.currentTimeMillis()
+                );
+                
+                // Publish simple ONLINE status to RabbitMQ
+                vehicleLocationPublisherService.publishStatus(carId, "ONLINE", System.currentTimeMillis());
+            }
         };
     }
 
@@ -381,6 +534,20 @@ public class MqttConfiguration {
         messageHandler.setAsync(true);
         messageHandler.setDefaultQos(1);
         messageHandler.setDefaultRetained(false);
+        return messageHandler;
+    }
+
+    @Bean
+    @ServiceActivator(inputChannel = "vehicleSettingsOutboundChannel")
+    public MessageHandler vehicleSettingsOutbound() {
+        MqttPahoMessageHandler messageHandler = new MqttPahoMessageHandler(
+            brokerUrl,
+            clientId + "-settings-out-" + System.currentTimeMillis(),
+            mqttClientFactory()
+        );
+        messageHandler.setAsync(true);
+        messageHandler.setDefaultQos(1);
+        messageHandler.setDefaultRetained(true); // Retain settings so vehicle gets them on reconnect
         return messageHandler;
     }
 

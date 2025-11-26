@@ -9,16 +9,25 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 )
 
 type TripHandler struct {
-	service *service.TripService
+	service   *service.TripService
+	scheduler *service.TripUpdateScheduler
+	poster    *service.TripUpdatePoster
+	baseURL   string
 }
 
-func NewTripHandler(service *service.TripService) *TripHandler {
-	return &TripHandler{service: service}
+func NewTripHandler(service *service.TripService, scheduler *service.TripUpdateScheduler, poster *service.TripUpdatePoster, baseURL string) *TripHandler {
+	return &TripHandler{
+		service:   service,
+		scheduler: scheduler,
+		poster:    poster,
+		baseURL:   baseURL,
+	}
 }
 
 func (h *TripHandler) CreateTrip(w http.ResponseWriter, r *http.Request) {
@@ -582,7 +591,7 @@ func (h *TripHandler) DeleteTrip(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "trip not found" {
 			utils.ErrorResponse(w, "Trip not found", http.StatusNotFound)
 			return
-		} else if err.Error() == "can only delete scheduled, cancelled, or in-progress trips" {
+		} else if err.Error() == "cannot delete completed or not-completed trips" {
 			utils.ErrorResponse(w, err.Error(), http.StatusBadRequest)
 			return
 		} else {
@@ -592,4 +601,130 @@ func (h *TripHandler) DeleteTrip(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, map[string]string{"message": "Trip processed successfully"}, http.StatusOK)
+}
+
+// GetTripLogs retrieves all logs for a specific trip
+func (h *TripHandler) GetTripLogs(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		utils.ErrorResponse(w, "Invalid trip ID", http.StatusBadRequest)
+		return
+	}
+
+	logs, err := h.service.GetTripLogs(id)
+	if err != nil {
+		utils.ErrorResponse(w, "Failed to retrieve trip logs: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if logs == nil {
+		// Logging is disabled or no logs found
+		utils.JSONResponse(w, []models.TripLog{}, http.StatusOK)
+		return
+	}
+
+	utils.JSONResponse(w, logs, http.StatusOK)
+}
+
+// GetTripsByCompanyID gets trips for a specific company (internal endpoint)
+func (h *TripHandler) GetTripsByCompanyID(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	companyID, err := strconv.ParseInt(vars["company_id"], 10, 64)
+	if err != nil {
+		utils.ErrorResponse(w, "Invalid company ID", http.StatusBadRequest)
+		return
+	}
+
+	// Parse optional query parameters
+	var driverID *int64
+	var vehicleID *int64
+	var fromDate *time.Time
+	var afterTripID *int64
+
+	if driverIDStr := r.URL.Query().Get("driver_id"); driverIDStr != "" {
+		id, err := strconv.ParseInt(driverIDStr, 10, 64)
+		if err != nil {
+			utils.ErrorResponse(w, "Invalid driver ID", http.StatusBadRequest)
+			return
+		}
+		driverID = &id
+	}
+
+	if vehicleIDStr := r.URL.Query().Get("vehicle_id"); vehicleIDStr != "" {
+		id, err := strconv.ParseInt(vehicleIDStr, 10, 64)
+		if err != nil {
+			utils.ErrorResponse(w, "Invalid vehicle ID", http.StatusBadRequest)
+			return
+		}
+		vehicleID = &id
+	}
+
+	if fromDateStr := r.URL.Query().Get("from_date"); fromDateStr != "" {
+		date, err := time.Parse("2006-01-02", fromDateStr)
+		if err != nil {
+			utils.ErrorResponse(w, "Invalid from_date format (expected YYYY-MM-DD)", http.StatusBadRequest)
+			return
+		}
+		fromDate = &date
+	}
+
+	if afterTripIDStr := r.URL.Query().Get("trip_id"); afterTripIDStr != "" {
+		id, err := strconv.ParseInt(afterTripIDStr, 10, 64)
+		if err != nil {
+			utils.ErrorResponse(w, "Invalid trip_id parameter", http.StatusBadRequest)
+			return
+		}
+		afterTripID = &id
+	}
+
+	// Parse pagination parameters
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	limit := 20 // default page size
+	offset := 0
+
+	if limitStr != "" {
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil || limit < 0 {
+			utils.ErrorResponse(w, "Invalid limit parameter", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if offsetStr != "" {
+		offset, err = strconv.Atoi(offsetStr)
+		if err != nil || offset < 0 {
+			utils.ErrorResponse(w, "Invalid offset parameter", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Get trips from service
+	trips, total, err := h.service.GetTripsByCompanyID(companyID, driverID, vehicleID, fromDate, afterTripID, limit, offset)
+	if err != nil {
+		utils.ErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Extract trip IDs for timer management
+	tripIDs := make([]int64, len(trips))
+	for i, trip := range trips {
+		tripIDs[i] = trip.ID
+	}
+
+	// Start or extend timer if scheduler and poster are available
+	if h.scheduler != nil && h.poster != nil && h.baseURL != "" {
+		h.scheduler.StartOrExtendTimer(companyID, h.baseURL, tripIDs)
+	}
+
+	// Create paginated response
+	pageResponse := models.PageResponse{
+		Trips:  trips,
+		Total:  total,
+		Limit:  limit,
+		Offset: offset,
+	}
+
+	utils.JSONResponse(w, pageResponse, http.StatusOK)
 }

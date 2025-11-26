@@ -8,6 +8,16 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10
+
+  rabbitmq:
+    host: rabbitmq
+    port: 5672
+    username: admin
+    password: admin
+    listener:
+      simple:
+        auto-startup: true  # Auto-start in Docker (RabbitMQ should be available)
+
 jwt:
  secret: "u8F3v1Q2w4E6r8T9y2B5n7M0p3L6s9V1x"
  expiration: 3600 # in seconds, e.g., 1 hour
@@ -25,3 +35,6 @@ eureka:
 
 server:
   port: 6060
+
+aggregator:
+  base-url: ${AGGREGATOR_BASE_URL:}

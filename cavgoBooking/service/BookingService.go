@@ -66,38 +66,52 @@ func NewBookingService(bookingRepo repository.BookingRepository, tripService Tri
 }
 
 func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingRequest) (*models.BookingResponse, error) {
-	fmt.Printf("[CreateBooking] Starting booking creation for trip %d\n", req.TripID)
+	fmt.Printf("[BookingService] [STEP 1/8] Starting booking creation: tripId=%d pickupLocationId=%s dropoffLocationId=%s numberOfTickets=%d userName=%s userPhone=%s\n", 
+		req.TripID, req.PickupLocationID, req.DropoffLocationID, req.NumberOfTickets, req.UserName, req.UserPhone)
 
 	// Validate request (user_name and user_phone required)
+	fmt.Printf("[BookingService] [STEP 2/8] Validating booking request...\n")
 	if err := s.validateBookingRequest(ctx, req); err != nil {
+		fmt.Printf("[BookingService] [STEP 2/8] Validation FAILED: %v\n", err)
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
+	fmt.Printf("[BookingService] [STEP 2/8] Validation PASSED\n")
 
 	// Validate trip availability and get trip
+	fmt.Printf("[BookingService] [STEP 3/8] Fetching trip details: tripId=%d\n", req.TripID)
 	trip, err := s.tripService.GetTripByID(ctx, req.TripID)
 	if err != nil {
+		fmt.Printf("[BookingService] [STEP 3/8] ERROR: Failed to fetch trip: %v\n", err)
 		return nil, fmt.Errorf("trip validation failed: %w", err)
 	}
+	fmt.Printf("[BookingService] [STEP 3/8] Trip fetched: tripId=%d status=%s seats=%d\n", trip.ID, trip.Status, trip.Seats)
+	
 	if trip.Status != "SCHEDULED" && trip.Status != "IN_PROGRESS" {
+		fmt.Printf("[BookingService] [STEP 3/8] ERROR: Trip not available: status=%s\n", trip.Status)
 		return nil, fmt.Errorf("trip is not available: status is %s", trip.Status)
 	}
 
 	// Ensure requested tickets do not exceed or equal available seats
 	if req.NumberOfTickets >= trip.Seats {
+		fmt.Printf("[BookingService] [STEP 3/8] ERROR: Too many tickets requested: requested=%d available=%d\n", req.NumberOfTickets, trip.Seats)
 		return nil, fmt.Errorf("requested number of tickets (%d) must be less than available seats (%d)", req.NumberOfTickets, trip.Seats)
 	}
+	fmt.Printf("[BookingService] [STEP 3/8] Seat availability check PASSED\n")
 
 	// Calculate price based on pickup and dropoff
+	fmt.Printf("[BookingService] [STEP 4/8] Calculating price: pickupLocationId=%s dropoffLocationId=%s\n", req.PickupLocationID, req.DropoffLocationID)
 	pickupOrder := -1
 	pickupPrice := 0.0
 	if fmt.Sprintf("%d", trip.Route.OriginID) == req.PickupLocationID {
 		pickupOrder = -1
 		pickupPrice = 0.0
+		fmt.Printf("[BookingService] [STEP 4/8] Pickup is at origin (order=-1, price=0.0)\n")
 	} else {
 		for _, wp := range trip.Waypoints {
 			if fmt.Sprintf("%d", wp.LocationID) == req.PickupLocationID {
 				pickupOrder = wp.Order
 				pickupPrice = wp.Price
+				fmt.Printf("[BookingService] [STEP 4/8] Pickup is at waypoint: order=%d price=%.2f\n", wp.Order, wp.Price)
 				break
 			}
 		}
@@ -108,11 +122,13 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 	if fmt.Sprintf("%d", trip.Route.DestinationID) == req.DropoffLocationID {
 		dropoffOrder = 999999
 		dropoffPrice = trip.Route.RoutePrice
+		fmt.Printf("[BookingService] [STEP 4/8] Dropoff is at destination (order=999999, price=%.2f)\n", trip.Route.RoutePrice)
 	} else {
 		for _, wp := range trip.Waypoints {
 			if fmt.Sprintf("%d", wp.LocationID) == req.DropoffLocationID {
 				dropoffOrder = wp.Order
 				dropoffPrice = wp.Price
+				fmt.Printf("[BookingService] [STEP 4/8] Dropoff is at waypoint: order=%d price=%.2f\n", wp.Order, wp.Price)
 				break
 			}
 		}
@@ -125,6 +141,7 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 	}
 
 	if pickupOrder >= dropoffOrder {
+		fmt.Printf("[BookingService] [STEP 4/8] ERROR: Invalid location order: pickupOrder=%d dropoffOrder=%d\n", pickupOrder, dropoffOrder)
 		return nil, fmt.Errorf("incorrect location: pickup must be before dropoff")
 	}
 
@@ -133,17 +150,21 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 		pricePerTicket = 0
 	}
 	totalAmount := pricePerTicket * float64(req.NumberOfTickets)
+	fmt.Printf("[BookingService] [STEP 4/8] Price calculated: pricePerTicket=%.2f numberOfTickets=%d totalAmount=%.2f\n", pricePerTicket, req.NumberOfTickets, totalAmount)
 
 	// Create booking
+	fmt.Printf("[BookingService] [STEP 5/8] Creating booking record...\n")
+	bookingID := uuid.New().String()
+	bookingReference := s.generateBookingReference()
 	booking := &models.Booking{
-		ID:                uuid.New().String(),
+		ID:                bookingID,
 		TripID:            req.TripID,
 		PickupLocationID:  req.PickupLocationID,
 		DropoffLocationID: req.DropoffLocationID,
 		NumberOfTickets:   req.NumberOfTickets,
 		TotalAmount:       totalAmount,
 		Status:            models.BookingStatusPending,
-		BookingReference:  s.generateBookingReference(),
+		BookingReference:  bookingReference,
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
 		UserID:            req.UserID,
@@ -151,21 +172,37 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 		UserPhone:         req.UserPhone,
 		UserName:          req.UserName,
 	}
+	fmt.Printf("[BookingService] [STEP 5/8] Booking object created: bookingId=%s bookingReference=%s status=%s\n", bookingID, bookingReference, booking.Status)
 
 	// Save booking
+	fmt.Printf("[BookingService] [STEP 5/8] Saving booking to database...\n")
 	if err := s.bookingRepo.CreateBooking(ctx, booking); err != nil {
+		fmt.Printf("[BookingService] [STEP 5/8] ERROR: Failed to save booking: bookingId=%s error=%v\n", bookingID, err)
 		return nil, fmt.Errorf("failed to create booking: %w", err)
 	}
+	fmt.Printf("[BookingService] [STEP 5/8] Booking saved successfully: bookingId=%s\n", bookingID)
 
 	// Create tickets
+	fmt.Printf("[BookingService] [STEP 6/8] Generating %d tickets...\n", req.NumberOfTickets)
 	tickets := s.generateTickets(booking.ID, req.NumberOfTickets, trip, req.PickupLocationID, req.DropoffLocationID)
+	fmt.Printf("[BookingService] [STEP 6/8] Generated %d tickets: bookingId=%s\n", len(tickets), booking.ID)
+	for i, ticket := range tickets {
+		fmt.Printf("[BookingService] [STEP 6/8] Ticket %d: ticketId=%s ticketNumber=%s qrCode=%s\n", 
+			i+1, ticket.ID, ticket.TicketNumber, ticket.QRCode)
+	}
+	
+	fmt.Printf("[BookingService] [STEP 6/8] Saving tickets to database...\n")
 	if err := s.bookingRepo.CreateTickets(ctx, tickets); err != nil {
+		fmt.Printf("[BookingService] [STEP 6/8] ERROR: Failed to save tickets: bookingId=%s error=%v\n", booking.ID, err)
 		return nil, fmt.Errorf("failed to create tickets: %w", err)
 	}
+	fmt.Printf("[BookingService] [STEP 6/8] Tickets saved successfully: bookingId=%s count=%d\n", booking.ID, len(tickets))
 
 	// Create payment record
+	fmt.Printf("[BookingService] [STEP 7/8] Creating payment record...\n")
+	paymentID := uuid.New().String()
 	payment := &models.Payment{
-		ID:            uuid.New().String(),
+		ID:            paymentID,
 		BookingID:     booking.ID,
 		Amount:        totalAmount,
 		PaymentMethod: req.PaymentMethod,
@@ -174,10 +211,15 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}
+	fmt.Printf("[BookingService] [STEP 7/8] Payment object created: paymentId=%s bookingId=%s amount=%.2f status=%s method=%s\n", 
+		paymentID, booking.ID, totalAmount, payment.Status, req.PaymentMethod)
 
+	fmt.Printf("[BookingService] [STEP 7/8] Saving payment to database...\n")
 	if err := s.bookingRepo.CreatePayment(ctx, payment); err != nil {
+		fmt.Printf("[BookingService] [STEP 7/8] ERROR: Failed to save payment: paymentId=%s error=%v\n", paymentID, err)
 		return nil, fmt.Errorf("failed to create payment: %w", err)
 	}
+	fmt.Printf("[BookingService] [STEP 7/8] Payment saved successfully: paymentId=%s\n", paymentID)
 
 	// Load full booking with relations
 	booking.Tickets = tickets
@@ -190,9 +232,11 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 	}
 
 	// Publish to RabbitMQ (ignore error, but log)
-	fmt.Printf("[CreateBooking] About to publish booking events for booking %s\n", booking.ID)
+	fmt.Printf("[BookingService] [STEP 8/8] Publishing booking events to RabbitMQ: bookingId=%s\n", booking.ID)
 	s.publishBookingEvents("created", resp)
-	fmt.Printf("[CreateBooking] Finished publishing booking events for booking %s\n", booking.ID)
+	fmt.Printf("[BookingService] [STEP 8/8] Finished publishing booking events: bookingId=%s\n", booking.ID)
+	fmt.Printf("[BookingService] [COMPLETE] Booking creation successful: bookingId=%s bookingReference=%s paymentId=%s tickets=%d\n", 
+		booking.ID, booking.BookingReference, payment.ID, len(tickets))
 
 	return resp, nil
 }

@@ -2,11 +2,14 @@ package com.nexxserve.cavgomqt.service;
 
 import com.nexxserve.cavgomqt.config.RabbitMQConfig;
 import com.nexxserve.cavgomqt.dto.TripEventMessage;
+import com.nexxserve.cavgomqt.dto.TripWaypoint;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 /**
  * Service for publishing trip events to RabbitMQ
@@ -55,7 +58,18 @@ public class RabbitMQTripPublisherService {
             logger.info("  - Source Topic: {}", sourceTopic);
             logger.info("  - Car ID: {}", carId);
             logger.info("  - Trip ID: {}", tripEventMessage.getData() != null ? tripEventMessage.getData().getId() : "unknown");
-            logger.debug("Trip event details: {}", tripEventMessage.getData().getWaypoints().getFirst().getRemainingDistance());
+            
+            // Debug log waypoint info if available (safely)
+            if (tripEventMessage.getData() != null 
+                && tripEventMessage.getData().getWaypoints() != null 
+                && !tripEventMessage.getData().getWaypoints().isEmpty()) {
+                List<TripWaypoint> waypoints = tripEventMessage.getData().getWaypoints();
+                logger.debug("Trip event waypoints: {} total", waypoints.size());
+                if (waypoints.size() > 0 && waypoints.get(0) != null) {
+                    logger.debug("First waypoint remaining distance: {}", 
+                               waypoints.get(0).getRemainingDistance());
+                }
+            }
 
             // Add metadata to the message (you could extend TripEventMessage to include this)
             // For now, we'll just log it and publish the original message

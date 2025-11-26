@@ -53,5 +53,8 @@ app:
   max-concurrent-trips: 2000
   max-cars: 3000
   max-bookings-per-trip: 60
+firebase:
+  topic:
+    default: general
 server:
   port: 5090
