@@ -209,12 +209,26 @@ func (h *TripHandler) GetTrips(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Calculate page number from offset (1-based)
+	page := 1
+	if limit > 0 {
+		page = (offset / limit) + 1
+	}
+
+	// Calculate total pages
+	totalPages := 0
+	if limit > 0 {
+		totalPages = int((total + int64(limit) - 1) / int64(limit))
+	}
+
 	// Create page response with session data
 	pageResponse := models.PageResponse{
-		Trips:  trips,
-		Total:  total,
-		Limit:  limit,
-		Offset: offset,
+		Trips:      trips,
+		Total:      total,
+		Limit:      limit,
+		Offset:     offset,
+		Page:       page,
+		TotalPages: totalPages,
 	}
 
 	// Only include session UUID if it's a new session
@@ -418,12 +432,26 @@ func (h *TripHandler) GetTripsByVehicleID(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Calculate page number from offset (1-based)
+	page := 1
+	if limit > 0 {
+		page = (offset / limit) + 1
+	}
+
+	// Calculate total pages
+	totalPages := 0
+	if limit > 0 {
+		totalPages = int((total + int64(limit) - 1) / int64(limit))
+	}
+
 	// Create page response with session data
 	pageResponse := models.PageResponse{
-		Trips:  trips,
-		Total:  total,
-		Limit:  limit,
-		Offset: offset,
+		Trips:      trips,
+		Total:      total,
+		Limit:      limit,
+		Offset:     offset,
+		Page:       page,
+		TotalPages: totalPages,
 	}
 
 	// Only include session UUID if it's a new session
@@ -718,12 +746,108 @@ func (h *TripHandler) GetTripsByCompanyID(w http.ResponseWriter, r *http.Request
 		h.scheduler.StartOrExtendTimer(companyID, h.baseURL, tripIDs)
 	}
 
+	// Calculate page number from offset (1-based)
+	page := 1
+	if limit > 0 {
+		page = (offset / limit) + 1
+	}
+
+	// Calculate total pages
+	totalPages := 0
+	if limit > 0 {
+		totalPages = int((total + int64(limit) - 1) / int64(limit))
+	}
+
 	// Create paginated response
 	pageResponse := models.PageResponse{
-		Trips:  trips,
-		Total:  total,
-		Limit:  limit,
-		Offset: offset,
+		Trips:      trips,
+		Total:      total,
+		Limit:      limit,
+		Offset:     offset,
+		Page:       page,
+		TotalPages: totalPages,
+	}
+
+	utils.JSONResponse(w, pageResponse, http.StatusOK)
+}
+
+// GetInternalTrips gets all trips from last 30 days (internal endpoint)
+func (h *TripHandler) GetInternalTrips(w http.ResponseWriter, r *http.Request) {
+	// Parse optional last_update_time parameter
+	var lastUpdateTime *time.Time
+	if lastUpdateTimeStr := r.URL.Query().Get("last_update_time"); lastUpdateTimeStr != "" {
+		// Try multiple timestamp formats to handle various ISO 8601 formats
+		var parsedTime time.Time
+		var err error
+		
+		// Try custom format with milliseconds first (e.g., 2025-11-14T09:17:51.628Z)
+		parsedTime, err = time.Parse("2006-01-02T15:04:05.000Z", lastUpdateTimeStr)
+		if err != nil {
+			// Try RFC3339 format (standard ISO 8601 with optional fractional seconds)
+			parsedTime, err = time.Parse(time.RFC3339, lastUpdateTimeStr)
+			if err != nil {
+				// Try RFC3339Nano (for nanosecond precision)
+				parsedTime, err = time.Parse(time.RFC3339Nano, lastUpdateTimeStr)
+				if err != nil {
+					utils.ErrorResponse(w, "Invalid last_update_time format (expected RFC3339, e.g., 2025-11-14T09:17:51.628Z)", http.StatusBadRequest)
+					return
+				}
+			}
+		}
+		lastUpdateTime = &parsedTime
+	}
+
+	// Parse pagination parameters
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	limit := 20 // default page size
+	offset := 0
+
+	if limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil || limit < 0 {
+			utils.ErrorResponse(w, "Invalid limit parameter", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if offsetStr != "" {
+		var err error
+		offset, err = strconv.Atoi(offsetStr)
+		if err != nil || offset < 0 {
+			utils.ErrorResponse(w, "Invalid offset parameter", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Get trips from service
+	trips, total, err := h.service.GetAllTripsInternal(lastUpdateTime, limit, offset)
+	if err != nil {
+		utils.ErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Calculate page number from offset (1-based)
+	page := 1
+	if limit > 0 {
+		page = (offset / limit) + 1
+	}
+
+	// Calculate total pages
+	totalPages := 0
+	if limit > 0 {
+		totalPages = int((total + int64(limit) - 1) / int64(limit))
+	}
+
+	// Create paginated response
+	pageResponse := models.PageResponse{
+		Trips:      trips,
+		Total:      total,
+		Limit:      limit,
+		Offset:     offset,
+		Page:       page,
+		TotalPages: totalPages,
 	}
 
 	utils.JSONResponse(w, pageResponse, http.StatusOK)

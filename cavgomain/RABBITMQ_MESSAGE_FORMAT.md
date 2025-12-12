@@ -141,6 +141,196 @@ Queue: (create your own queue and bind it)
 
 ---
 
+### Vehicle Events
+
+**Exchange:** `vehicle.events` (fanout)
+
+#### 1.1 Vehicle CREATE Event
+
+```json
+{
+  "event": "CREATE",
+  "data": {
+    "id": 123,
+    "companyId": 1,
+    "companyName": "ABC Transport",
+    "make": "Toyota",
+    "model": "Camry",
+    "capacity": 4,
+    "licensePlate": "ABC-123",
+    "vehicleType": "SEDAN",
+    "status": "AVAILABLE",
+    "createdAt": "2024-01-01T10:00:00",
+    "updatedAt": "2024-01-01T10:00:00",
+    "driver": null,
+    "initialPassword": null
+  }
+}
+```
+
+#### 1.2 Vehicle UPDATE Event
+
+```json
+{
+  "event": "UPDATE",
+  "data": {
+    "id": 123,
+    "companyId": 1,
+    "companyName": "ABC Transport",
+    "make": "Toyota",
+    "model": "Camry",
+    "capacity": 4,
+    "licensePlate": "ABC-123",
+    "vehicleType": "SEDAN",
+    "status": "OCCUPIED",
+    "createdAt": "2024-01-01T10:00:00",
+    "updatedAt": "2024-01-01T11:00:00",
+    "driver": {
+      "id": 456,
+      "companyId": 1,
+      "companyName": "ABC Transport",
+      "firstName": "John",
+      "lastName": "Doe",
+      "email": "john.doe@example.com",
+      "phone": "+1234567890",
+      "status": "ACTIVE",
+      "dateOfBirth": "1990-01-01",
+      "address": "123 Main St",
+      "role": "DRIVER",
+      "licenseNumber": "DL123456",
+      "licenseExpiry": "2025-12-31",
+      "createdAt": "2024-01-01T09:00:00",
+      "updatedAt": "2024-01-01T09:00:00",
+      "vehicle": null
+    },
+    "initialPassword": null
+  }
+}
+```
+
+#### 1.3 Vehicle DELETE Event
+
+```json
+{
+  "event": "DELETE",
+  "data": {
+    "vehicleId": 123
+  }
+}
+```
+
+#### 1.4 Driver Assignment Event
+
+```json
+{
+  "event": "DRIVER_ASSIGNMENT",
+  "data": {
+    "vehicleId": 123,
+    "driverId": 456
+  }
+}
+```
+
+**Event Types:**
+- `CREATE` - New vehicle created
+- `UPDATE` - Vehicle updated (status change, etc.)
+- `DELETE` - Vehicle deleted
+- `DRIVER_ASSIGNMENT` - Driver assigned/unassigned to/from vehicle
+
+**Note:** Driver assignment events are published as part of vehicle events, not driver events.
+
+---
+
+### Driver Events
+
+**Exchange:** `driver.events` (fanout)
+
+#### 2.1 Driver CREATE Event
+
+```json
+{
+  "event": "CREATE",
+  "data": {
+    "id": 456,
+    "companyId": 1,
+    "companyName": "ABC Transport",
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john.doe@example.com",
+    "phone": "+1234567890",
+    "status": "ACTIVE",
+    "dateOfBirth": "1990-01-01",
+    "address": "123 Main St",
+    "role": "DRIVER",
+    "licenseNumber": "DL123456",
+    "licenseExpiry": "2025-12-31",
+    "createdAt": "2024-01-01T09:00:00",
+    "updatedAt": "2024-01-01T09:00:00",
+    "vehicle": {
+      "id": 123,
+      "companyId": 1,
+      "companyName": "ABC Transport",
+      "make": "Toyota",
+      "model": "Camry",
+      "capacity": 4,
+      "licensePlate": "ABC-123",
+      "vehicleType": "SEDAN",
+      "status": "OCCUPIED",
+      "createdAt": "2024-01-01T10:00:00",
+      "updatedAt": "2024-01-01T10:00:00",
+      "driver": null,
+      "initialPassword": null
+    }
+  }
+}
+```
+
+#### 2.2 Driver UPDATE Event
+
+```json
+{
+  "event": "UPDATE",
+  "data": {
+    "id": 456,
+    "companyId": 1,
+    "companyName": "ABC Transport",
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john.doe@example.com",
+    "phone": "+1234567890",
+    "status": "ACTIVE",
+    "dateOfBirth": "1990-01-01",
+    "address": "123 Main St",
+    "role": "DRIVER",
+    "licenseNumber": "DL123456",
+    "licenseExpiry": "2025-12-31",
+    "createdAt": "2024-01-01T09:00:00",
+    "updatedAt": "2024-01-01T12:00:00",
+    "vehicle": null
+  }
+}
+```
+
+#### 2.3 Driver DELETE Event
+
+```json
+{
+  "event": "DELETE",
+  "data": {
+    "driverId": 456
+  }
+}
+```
+
+**Event Types:**
+- `CREATE` - New driver created
+- `UPDATE` - Driver updated
+- `DELETE` - Driver deleted
+
+**Note:** Only drivers (users with `role: "DRIVER"`) trigger driver events.
+
+---
+
 ## 🔄 Processing Logic
 
 ### Backend Processing Flow

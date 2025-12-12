@@ -121,21 +121,35 @@ public class VehicleService {
     public List<VehicleResponseDto> getVehicleUser(Long userId) {
         CompanyUser user = companyUserRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
-        return getCompanyVehicles(user.getCompany().getId());
+        return getCompanyVehicles(user.getCompany().getId(), null);
     }
 
     public VehicleResponseDto getVehicleResponse(Long id) {
         return VehicleResponseDto.fromEntity(getVehicle(id));
     }
 
-    public List<VehicleResponseDto> getAllVehicles() {
-        return vehicleRepository.findAllWithActiveAssignments().stream()
+    public List<VehicleResponseDto> getAllVehicles(LocalDateTime timeLimit) {
+        List<Vehicle> vehicles;
+        if (timeLimit != null) {
+            vehicles = vehicleRepository.findAllWithActiveAssignmentsAfterTime(timeLimit);
+        } else {
+            // Use a very old date to get all records
+            vehicles = vehicleRepository.findAllWithActiveAssignmentsAfterTime(LocalDateTime.of(1970, 1, 1, 0, 0));
+        }
+        return vehicles.stream()
                 .map(VehicleResponseDto::fromEntity)
                 .toList();
     }
 
-    public List<VehicleResponseDto> getCompanyVehicles(Long id) {
-        return vehicleRepository.findByCompanyIdWithActiveAssignments(id).stream()
+    public List<VehicleResponseDto> getCompanyVehicles(Long id, LocalDateTime timeLimit) {
+        List<Vehicle> vehicles;
+        if (timeLimit != null) {
+            vehicles = vehicleRepository.findByCompanyIdWithActiveAssignmentsAfterTime(id, timeLimit);
+        } else {
+            // Use a very old date to get all records
+            vehicles = vehicleRepository.findByCompanyIdWithActiveAssignmentsAfterTime(id, LocalDateTime.of(1970, 1, 1, 0, 0));
+        }
+        return vehicles.stream()
                 .map(VehicleResponseDto::fromEntity)
                 .toList();
     }

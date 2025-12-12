@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -64,8 +65,15 @@ public class CompanyService {
     }
 
     @Transactional(readOnly = true)
-    public List<CompanyResponseDto> findAll() {
-        return companyRepository.findAll().stream()
+    public List<CompanyResponseDto> findAll(LocalDateTime timeLimit) {
+        List<Company> companies;
+        if (timeLimit != null) {
+            companies = companyRepository.findAllAfterTime(timeLimit);
+        } else {
+            // Use a very old date to get all records
+            companies = companyRepository.findAllAfterTime(LocalDateTime.of(1970, 1, 1, 0, 0));
+        }
+        return companies.stream()
                 .map(CompanyResponseDto::fromEntity)
                 .toList();
     }

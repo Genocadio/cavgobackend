@@ -10,6 +10,7 @@ import com.nexxserve.cavgomqt.config.RabbitMQConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -25,11 +26,26 @@ public class RabbitMQListenerService {
     @Autowired
     private TripNotificationService tripNotificationService;
 
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
+
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQListenerService.class);
 
     @RabbitListener(queues = "bookings.queue")
     public void handleBookingChanges(BookingEventMessage message) {
-        logger.info("Received booking message: {}", message.toString());
+        logger.info("═══════════════════════════════════════════════════════════════");
+        logger.info("📥 === RECEIVED MESSAGE FROM RABBITMQ QUEUE: bookings.queue ===");
+        logger.info("  - Timestamp: {}", System.currentTimeMillis());
+        logger.info("  - Event Type: {}", message.getEvent());
+        
+        if (message.getData() != null && message.getData().getBooking() != null) {
+            logger.info("  - Booking ID: {}", message.getData().getBooking().getId());
+            logger.info("  - Trip ID: {}", message.getData().getBooking().getTripId());
+            logger.info("  - Status: {}", message.getData().getBooking().getStatus());
+        } else {
+            logger.warn("  ⚠️  Message data or booking is null!");
+        }
+        logger.info("═══════════════════════════════════════════════════════════════");
 
         try {
 //            BookingEventMessage eventMessage = objectMapper.readValue(message, BookingEventMessage.class);
@@ -55,15 +71,38 @@ public class RabbitMQListenerService {
 //            }
 
         } catch (Exception e) {
-            logger.error("Error parsing booking message: {}", e.getMessage());
+            logger.error("❌ Error processing booking message from RabbitMQ: {}", e.getMessage(), e);
+            logger.error("  - Event: {}", message != null ? message.getEvent() : "null");
         }
+        logger.info("✅ Finished processing message from bookings.queue");
+        logger.info("═══════════════════════════════════════════════════════════════");
     }
 
-    @RabbitListener(queues = "trips.queue")
+    @RabbitListener(queues = "tripservicesend")
     public void handleTripChanges(TripEventMessage message) {
-        logger.info("📥 Received trip message from RabbitMQ: {}", message.getEvent());
+        logger.info("═══════════════════════════════════════════════════════════════");
+        logger.info("📥 === RECEIVED MESSAGE FROM RABBITMQ QUEUE: tripservicesend ===");
+        logger.info("  - Timestamp: {}", System.currentTimeMillis());
+        logger.info("  - Event Type: {}", message.getEvent());
+        
+        if (message.getData() != null) {
+            Trip trip = message.getData();
+            logger.info("  - Trip ID: {}", trip.getId());
+            logger.info("  - Vehicle ID: {}", trip.getVehicleId());
+            logger.info("  - Status: {}", trip.getStatus());
+            if (trip.getVehicle() != null) {
+                logger.info("  - Vehicle License Plate: {}", trip.getVehicle().getLicensePlate());
+            }
+        } else {
+            logger.warn("  ⚠️  Message data is null!");
+        }
+        logger.info("═══════════════════════════════════════════════════════════════");
 
         try {
+            // Also publish to fanout exchange for multiple services to consume
+            rabbitTemplate.convertAndSend(RabbitMQConfig.TRIPS_FANOUT_EXCHANGE, "", message);
+            logger.info("📤 Published to fanout exchange: {}", RabbitMQConfig.TRIPS_FANOUT_EXCHANGE);
+            
             Trip trip = message.getData();
             String event = message.getEvent();
             
@@ -94,7 +133,8 @@ public class RabbitMQListenerService {
                         handleTripUpdatedEvent(message, trip);
                         break;
                     default:
-                        logger.info("📋 Unhandled trip event type: {}, checking trip status", event);
+                        logger.info("📋 Unhandled trip event type: '{}', treating as TRIP_UPDATED", event);
+                        logger.info("  - This includes events like: created, updated, etc.");
                         // For unhandled events, still check trip status and send notifications
                         handleTripUpdatedEvent(message, trip);
                         break;
@@ -103,13 +143,17 @@ public class RabbitMQListenerService {
 
         } catch (Exception e) {
             logger.error("❌ Error processing trip message from RabbitMQ: {}", e.getMessage(), e);
+            logger.error("  - Event: {}", message != null ? message.getEvent() : "null");
+            logger.error("  - Trip ID: {}", message != null && message.getData() != null ? message.getData().getId() : "null");
         }
+        logger.info("✅ Finished processing message from trips.queue");
+        logger.info("═══════════════════════════════════════════════════════════════");
     }
 
     @RabbitListener(queues = RabbitMQConfig.BOOKINGS_BUNDLE_REPLY_QUEUE)
     public void handleBookingBundleReplies(BookingBundle bundle) {
-        logger.info("📥 === RECEIVING BOOKING BUNDLE REPLY FROM RABBITMQ ===");
-        logger.info("  - Queue: {}", RabbitMQConfig.BOOKINGS_BUNDLE_REPLY_QUEUE);
+        logger.info("═══════════════════════════════════════════════════════════════");
+        logger.info("📥 === RECEIVED MESSAGE FROM RABBITMQ QUEUE: {} ===", RabbitMQConfig.BOOKINGS_BUNDLE_REPLY_QUEUE);
         logger.info("  - Timestamp: {}", System.currentTimeMillis());
         
         try {
@@ -141,6 +185,8 @@ public class RabbitMQListenerService {
             logger.error("  - Exception type: {}", e.getClass().getSimpleName());
             e.printStackTrace();
         }
+        logger.info("✅ Finished processing message from {}", RabbitMQConfig.BOOKINGS_BUNDLE_REPLY_QUEUE);
+        logger.info("═══════════════════════════════════════════════════════════════");
     }
 
     private void handleTripStartedEvent(TripEventMessage message, Trip trip) {

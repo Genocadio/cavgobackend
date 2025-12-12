@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,6 +34,14 @@ public interface VehicleRepository extends JpaRepository<Vehicle, Long> {
 
     @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE (va.status = 'ACTIVE' OR va IS NULL)")
     List<Vehicle> findAllWithActiveAssignments();
+
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE (va.status = 'ACTIVE' OR va IS NULL) " +
+           "AND (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit)")
+    List<Vehicle> findAllWithActiveAssignmentsAfterTime(@Param("timeLimit") LocalDateTime timeLimit);
+
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.company.id = :companyId AND (va.status = 'ACTIVE' OR va IS NULL) " +
+           "AND (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit)")
+    List<Vehicle> findByCompanyIdWithActiveAssignmentsAfterTime(@Param("companyId") Long companyId, @Param("timeLimit") LocalDateTime timeLimit);
 
     @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.licensePlate = :licensePlate AND (va.status = 'ACTIVE' OR va IS NULL)")
     Optional<Vehicle> findByLicensePlateWithActiveAssignment(@Param("licensePlate") String licensePlate);

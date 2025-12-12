@@ -86,7 +86,7 @@ services:
       SPRING_RABBITMQ_PORT: 5672
       SPRING_RABBITMQ_USERNAME: admin
       SPRING_RABBITMQ_PASSWORD: admin
-      AGGREGATOR_BASE_URL: http://adminaggre:4000
+      AGGREGATOR_BASE_URL: http://adminaggregate:4000
     ports:
       - "6060:6060"
     depends_on:
@@ -178,7 +178,7 @@ services:
       RABBITMQ_QUEUE: trips.queue
       RABBITMQ_EXCHANGE: bookings.fanout
       STORE_LOGS: "true"
-      TRIP_UPDATE_BASE_URL: http://adminaggre:4000
+      TRIP_UPDATE_BASE_URL: http://adminaggregate:4000
     ports:
       - "6080:6080"
     depends_on:
@@ -306,18 +306,21 @@ services:
       retries: 3
       start_period: 60s
 
-  adminaggre:
+  adminaggregate:
     build:
-      context: ./adminaggre
+      context: ./adminaggregate
       dockerfile: Dockerfile
-    container_name: cavgo-adminaggre
+    container_name: cavgo-adminaggregate
     environment:
       NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/cavgoaggrgate?sslmode=disable
-      TRIP_API_BASE_URL: http://cavgotrips:6080
-      BOOKING_API_BASE_URL: http://cavgobooking:6030
-      API_BASE_URL: http://cavgomain:6060
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/adminaggregate?sslmode=disable
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: admin
+      RABBITMQ_PASSWORD: admin
+      MAIN_BASE_URL: http://cavgomain:6060
+      TRIPS_BASE_URL: http://cavgotrips:6080
     ports:
       - "4000:4000"
     depends_on:
@@ -325,6 +328,8 @@ services:
         condition: service_healthy
       cavgomain:
         condition: service_healthy
+      rabbitmq:
+        condition: service_started
       cavgotrips:
         condition: service_healthy
     networks:

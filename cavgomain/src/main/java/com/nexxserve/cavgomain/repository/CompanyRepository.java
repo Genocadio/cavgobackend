@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -23,5 +24,8 @@ public interface CompanyRepository extends JpaRepository<Company, Long> {
 
     @Query("SELECT c FROM Company c WHERE c.email = :email")
     Optional<Company> findByEmail(@Param("email") String email);
+
+    @Query("SELECT c FROM Company c WHERE (c.createdAt >= :timeLimit OR c.updatedAt >= :timeLimit)")
+    List<Company> findAllAfterTime(@Param("timeLimit") LocalDateTime timeLimit);
 }
 

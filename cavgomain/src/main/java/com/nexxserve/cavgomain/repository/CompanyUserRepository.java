@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -34,4 +35,12 @@ public interface CompanyUserRepository extends JpaRepository<CompanyUser, Long> 
            "LOWER(cu.lastName) LIKE LOWER(CONCAT('%', :searchQuery, '%')) OR " +
            "LOWER(CONCAT(cu.firstName, ' ', cu.lastName)) LIKE LOWER(CONCAT('%', :searchQuery, '%')))")
     List<CompanyUser> searchDriversByCompanyAndName(@Param("companyId") Long companyId, @Param("searchQuery") String searchQuery);
+
+    @Query("SELECT cu FROM CompanyUser cu WHERE cu.company.id = :companyId " +
+           "AND (cu.createdAt >= :timeLimit OR cu.updatedAt >= :timeLimit)")
+    List<CompanyUser> findByCompanyIdAfterTime(@Param("companyId") Long companyId, @Param("timeLimit") LocalDateTime timeLimit);
+
+    @Query("SELECT cu FROM CompanyUser cu WHERE cu.company.id = :companyId AND cu.role = :role " +
+           "AND (cu.createdAt >= :timeLimit OR cu.updatedAt >= :timeLimit)")
+    List<CompanyUser> findByCompanyIdAndRoleAfterTime(@Param("companyId") Long companyId, @Param("role") CompanyUserRole role, @Param("timeLimit") LocalDateTime timeLimit);
 }

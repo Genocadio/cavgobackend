@@ -7,7 +7,8 @@ import org.springframework.stereotype.Service;
 
 /**
  * Service to publish vehicle location/status updates to RabbitMQ
- * Queue: vehicle.location.updates
+ * Exchange: vehicle.location.updates.fanout (FanoutExchange)
+ * Multiple services can bind their queues to this exchange to receive updates
  */
 @Service
 public class RabbitMQVehicleLocationPublisherService {
@@ -15,7 +16,7 @@ public class RabbitMQVehicleLocationPublisherService {
     @Autowired
     private RabbitTemplate rabbitTemplate;
 
-    private static final String QUEUE_NAME = "vehicle.location.updates";
+    private static final String EXCHANGE_NAME = "vehicle.location.updates.fanout";
 
     /**
      * Publish vehicle location/status update to RabbitMQ
@@ -30,7 +31,7 @@ public class RabbitMQVehicleLocationPublisherService {
             boolean hasLocation = message.getCurrentLatitude() != null && message.getCurrentLongitude() != null;
             
             System.out.println("📤 === PUBLISHING VEHICLE LOCATION TO RABBITMQ ===");
-            System.out.println("  - Queue: " + QUEUE_NAME);
+            System.out.println("  - Exchange: " + EXCHANGE_NAME + " (Fanout)");
             System.out.println("  - Car ID: " + message.getCarId());
             System.out.println("  - Status: " + message.getStatus());
             System.out.println("  - Timestamp: " + message.getTimestamp());
@@ -44,9 +45,10 @@ public class RabbitMQVehicleLocationPublisherService {
                 System.out.println("  - Location: NOT PROVIDED (status update only)");
             }
             
+            // Publish to fanout exchange - routing key is ignored for fanout exchanges
             // Let RabbitTemplate's Jackson converter handle serialization automatically
             // This sets the correct __TypeId__ header for proper deserialization
-            rabbitTemplate.convertAndSend(QUEUE_NAME, message);
+            rabbitTemplate.convertAndSend(EXCHANGE_NAME, "", message);
             
             System.out.println("✅ SUCCESS: Vehicle " + (hasLocation ? "location" : "status") + " published to RabbitMQ");
             System.out.println("  - Car ID: " + message.getCarId());

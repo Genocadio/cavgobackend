@@ -34,6 +34,10 @@ public class RabbitMQTripPublisherService {
 
             // Publish to the trips publisher queue (separate from listener queue)
             rabbitTemplate.convertAndSend(RabbitMQConfig.TRIPS_PUBLISHER_QUEUE, tripEventMessage);
+            
+            // Also publish to fanout exchange for multiple services to consume
+            rabbitTemplate.convertAndSend(RabbitMQConfig.TRIPS_FANOUT_EXCHANGE, "", tripEventMessage);
+            logger.debug("📤 Also published to fanout exchange: {}", RabbitMQConfig.TRIPS_FANOUT_EXCHANGE);
 
             logger.info("✅ Successfully published trip event: {} for trip ID: {}", 
                        tripEventMessage.getEvent(), 
@@ -65,15 +69,19 @@ public class RabbitMQTripPublisherService {
                 && !tripEventMessage.getData().getWaypoints().isEmpty()) {
                 List<TripWaypoint> waypoints = tripEventMessage.getData().getWaypoints();
                 logger.debug("Trip event waypoints: {} total", waypoints.size());
-                if (waypoints.size() > 0 && waypoints.get(0) != null) {
+                if (!waypoints.isEmpty() && waypoints.getFirst() != null) {
                     logger.debug("First waypoint remaining distance: {}", 
-                               waypoints.get(0).getRemainingDistance());
+                               waypoints.getFirst().getRemainingDistance());
                 }
             }
 
             // Add metadata to the message (you could extend TripEventMessage to include this)
             // For now, we'll just log it and publish the original message
             rabbitTemplate.convertAndSend(RabbitMQConfig.TRIPS_PUBLISHER_QUEUE, tripEventMessage);
+            
+            // Also publish to fanout exchange for multiple services to consume
+            rabbitTemplate.convertAndSend(RabbitMQConfig.TRIPS_FANOUT_EXCHANGE, "", tripEventMessage);
+            logger.debug("📤 Also published to fanout exchange: {}", RabbitMQConfig.TRIPS_FANOUT_EXCHANGE);
 
             logger.info("✅ Successfully published trip event with metadata to RabbitMQ");
 

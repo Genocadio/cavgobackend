@@ -2,11 +2,12 @@ package com.nexxserve.cavgomain.controller;
 
 import com.nexxserve.cavgomain.dto.request.CompanyUserRequestDto;
 import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
-import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.service.CompanyUserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
@@ -34,13 +35,17 @@ public class CompanyUserController {
     }
 
     @GetMapping("/company/{companyId}")
-    public List<CompanyUserResponseDto> getByCompanyId(@PathVariable Long companyId) {
-        return companyUserService.findByCompanyId(companyId);
+    public List<CompanyUserResponseDto> getByCompanyId(
+            @PathVariable Long companyId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit) {
+        return companyUserService.findByCompanyId(companyId, timeLimit);
     }
 
     @GetMapping("/company/{companyId}/drivers")
-    public List<CompanyUserResponseDto> getDriversByCompany(@PathVariable Long companyId) {
-        return companyUserService.findDriversByCompany(companyId);
+    public List<CompanyUserResponseDto> getDriversByCompany(
+            @PathVariable Long companyId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit) {
+        return companyUserService.findDriversByCompany(companyId, timeLimit);
     }
 
     @GetMapping("/company/{companyId}/drivers/search")

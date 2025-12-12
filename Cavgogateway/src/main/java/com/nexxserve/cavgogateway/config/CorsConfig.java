@@ -15,6 +15,7 @@ public class CorsConfig {
 
         // Specify allowed origins explicitly for better security and compatibility
         corsConfig.addAllowedOriginPattern("https://book.gocavgo.com");
+        corsConfig.addAllowedOriginPattern("https://admin.gocavgo.com");
         corsConfig.addAllowedOriginPattern("http://localhost:3000"); // For local development
 //        corsConfig.addAllowedOriginPattern("http://localhost:8080"); // For local development
 

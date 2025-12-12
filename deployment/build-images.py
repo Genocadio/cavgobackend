@@ -31,13 +31,15 @@ class DockerImageBuilder:
     
     def __init__(self, compose_file: str = "docker-compose.yml", 
                  hub_file: str = "docker-compose-hub.yml",
-                 base_dir: Optional[str] = None):
+                 base_dir: Optional[str] = None,
+                 target_platform: Optional[str] = None):
         """Initialize the builder.
         
         Args:
             compose_file: Path to docker-compose.yml (relative to base_dir)
             hub_file: Path to docker-compose-hub.yml (relative to base_dir)
             base_dir: Base directory containing compose files (default: parent of script)
+            target_platform: Target platform to build for (e.g., 'linux/amd64', 'linux/arm64', 'amd64', 'arm64')
         """
         if base_dir is None:
             # Default to parent directory of deployment folder
@@ -90,6 +92,22 @@ class DockerImageBuilder:
         self.arch = platform.machine().lower()
         self.is_arm64 = self.arch == 'arm64' or self.arch == 'aarch64'
         self.use_buildx = False  # Will be set when needed
+        
+        # Handle target platform
+        if target_platform:
+            # Normalize platform string (accept 'amd64', 'arm64', 'linux/amd64', etc.)
+            target_platform = target_platform.lower()
+            if target_platform in ['amd64', 'x86_64', 'x64']:
+                self.target_platform = 'linux/amd64'
+            elif target_platform in ['arm64', 'aarch64']:
+                self.target_platform = 'linux/arm64'
+            elif target_platform.startswith('linux/'):
+                self.target_platform = target_platform
+            else:
+                self.console.print(f"[yellow]Warning:[/yellow] Unknown platform '{target_platform}', using current platform")
+                self.target_platform = None
+        else:
+            self.target_platform = None
         
         # Setup logging directory
         self.logs_dir = Path(__file__).parent / "logs"
@@ -392,24 +410,41 @@ class DockerImageBuilder:
             compose_file = self.compose_file
             
             # Determine build command based on platform requirements
-            # Note: --load with buildx doesn't support multi-platform manifest lists
-            # So we'll use regular docker compose build for local builds (which works fine)
-            # True multi-platform builds would require --push (not implemented yet)
+            use_compose_tagging = True  # Default to compose tagging
             
-            # For now, always use docker compose build for local builds
-            # This matches the working behavior and avoids the manifest list issue
-            cmd = [
-                "docker", "compose",
-                "-f", str(compose_file),
-                "build", service_name
-            ]
-            use_compose_tagging = True  # Need to tag after compose build
+            # If target_platform is specified, use buildx to build for that specific platform
+            if self.target_platform:
+                # Always use buildx when target platform is specified to ensure we build for that exact platform
+                self.use_buildx = True
+                if not self._setup_buildx():
+                    return False, "buildx is required for platform-specific builds but is not available"
+                
+                # Use buildx build with --platform and --load
+                cmd = [
+                    "docker", "buildx", "build",
+                    "--platform", self.target_platform,
+                    "-f", str(dockerfile_path),
+                    "-t", target_image,
+                    "--load",  # Load into local Docker daemon
+                    str(context_path)
+                ]
+                use_compose_tagging = False  # Already tagged with target_image
+            else:
+                # No target platform specified - use regular docker compose build
+                cmd = [
+                    "docker", "compose",
+                    "-f", str(compose_file),
+                    "build", service_name
+                ]
             
-            # If multi-platform was requested, note that we're building for current platform
-            # (True multi-platform requires --push which we're not doing yet)
-            if multi_platform and progress and task_id is not None:
-                platform_note = "arm64" if self.is_arm64 else "amd64"
-                progress.update(task_id, description=f"[dim]{service_name}: building for {platform_note} (multi-platform requires push)[/dim]")
+            # Update progress with platform info
+            if progress and task_id is not None:
+                if self.target_platform:
+                    platform_note = self.target_platform.split('/')[-1] if '/' in self.target_platform else self.target_platform
+                    progress.update(task_id, description=f"[dim]{service_name}: building for {platform_note}[/dim]")
+                elif multi_platform:
+                    platform_note = "arm64" if self.is_arm64 else "amd64"
+                    progress.update(task_id, description=f"[dim]{service_name}: building for {platform_note} (multi-platform requires push)[/dim]")
             
             # Setup logging for this service
             service_log_dir = self.logs_dir / service_name
@@ -658,7 +693,23 @@ class DockerImageBuilder:
         
         try:
             # Determine push method based on platform requirements
-            if multi_platform and self.is_arm64:
+            # If target_platform is set, use it (single platform push)
+            if self.target_platform:
+                # Push for specific platform using buildx
+                self.use_buildx = True
+                if not self._setup_buildx():
+                    return False, "buildx is required for platform-specific push but is not available"
+                
+                # Rebuild and push for the specific platform
+                cmd = [
+                    "docker", "buildx", "build",
+                    "--platform", self.target_platform,
+                    "-f", str(context_path / dockerfile),
+                    "-t", target_image,
+                    "--push",  # Push directly
+                    str(context_path)
+                ]
+            elif multi_platform and self.is_arm64:
                 # Use buildx for multi-platform push
                 self.use_buildx = True
                 if not self._setup_buildx():
@@ -668,7 +719,7 @@ class DockerImageBuilder:
                     if progress and task_id is not None:
                         progress.update(task_id, description=f"[yellow]{service_name}: buildx not available, pushing single platform")
             
-            if multi_platform and self.use_buildx and self.is_arm64:
+            if multi_platform and self.use_buildx and self.is_arm64 and not self.target_platform:
                 # Use buildx build --push for multi-platform
                 platforms = "linux/amd64,linux/arm64"
                 cmd = [
@@ -679,7 +730,7 @@ class DockerImageBuilder:
                     "--push",  # Push directly
                     str(context_path)
                 ]
-            else:
+            elif not self.target_platform:
                 # Use regular docker push for single platform
                 cmd = ["docker", "push", target_image]
             
@@ -1128,7 +1179,7 @@ class DockerImageBuilder:
 
 
 def show_main_menu(builder: DockerImageBuilder, build_all: Optional[bool] = None, 
-                   multi_platform: Optional[bool] = None, quick_mode: bool = False) -> Tuple[Optional[List[str]], bool, bool]:
+                   multi_platform: Optional[bool] = None, quick_mode: bool = False) -> Tuple[Optional[List[str]], bool, Optional[str], bool]:
     """Display interactive main menu and return selected services.
     
     Args:
@@ -1138,7 +1189,7 @@ def show_main_menu(builder: DockerImageBuilder, build_all: Optional[bool] = None
         quick_mode: If True, skip to service selection directly
     
     Returns:
-        Tuple of (List of service names to build or None if cancelled, multi_platform bool, will_push bool)
+        Tuple of (List of service names to build or None if cancelled, multi_platform bool, target_platform str or None, will_push bool)
     """
     console = builder.console
     
@@ -1164,7 +1215,7 @@ def show_main_menu(builder: DockerImageBuilder, build_all: Optional[bool] = None
         selection = Prompt.ask("Enter service numbers", default="")
         
         if selection.lower() == "all":
-            return all_services, True, False  # multi-platform enabled in quick mode, no push (quick mode handles push separately)
+            return all_services, False, "linux/amd64", False  # x86/amd64 default in quick mode, no push (quick mode handles push separately)
         
         selected = []
         try:
@@ -1176,13 +1227,13 @@ def show_main_menu(builder: DockerImageBuilder, build_all: Optional[bool] = None
                     console.print(f"[yellow]Warning: Invalid index {idx}, skipping[/yellow]")
         except ValueError:
             console.print("[red]Invalid input. Please enter numbers separated by commas.[/red]")
-            return None, True, False
+            return None, False, "linux/amd64", False
         
         if not selected:
             console.print("[yellow]No valid services selected.[/yellow]")
-            return None, True, False
+            return None, False, "linux/amd64", False
         
-        return selected, True, False  # multi-platform enabled in quick mode, no push (quick mode handles push separately)
+        return selected, False, "linux/amd64", False  # x86/amd64 default in quick mode, no push (quick mode handles push separately)
     
     while True:
         # Clear screen (works in most terminals)
@@ -1267,42 +1318,64 @@ def show_main_menu(builder: DockerImageBuilder, build_all: Optional[bool] = None
         
         elif choice == "4":
             # Push menu - handle push directly
-            push_services, push_multi_platform = show_push_menu(builder, multi_platform)
+            push_services, push_multi_platform, push_target_platform = show_push_menu(builder, multi_platform)
             if push_services:
-                platform_info = "multi-platform" if push_multi_platform else "current platform only"
+                if push_target_platform:
+                    platform_info = push_target_platform.split('/')[-1] if '/' in push_target_platform else push_target_platform
+                elif push_multi_platform:
+                    platform_info = "multi-platform"
+                else:
+                    platform_info = "current platform only"
                 console.print(f"\n[cyan]Pushing {len(push_services)} service(s) ({platform_info})...[/cyan]\n")
+                # Temporarily set target_platform for push
+                original_target = builder.target_platform
+                if push_target_platform:
+                    builder.target_platform = push_target_platform
                 push_results = builder.push_services(push_services, show_progress=True, multi_platform=push_multi_platform, verbose=True)
+                builder.target_platform = original_target  # Restore
                 builder.show_build_results(push_results, "Push")
                 console.print()
                 if not Confirm.ask("Return to main menu?", default=True):
-                    return None, True, False
+                    return None, True, None, False
             continue  # Return to menu
         
         elif choice == "5":
-            return None, True, False
+            return None, True, None, False
         
-        # Ask about platform if not already answered
-        if multi_platform is None:
+        # Ask if user wants to push after build FIRST
+        console.print()
+        will_push = Confirm.ask("Push images after build?", default=False)
+        
+        # If pushing, automatically use x86/amd64 and skip platform question
+        if will_push:
+            use_multi_platform = False
+            target_platform = "linux/amd64"
+        # Ask about platform if not already answered and not pushing
+        elif multi_platform is None:
             console.print()
             platform_choice = Prompt.ask(
-                "Build for [cyan]multi-platform[/cyan] (linux/amd64,linux/arm64) or [yellow]current platform only[/yellow]?",
-                choices=["m", "c", "multi", "current"],
-                default="m"
+                "Build for [cyan]multi-platform[/cyan] (linux/amd64,linux/arm64), [green]x86/amd64 only[/green], or [yellow]current platform only[/yellow]?",
+                choices=["m", "x", "c", "multi", "x86", "amd64", "current"],
+                default="x"
             )
-            use_multi_platform = platform_choice in ["m", "multi"]
+            if platform_choice in ["m", "multi"]:
+                use_multi_platform = True
+                target_platform = None
+            elif platform_choice in ["x", "x86", "amd64"]:
+                use_multi_platform = False
+                target_platform = "linux/amd64"
+            else:  # current
+                use_multi_platform = False
+                target_platform = None
         else:
             use_multi_platform = multi_platform
+            target_platform = None
         
-        # Ask if user wants to push after build
-        console.print()
-        will_push = Confirm.ask("Push images after build? (multi-platform)", default=False)
-        
-        # Return services, multi_platform, and push flag
-        # We'll use a tuple with 3 elements, but need to update the return type
-        return (services, use_multi_platform, will_push)
+        # Return services, multi_platform, target_platform, and push flag
+        return (services, use_multi_platform, target_platform, will_push)
 
 
-def show_push_menu(builder: DockerImageBuilder, multi_platform: Optional[bool] = None) -> Tuple[Optional[List[str]], bool]:
+def show_push_menu(builder: DockerImageBuilder, multi_platform: Optional[bool] = None) -> Tuple[Optional[List[str]], bool, Optional[str]]:
     """Display push menu and return selected services to push.
     
     Args:
@@ -1310,7 +1383,7 @@ def show_push_menu(builder: DockerImageBuilder, multi_platform: Optional[bool] =
         multi_platform: If set, skip platform question
     
     Returns:
-        Tuple of (List of service names to push or None if cancelled, multi_platform bool)
+        Tuple of (List of service names to push or None if cancelled, multi_platform bool, target_platform str or None)
     """
     console = builder.console
     
@@ -1321,8 +1394,8 @@ def show_push_menu(builder: DockerImageBuilder, multi_platform: Optional[bool] =
     if not available_services:
         console.print("[yellow]No images found locally to push. Build images first.[/yellow]")
         if not Confirm.ask("Return to main menu?"):
-            return None, True
-        return None, True
+            return None, True, None
+        return None, True, None
     
     console.print("\n[bold]Select services to push:[/bold]")
     console.print("[dim](Enter service numbers separated by commas, or 'all' for all services)[/dim]\n")
@@ -1355,18 +1428,28 @@ def show_push_menu(builder: DockerImageBuilder, multi_platform: Optional[bool] =
         services = selected
     
     # Ask about platform if not already answered
+    # When pushing, default to x86/amd64
     if multi_platform is None:
         console.print()
         platform_choice = Prompt.ask(
-            "Push as [cyan]multi-platform[/cyan] (linux/amd64,linux/arm64) or [yellow]current platform only[/yellow]?",
-            choices=["m", "c", "multi", "current"],
-            default="m"
+            "Push as [cyan]multi-platform[/cyan] (linux/amd64,linux/arm64), [green]x86/amd64 only[/green], or [yellow]current platform only[/yellow]?",
+            choices=["m", "x", "c", "multi", "x86", "amd64", "current"],
+            default="x"
         )
-        use_multi_platform = platform_choice in ["m", "multi"]
+        if platform_choice in ["m", "multi"]:
+            use_multi_platform = True
+            target_platform = None
+        elif platform_choice in ["x", "x86", "amd64"]:
+            use_multi_platform = False
+            target_platform = "linux/amd64"
+        else:  # current
+            use_multi_platform = False
+            target_platform = None
     else:
         use_multi_platform = multi_platform
+        target_platform = None
     
-    return services, use_multi_platform
+    return services, use_multi_platform, target_platform
 
 
 def main():
@@ -1420,6 +1503,12 @@ def main():
         default="docker-compose-hub.yml",
         help="Path to docker-compose-hub.yml (relative to script parent directory)"
     )
+    parser.add_argument(
+        "--platform",
+        type=str,
+        default=None,
+        help="Target platform to build for (e.g., 'amd64', 'arm64', 'linux/amd64', 'linux/arm64'). Default: current platform"
+    )
     
     args = parser.parse_args()
     
@@ -1444,7 +1533,8 @@ def main():
     # Initialize builder
     builder = DockerImageBuilder(
         compose_file=args.compose_file,
-        hub_file=args.hub_file
+        hub_file=args.hub_file,
+        target_platform=args.platform
     )
     
     build_results = {}
@@ -1453,7 +1543,7 @@ def main():
     # Determine which services to build/push
     if args.quick:
         # Quick mode: select services, then build (and push if not -b)
-        services, final_multi_platform = show_main_menu(
+        services, final_multi_platform, target_platform, will_push_quick = show_main_menu(
             builder,
             quick_mode=True
         )
@@ -1466,19 +1556,32 @@ def main():
             builder.console.print("\n[yellow]No services selected.[/yellow]")
             return 0
         
-        platform_info = "multi-platform" if final_multi_platform else "current platform only"
+        # Set target platform if specified
+        original_target = builder.target_platform
+        if target_platform:
+            builder.target_platform = target_platform
+        
+        if target_platform:
+            platform_info = target_platform.split('/')[-1] if '/' in target_platform else target_platform
+        elif final_multi_platform:
+            platform_info = "multi-platform"
+        else:
+            platform_info = "current platform only"
         builder.console.print(f"\n[cyan]Building {len(services)} service(s) ({platform_info}) in quick mode...[/cyan]\n")
         build_results = builder.build_services(services, show_progress=True, multi_platform=final_multi_platform, verbose=True)
         builder.show_build_results(build_results, "Build")
         
         # Push after build if enabled (default in quick mode unless -b)
-        if should_push:
+        if should_push or will_push_quick:
             # Filter to only successfully built services
             services_to_push = [name for name in services if build_results.get(name, (False, ""))[0]]
             if services_to_push:
                 builder.console.print(f"\n[cyan]Pushing {len(services_to_push)} service(s) ({platform_info})...[/cyan]\n")
                 push_results = builder.push_services(services_to_push, show_progress=True, multi_platform=final_multi_platform, verbose=True)
                 builder.show_build_results(push_results, "Push")
+        
+        # Restore original target platform
+        builder.target_platform = original_target
         
     elif args.silent:
         # Silent mode: build only by default, push if -p is specified
@@ -1487,7 +1590,12 @@ def main():
             available_services = [name for name, info in builder.services.items() 
                                   if builder._image_exists_locally(info['target_image'])]
             if available_services:
-                platform_info = "multi-platform" if multi_platform else "current platform only"
+                if builder.target_platform:
+                    platform_info = builder.target_platform.split('/')[-1] if '/' in builder.target_platform else builder.target_platform
+                elif multi_platform:
+                    platform_info = "multi-platform"
+                else:
+                    platform_info = "current platform only"
                 builder.console.print(f"[cyan]Pushing {len(available_services)} service(s) ({platform_info})...[/cyan]\n")
                 push_results = builder.push_services(available_services, show_progress=True, multi_platform=multi_platform, verbose=verbose)
                 builder.show_build_results(push_results, "Push")
@@ -1500,7 +1608,12 @@ def main():
                 builder.console.print("[green]All images already exist locally. Nothing to build.[/green]")
                 return 0
             
-            platform_info = "multi-platform" if multi_platform else "current platform only"
+            if builder.target_platform:
+                platform_info = builder.target_platform.split('/')[-1] if '/' in builder.target_platform else builder.target_platform
+            elif multi_platform:
+                platform_info = "multi-platform"
+            else:
+                platform_info = "current platform only"
             builder.console.print(f"[cyan]Building {len(services)} service(s) ({platform_info})...[/cyan]\n")
             build_results = builder.build_services(services, show_progress=True, multi_platform=multi_platform, verbose=verbose)
             builder.show_build_results(build_results, "Build")
@@ -1518,7 +1631,7 @@ def main():
         # Check if push-only mode
         if args.push and not args.build_only:
             # Push-only: show push menu
-            services, final_multi_platform = show_push_menu(builder, multi_platform if args.local else None)
+            services, final_multi_platform, push_target_platform = show_push_menu(builder, multi_platform if args.local else None)
             
             if services is None:
                 builder.console.print("\n[yellow]Push cancelled.[/yellow]")
@@ -1528,13 +1641,26 @@ def main():
                 builder.console.print("\n[yellow]No services selected.[/yellow]")
                 return 0
             
-            platform_info = "multi-platform" if final_multi_platform else "current platform only"
+            # Set target platform if specified
+            original_target = builder.target_platform
+            if push_target_platform:
+                builder.target_platform = push_target_platform
+            
+            if push_target_platform:
+                platform_info = push_target_platform.split('/')[-1] if '/' in push_target_platform else push_target_platform
+            elif final_multi_platform:
+                platform_info = "multi-platform"
+            else:
+                platform_info = "current platform only"
             builder.console.print(f"\n[cyan]Pushing {len(services)} service(s) ({platform_info})...[/cyan]\n")
             push_results = builder.push_services(services, show_progress=True, multi_platform=final_multi_platform, verbose=verbose)
             builder.show_build_results(push_results, "Push")
+            
+            # Restore original target platform
+            builder.target_platform = original_target
         else:
             # Build mode (with optional push after)
-            services, final_multi_platform, will_push = show_main_menu(
+            services, final_multi_platform, target_platform, will_push = show_main_menu(
                 builder, 
                 build_all=args.all if args.all else None,
                 multi_platform=multi_platform if args.local else None
@@ -1548,7 +1674,17 @@ def main():
                 builder.console.print("\n[yellow]No services selected.[/yellow]")
                 return 0
             
-            platform_info = "multi-platform" if final_multi_platform else "current platform only"
+            # Set target platform if specified
+            original_target = builder.target_platform
+            if target_platform:
+                builder.target_platform = target_platform
+            
+            if target_platform:
+                platform_info = target_platform.split('/')[-1] if '/' in target_platform else target_platform
+            elif final_multi_platform:
+                platform_info = "multi-platform"
+            else:
+                platform_info = "current platform only"
             builder.console.print(f"\n[cyan]Building {len(services)} service(s) ({platform_info})...[/cyan]\n")
             build_results = builder.build_services(services, show_progress=True, multi_platform=final_multi_platform, verbose=verbose)
             builder.show_build_results(build_results, "Build")
@@ -1560,6 +1696,9 @@ def main():
                     builder.console.print(f"\n[cyan]Pushing {len(services_to_push)} service(s) ({platform_info})...[/cyan]\n")
                     push_results = builder.push_services(services_to_push, show_progress=True, multi_platform=final_multi_platform, verbose=verbose)
                     builder.show_build_results(push_results, "Push")
+            
+            # Restore original target platform
+            builder.target_platform = original_target
     
     # Return exit code based on results
     all_results = {**build_results, **push_results} if push_results else build_results

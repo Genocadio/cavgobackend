@@ -52,6 +52,7 @@ func Setup(
 
 	// Internal trip endpoints (must be before public endpoints to avoid conflicts)
 	r.HandleFunc("/internal/trips/company/{company_id}", tripHandler.GetTripsByCompanyID).Methods("GET")
+	r.HandleFunc("/internal/trips", tripHandler.GetInternalTrips).Methods("GET")
 
 	// Trip endpoints
 	r.HandleFunc("/trips", tripHandler.CreateTrip).Methods("POST")

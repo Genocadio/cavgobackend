@@ -254,11 +254,13 @@ func (t *Trip) Validate() error {
 
 // PageResponse represents a paginated response with SSE subscription UUID
 type PageResponse struct {
-	Trips   []Trip `json:"trips"`
-	Total   int64  `json:"total"`
-	Limit   int    `json:"limit"`
-	Offset  int    `json:"offset"`
-	SSEUUID string `json:"sse_uuid"` // UUID for SSE subscription
+	Trips      []Trip `json:"trips"`
+	Total      int64  `json:"total"`       // Total number of trips matching the query
+	Limit      int    `json:"limit"`       // Number of trips per page
+	Offset     int    `json:"offset"`      // Current offset
+	Page       int    `json:"page"`        // Current page number (1-based)
+	TotalPages int    `json:"total_pages"` // Total number of pages
+	SSEUUID    string `json:"sse_uuid"`    // UUID for SSE subscription
 }
 
 // DriverMetrics represents metrics for a driver

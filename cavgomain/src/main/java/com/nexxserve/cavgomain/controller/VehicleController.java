@@ -44,8 +44,9 @@ public class VehicleController {
     }
 
     @GetMapping
-    public List<VehicleResponseDto> getAllVehicles() {
-        return vehicleService.getAllVehicles();
+    public List<VehicleResponseDto> getAllVehicles(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit) {
+        return vehicleService.getAllVehicles(timeLimit);
     }
 
     @PutMapping("/{id}")
@@ -54,8 +55,10 @@ public class VehicleController {
     }
 
     @GetMapping("/company/{companyId}")
-    public List<VehicleResponseDto> getcompanyVehicles(@PathVariable Long companyId) {
-        return vehicleService.getCompanyVehicles(companyId);
+    public List<VehicleResponseDto> getcompanyVehicles(
+            @PathVariable Long companyId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit) {
+        return vehicleService.getCompanyVehicles(companyId, timeLimit);
     }
 
     @DeleteMapping("/{id}")

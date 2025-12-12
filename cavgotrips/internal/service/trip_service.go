@@ -764,6 +764,19 @@ func (s *TripService) GetTripsByCompanyID(companyID int64, driverID *int64, vehi
 	return trips, total, nil
 }
 
+// GetAllTripsInternal gets all trips from last 30 days with optional filters
+func (s *TripService) GetAllTripsInternal(lastUpdateTime *time.Time, limit, offset int) ([]models.Trip, int64, error) {
+	trips, total, err := s.tripRepo.GetAllTripsInternal(lastUpdateTime, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range trips {
+		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
+	}
+	return trips, total, nil
+}
+
 func (s *TripService) GetDriverMetrics(driverID int64) (*models.DriverMetrics, error) {
 	return s.tripRepo.GetDriverMetrics(driverID)
 }

@@ -34,7 +34,8 @@ public class RabbitMQVehicleSettingsListenerService {
             VehicleSettingsMessage settings,
             @Header("amqp_receivedRoutingKey") String routingKey) {
         try {
-            System.out.println("📥 === RECEIVED VEHICLE SETTINGS FROM RABBITMQ ===");
+            System.out.println("═══════════════════════════════════════════════════════════════");
+            System.out.println("📥 === RECEIVED MESSAGE FROM RABBITMQ QUEUE: vehicle.settings.queue ===");
             System.out.println("  - Timestamp: " + System.currentTimeMillis());
             System.out.println("  - Routing Key: " + routingKey);
             
@@ -57,6 +58,7 @@ public class RabbitMQVehicleSettingsListenerService {
             // Forward to MQTT
             mqttService.publishVehicleSettings(vehicleId, settings);
             System.out.println("✅ Successfully forwarded vehicle settings to MQTT");
+            System.out.println("═══════════════════════════════════════════════════════════════");
             
         } catch (Exception e) {
             System.err.println("❌ FAILED to process vehicle settings from RabbitMQ:");

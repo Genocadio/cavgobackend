@@ -61,7 +61,7 @@ func (r *RabbitMQService) PublishTripEvent(event string, trip models.Trip) error
 	}
 
 	// Log the full JSON structure to the console
-	log.Printf("[RabbitMQ Publish] Event: %s, Message: %s\n", event, string(body))
+	log.Printf("[RabbitMQ Publish] Queue: %s, Event: %s, Message: %s\n", r.queue.Name, event, string(body))
 
 	return r.channel.Publish(
 		"",           // exchange

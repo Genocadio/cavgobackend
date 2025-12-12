@@ -2,12 +2,13 @@ package com.nexxserve.cavgomain.controller;
 
 import com.nexxserve.cavgomain.dto.request.CompanyRequestDto;
 import com.nexxserve.cavgomain.dto.response.CompanyResponseDto;
-import com.nexxserve.cavgomain.entity.Company;
 import com.nexxserve.cavgomain.enums.CompanyStatus;
 import com.nexxserve.cavgomain.service.CompanyService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
@@ -33,8 +34,9 @@ public class CompanyController {
     }
 
     @GetMapping
-    public List<CompanyResponseDto> getAllCompanies() {
-        return companyService.findAll();
+    public List<CompanyResponseDto> getAllCompanies(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit) {
+        return companyService.findAll(timeLimit);
     }
 
     @GetMapping("/status/{status}")

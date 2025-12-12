@@ -14,17 +14,31 @@ import org.springframework.context.annotation.Configuration;
 @EnableRabbit
 public class RabbitMQConfig {
 
-    // Queue names
-    public static final String VEHICLE_LOCATION_QUEUE = "vehicle.location.updates";
+    // Exchange names
+    public static final String VEHICLE_LOCATION_EXCHANGE = "vehicle.location.updates.fanout";
+    public static final String VEHICLE_LOCATION_QUEUE = "vehicle.location.updates.queue";
     
     // Exchange for settings
     public static final String VEHICLE_SETTINGS_EXCHANGE = "vehicle.settings.exchange";
     public static final String VEHICLE_SETTINGS_ROUTING_KEY_PREFIX = "vehicle.settings.";
 
-    // Bean for combined location/status queue
+    // Bean for vehicle location fanout exchange
+    @Bean
+    public FanoutExchange vehicleLocationExchange() {
+        return new FanoutExchange(VEHICLE_LOCATION_EXCHANGE, true, false);
+    }
+
+    // Bean for queue bound to vehicle location exchange
     @Bean
     public Queue vehicleLocationQueue() {
         return new Queue(VEHICLE_LOCATION_QUEUE, true);
+    }
+
+    // Bind queue to fanout exchange
+    @Bean
+    public Binding vehicleLocationBinding() {
+        return BindingBuilder.bind(vehicleLocationQueue())
+                .to(vehicleLocationExchange());
     }
 
     // Bean for settings exchange (topic exchange for flexible routing)

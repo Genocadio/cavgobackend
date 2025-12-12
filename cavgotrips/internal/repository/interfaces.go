@@ -64,6 +64,7 @@ type TripRepository interface {
 	GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error)
 	GetTripsByFiltersWithCityRoute(origin, destination, company string, cityRoute bool, limit, offset int) ([]models.Trip, int64, error)
 	GetTripsByCompanyID(companyID int64, driverID *int64, vehicleID *int64, fromDate *time.Time, afterTripID *int64, limit, offset int) ([]models.Trip, int64, error)
+	GetAllTripsInternal(lastUpdateTime *time.Time, limit, offset int) ([]models.Trip, int64, error)
 	GetDriverMetrics(driverID int64) (*models.DriverMetrics, error)
 	Delete(id int64) error
 }

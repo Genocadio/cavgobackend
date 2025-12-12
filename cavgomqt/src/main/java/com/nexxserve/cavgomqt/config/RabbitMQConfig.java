@@ -15,11 +15,13 @@ import org.springframework.context.annotation.Configuration;
 public class RabbitMQConfig {
 
     public static final String BOOKINGS_QUEUE = "bookings.queue";
-    public static final String TRIPS_QUEUE = "trips.queue";
+    public static final String TRIPS_QUEUE = "tripservicesend";
     public static final String TRIPS_PUBLISHER_QUEUE = "trips.publisher.queue";
+    public static final String TRIPS_FANOUT_EXCHANGE = "trips.fanout";
     public static final String BOOKINGS_BUNDLE_QUEUE = "bookingbundles.queue";
     public static final String BOOKINGS_BUNDLE_REPLY_QUEUE = "bookingbundles.reply.queue";
     public static final String VEHICLE_LOCATION_UPDATES_QUEUE = "vehicle.location.updates";
+    public static final String VEHICLE_LOCATION_UPDATES_EXCHANGE = "vehicle.location.updates.fanout";
     public static final String VEHICLE_SETTINGS_QUEUE = "vehicle.settings.queue";
     public static final String VEHICLE_SETTINGS_EXCHANGE = "vehicle.settings.exchange";
 
@@ -99,10 +101,25 @@ public class RabbitMQConfig {
     }
 
     @Bean
+    public FanoutExchange vehicleLocationUpdatesFanoutExchange() {
+        return new FanoutExchange(VEHICLE_LOCATION_UPDATES_EXCHANGE);
+    }
+
+    @Bean
     public Queue vehicleLocationUpdatesQueue() {
         // Queue already exists without DLQ in RabbitMQ (created by another service)
         // Just declare it as durable without additional arguments to avoid mismatch
         return QueueBuilder.durable(VEHICLE_LOCATION_UPDATES_QUEUE).build();
+    }
+
+    @Bean
+    public Binding vehicleLocationUpdatesBinding(Queue vehicleLocationUpdatesQueue, FanoutExchange vehicleLocationUpdatesFanoutExchange) {
+        return BindingBuilder.bind(vehicleLocationUpdatesQueue).to(vehicleLocationUpdatesFanoutExchange);
+    }
+
+    @Bean
+    public FanoutExchange tripsFanoutExchange() {
+        return new FanoutExchange(TRIPS_FANOUT_EXCHANGE);
     }
 
     @Bean

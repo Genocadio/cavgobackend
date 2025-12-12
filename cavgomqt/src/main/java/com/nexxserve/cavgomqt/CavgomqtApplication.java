@@ -22,10 +22,14 @@ public class CavgomqtApplication implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        System.out.println("=== MQTT Spring Integration Demo ===");
-        System.out.println("Application started. MQTT subscriber is listening...");
+        System.out.println("═══════════════════════════════════════════════════════════════");
+        System.out.println("🚀 CAVGOMQT APPLICATION STARTED");
+        System.out.println("═══════════════════════════════════════════════════════════════");
+        System.out.println("✅ MQTT subscriber is listening...");
+        System.out.println("✅ RabbitMQ listeners are active (see logs above for details)");
+        System.out.println("═══════════════════════════════════════════════════════════════");
 
-        // Wait a bit for connection to establish
+        // Wait a bit for connections to establish
         Thread.sleep(2000);
 
         // Send a test message

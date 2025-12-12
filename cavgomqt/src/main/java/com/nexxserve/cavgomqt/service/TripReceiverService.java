@@ -33,6 +33,9 @@ public class TripReceiverService {
     @Autowired
     private TripNotificationService tripNotificationService;
 
+    @Autowired
+    private RabbitMQVehicleLocationPublisherService vehicleLocationPublisherService;
+
     /**
      * Process incoming trip event message from MQTT
      * @param topic MQTT topic (e.g., "car/3/trip/updates")
@@ -61,6 +64,9 @@ public class TripReceiverService {
             logger.info("🔄 Converting to internal format...");
             TripEventMessage internalMessage = convertToInternalFormat(incomingMessage);
             logger.info("✅ Successfully converted to internal format");
+            
+            // Check if trip has location data and publish vehicle location update
+            checkAndPublishVehicleLocation(carId, internalMessage.getData());
             
             // Process the trip event
             logger.info("🔄 Processing trip event...");
@@ -371,6 +377,49 @@ public class TripReceiverService {
         // Check and send "about to complete" notification if conditions are met
         logger.info("🔔 Checking if 'about to complete' notification should be sent...");
         tripNotificationService.checkAndSendAboutToCompleteNotification(tripData);
+    }
+
+    /**
+     * Check if trip data has location information and publish vehicle location update
+     * @param carId The car ID
+     * @param tripData The trip data containing location information
+     */
+    private void checkAndPublishVehicleLocation(String carId, Trip tripData) {
+        if (tripData == null) {
+            return;
+        }
+        
+        // Check if latitude and longitude are not null
+        if (tripData.getCurrentLatitude() != null && tripData.getCurrentLongitude() != null) {
+            logger.info("📍 Trip data contains location: ({}, {})", 
+                       tripData.getCurrentLatitude(), tripData.getCurrentLongitude());
+            
+            // Create vehicle location update message
+            VehicleLocationUpdateMessage locationMsg = new VehicleLocationUpdateMessage();
+            locationMsg.setCarId(carId);
+            locationMsg.setStatus("ONLINE");
+            locationMsg.setTimestamp(System.currentTimeMillis());
+            locationMsg.setCurrentLatitude(tripData.getCurrentLatitude());
+            locationMsg.setCurrentLongitude(tripData.getCurrentLongitude());
+            
+            // Include speed if available
+            if (tripData.getCurrentSpeed() != null) {
+                locationMsg.setCurrentSpeed(tripData.getCurrentSpeed());
+            }
+            
+            // Accuracy and bearing are not available in trip data, leave as null
+            
+            // Publish to RabbitMQ
+            try {
+                vehicleLocationPublisherService.publish(locationMsg);
+                logger.info("✅ Published vehicle location update from trip data for car: {}", carId);
+            } catch (Exception e) {
+                logger.error("❌ Failed to publish vehicle location update from trip data: {}", e.getMessage(), e);
+            }
+        } else {
+            logger.debug("📍 Trip data does not contain location information (lat: {}, lng: {})", 
+                        tripData.getCurrentLatitude(), tripData.getCurrentLongitude());
+        }
     }
 
     /**

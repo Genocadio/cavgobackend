@@ -152,9 +152,22 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleMessageNotReadableException(
             HttpMessageNotReadableException ex, HttpServletRequest request) {
 
+        // Log the full exception for debugging
+        log.error("HttpMessageNotReadableException: {}", ex.getMessage(), ex);
+
         String message = "Request body is missing or malformed";
-        if (ex.getMessage() != null && ex.getMessage().contains("VehicleType")) {
-            message = "Invalid value for vehicleType. Allowed values: SEDAN, SUV, TRUCK, VAN, MOTORCYCLE, BUS, MINIBUS";
+        if (ex.getMessage() != null) {
+            if (ex.getMessage().contains("VehicleType")) {
+                message = "Invalid value for vehicleType. Allowed values: SEDAN, SUV, TRUCK, VAN, MOTORCYCLE, BUS, MINIBUS";
+            } else if (ex.getCause() != null && ex.getCause().getMessage() != null) {
+                // Include more details from the root cause
+                String causeMessage = ex.getCause().getMessage();
+                if (causeMessage.contains("Cannot deserialize")) {
+                    message = "Invalid request body format: " + causeMessage;
+                } else if (causeMessage.contains("Unexpected token") || causeMessage.contains("JSON")) {
+                    message = "Malformed JSON in request body: " + causeMessage;
+                }
+            }
         }
 
         ErrorResponse errorResponse = ErrorResponse.builder()

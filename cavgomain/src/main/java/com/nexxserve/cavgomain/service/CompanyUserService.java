@@ -17,6 +17,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -141,8 +142,15 @@ public class CompanyUserService {
     }
 
     @Transactional(readOnly = true)
-    public List<CompanyUserResponseDto> findByCompanyId(Long companyId) {
-        return companyUserRepository.findByCompanyId(companyId).stream()
+    public List<CompanyUserResponseDto> findByCompanyId(Long companyId, LocalDateTime timeLimit) {
+        List<CompanyUser> users;
+        if (timeLimit != null) {
+            users = companyUserRepository.findByCompanyIdAfterTime(companyId, timeLimit);
+        } else {
+            // Use a very old date to get all records
+            users = companyUserRepository.findByCompanyIdAfterTime(companyId, LocalDateTime.of(1970, 1, 1, 0, 0));
+        }
+        return users.stream()
                 .map(user -> {
                     CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(user);
                     
@@ -164,8 +172,15 @@ public class CompanyUserService {
     }
 
     @Transactional(readOnly = true)
-    public List<CompanyUserResponseDto> findDriversByCompany(Long companyId) {
-        return companyUserRepository.findByCompanyIdAndRole(companyId, CompanyUserRole.DRIVER).stream()
+    public List<CompanyUserResponseDto> findDriversByCompany(Long companyId, LocalDateTime timeLimit) {
+        List<CompanyUser> drivers;
+        if (timeLimit != null) {
+            drivers = companyUserRepository.findByCompanyIdAndRoleAfterTime(companyId, CompanyUserRole.DRIVER, timeLimit);
+        } else {
+            // Use a very old date to get all records
+            drivers = companyUserRepository.findByCompanyIdAndRoleAfterTime(companyId, CompanyUserRole.DRIVER, LocalDateTime.of(1970, 1, 1, 0, 0));
+        }
+        return drivers.stream()
                 .map(driver -> {
                     CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(driver);
                     

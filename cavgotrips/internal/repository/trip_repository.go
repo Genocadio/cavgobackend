@@ -388,6 +388,48 @@ func (r *tripRepository) GetTripsByCompanyID(companyID int64, driverID *int64, v
 	return trips, total, nil
 }
 
+// GetAllTripsInternal gets all trips from last 30 days with optional last_update_time filter
+func (r *tripRepository) GetAllTripsInternal(lastUpdateTime *time.Time, limit, offset int) ([]models.Trip, int64, error) {
+	var trips []models.Trip
+
+	// Calculate 30 days ago
+	thirtyDaysAgo := time.Now().AddDate(0, 0, -30)
+
+	db := r.db.Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		Where("trips.created_at >= ?", thirtyDaysAgo).
+		Order("trips.updated_at DESC, trips.created_at DESC")
+
+	// Apply optional last_update_time filter
+	// Return trips where created_at >= last_update_time OR updated_at >= last_update_time
+	if lastUpdateTime != nil {
+		db = db.Where("(trips.created_at >= ? OR trips.updated_at >= ?)", *lastUpdateTime, *lastUpdateTime)
+	}
+
+	// Get total count before pagination
+	var total int64
+	countDB := db.Session(&gorm.Session{})
+	err := countDB.Model(&models.Trip{}).Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Apply pagination
+	if limit > 0 {
+		db = db.Limit(limit)
+	}
+	if offset > 0 {
+		db = db.Offset(offset)
+	}
+
+	if err = db.Find(&trips).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return trips, total, nil
+}
+
 func (r *tripRepository) GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error) {
 	var trips []models.Trip
 	err := r.db.Preload("Route.Origin").
