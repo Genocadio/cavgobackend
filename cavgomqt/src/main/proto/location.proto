@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option java_package = "com.nexxserve.cavgomqt.proto";
+option java_outer_classname = "LocationProto";
+
+message LocationPoint {
+  double lat = 1;         // Latitude
+  double lng = 2;         // Longitude
+  float speed = 3;        // Speed in m/s
+  optional float bearing = 4;      // Heading (0-360)
+  optional float accuracy = 5;     // Confidence interval (meters)
+  int64 timestamp = 6;    // Unix time (ms)
+}
+
+message LocationBatch {
+  string vehicleId = 1;
+  string plate = 2;       // Vehicle license plate
+  repeated LocationPoint points = 3;
+}

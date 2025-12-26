@@ -7,7 +7,7 @@ spring:
       default-retained: false
       completion-timeout: 5000
   datasource:
-    url: jdbc:postgresql://cavgo-postgres:5432/cavgomqt
+    url: jdbc:postgresql://postgres:5432/cavgomqt
     username: postgres
     password: postgres
     driver-class-name: org.postgresql.Driver
@@ -27,8 +27,7 @@ mqtt:
   username: genoyves
   password: Cadio*11.
   broker:
-    url: ssl://73d5ec93cbe843ab83b8f29e68f6979e.s1.eu.hivemq.cloud
-  topic: hello
+    url: ssl://73d5ec93cbe843ab83b8f29e68f6979e.s1.eu.hivemq.cloud:8883
 logging:
   level:
     org:
@@ -63,6 +62,9 @@ app:
 firebase:
   topic:
     default: general
+naviga:
+  base:
+    url: http://navigation:6040
 server:
   port: 6090
 vehicle:

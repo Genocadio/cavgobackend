@@ -32,5 +32,6 @@ create_db_if_not_exists "adminaggregate"
 create_db_if_not_exists "cavgomqt"
 
 create_db_if_not_exists "ridehail"
+create_db_if_not_exists "navigation"
 echo "Database initialization completed successfully!"
 

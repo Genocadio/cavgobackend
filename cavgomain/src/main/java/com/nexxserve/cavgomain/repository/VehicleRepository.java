@@ -26,23 +26,24 @@ public interface VehicleRepository extends JpaRepository<Vehicle, Long> {
     List<Vehicle> findAvailableVehiclesByCompany(@Param("companyId") Long companyId);
 
     // Fetch vehicles with their active assignments
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.id = :id AND (va.status = 'ACTIVE' OR va IS NULL)")
+    // Note: We fetch the vehicle first, then filter assignments in the service layer if needed
+    @Query("SELECT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.id = :id")
     Optional<Vehicle> findByIdWithActiveAssignment(@Param("id") Long id);
 
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.company.id = :companyId AND (va.status = 'ACTIVE' OR va IS NULL)")
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.company.id = :companyId")
     List<Vehicle> findByCompanyIdWithActiveAssignments(@Param("companyId") Long companyId);
 
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE (va.status = 'ACTIVE' OR va IS NULL)")
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va")
     List<Vehicle> findAllWithActiveAssignments();
 
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE (va.status = 'ACTIVE' OR va IS NULL) " +
-           "AND (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit)")
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va " +
+           "WHERE (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit)")
     List<Vehicle> findAllWithActiveAssignmentsAfterTime(@Param("timeLimit") LocalDateTime timeLimit);
 
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.company.id = :companyId AND (va.status = 'ACTIVE' OR va IS NULL) " +
-           "AND (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit)")
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va " +
+           "WHERE v.company.id = :companyId AND (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit)")
     List<Vehicle> findByCompanyIdWithActiveAssignmentsAfterTime(@Param("companyId") Long companyId, @Param("timeLimit") LocalDateTime timeLimit);
 
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.licensePlate = :licensePlate AND (va.status = 'ACTIVE' OR va IS NULL)")
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.licensePlate = :licensePlate")
     Optional<Vehicle> findByLicensePlateWithActiveAssignment(@Param("licensePlate") String licensePlate);
 }

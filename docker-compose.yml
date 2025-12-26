@@ -25,6 +25,20 @@ services:
       RABBITMQ_DEFAULT_PASS: admin
     networks:
     - cavgo-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: cavgo-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - cavgo-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     
   postgres:
     image: postgres:15-alpine
@@ -250,17 +264,18 @@ services:
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: postgres
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/cavgo-data/firebase-credentials.json
       SPRING_JPA_SHOW_SQL: false
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: admin
       RABBITMQ_PASS: admin
-      GOOGLE_APPLICATION_CREDENTIALS: /opt/cavgo-data/firebase-credentials.json
+      NAVIGA_BASE_URL: http://navigation:6040
     ports:
       - "6090:6090"
     volumes:
-      - /opt/cavgo-data/firebase-credentials.json:/opt/cavgo-data/firebase-credentials.json:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/opt/cavgo-data/firebase-credentials.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -268,6 +283,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_started
+      navigation:
+        condition: service_healthy
     networks:
       - cavgo-network
     healthcheck:
@@ -334,6 +351,41 @@ services:
         condition: service_healthy
     networks:
       - cavgo-network
+  # Navigation Service (Java)
+  navigation:
+    build: 
+      context: ../Navigation
+      dockerfile: Dockerfile
+    container_name: cavgo-navigation
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/navigation
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_SHOW_SQL: false
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_TIMEOUT: 2000ms
+      OSRM_URL: http://host.docker.internal:5000
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
+    ports:
+      - "6040:6040"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      eurekacavgo:
+        condition: service_healthy
+    networks:
+      - cavgo-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6040/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 volumes:
   postgres_data:
