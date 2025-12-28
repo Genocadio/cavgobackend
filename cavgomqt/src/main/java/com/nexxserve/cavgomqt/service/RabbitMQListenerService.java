@@ -3,15 +3,12 @@ package com.nexxserve.cavgomqt.service;
 import com.nexxserve.cavgomqt.dto.BookingEventMessage;
 import com.nexxserve.cavgomqt.dto.Trip;
 import com.nexxserve.cavgomqt.dto.TripEventMessage;
-import com.nexxserve.cavgomqt.dto.TripStatus;
-import com.nexxserve.cavgomqt.repository.NavigaTripRepository;
 import lombok.RequiredArgsConstructor;
 import com.nexxserve.cavgomqt.dto.mqtt.BookingBundle;
 import com.nexxserve.cavgomqt.config.RabbitMQConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -22,17 +19,12 @@ public class RabbitMQListenerService {
     @Autowired
     private MqttService mqttService;
 
-    @Autowired
-    private TripNotificationService tripNotificationService;
 
-    @Autowired
-    private RabbitTemplate rabbitTemplate;
+    // Removed RabbitTemplate publish usage; all trip updates are published by NavigaService
 
     @Autowired
     private NavigaService navigaService;
 
-    @Autowired
-    private NavigaTripRepository navigaTripRepository;
 
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQListenerService.class);
 
@@ -92,7 +84,7 @@ public class RabbitMQListenerService {
     @RabbitListener(queues = "tripservicesend")
     public void handleTripChanges(TripEventMessage message) {
         logger.info("═══════════════════════════════════════════════════════════════");
-        logger.info("📥 === RECEIVED MESSAGE FROM RABBITMQ QUEUE: tripservicesend ===");
+        logger.info("📥 === RECEIVED TRIP EVENT FROM FANOUT (queue bound to: tripservice.trips.updates) ===");
         logger.info("  - Timestamp: {}", System.currentTimeMillis());
         logger.info("  - Event Type: {}", message.getEvent());
 
@@ -110,51 +102,18 @@ public class RabbitMQListenerService {
         logger.info("═══════════════════════════════════════════════════════════════");
 
         try {
-            // Also publish to fanout exchange for multiple services to consume
-            rabbitTemplate.convertAndSend(RabbitMQConfig.TRIPS_FANOUT_EXCHANGE, "", message);
-            logger.info("📤 Published to fanout exchange: {}", RabbitMQConfig.TRIPS_FANOUT_EXCHANGE);
-
             Trip trip = message.getData();
             String event = message.getEvent();
 
-            // Handle different trip event types
-            // Also check trip status in data, not just event type
-            if (trip.getStatus() == TripStatus.COMPLETED) {
-                // If trip is completed, always send completion notification regardless of event
-                // type
-                handleTripCompletedEvent(message, trip);
+            // Only handle the two canonical Trip Service events:
+            // - created: create/register trip in Naviga
+            // - cancelled: delete trip in Naviga and cleanup registry
+            if ("created".equalsIgnoreCase(event)) {
+                handleTripStartedEvent(message, trip);
+            } else if ("cancelled".equalsIgnoreCase(event)) {
+                handleTripCancelledEvent(message, trip);
             } else {
-                switch (event) {
-                    case "TRIP_CREATED":
-                    case "trip_created":
-                    case "CREATED":
-                    case "created":
-                    case "TRIP_STARTED":
-                    case "trip_started":
-                        handleTripStartedEvent(message, trip);
-                        break;
-                    case "TRIP_COMPLETED":
-                    case "trip_completed":
-                        handleTripCompletedEvent(message, trip);
-                        break;
-                    case "TRIP_CANCELLED":
-                    case "trip_cancelled":
-                        handleTripCancelledEvent(message, trip);
-                        break;
-                    case "TRIP_UPDATED":
-                    case "trip_updated":
-                    case "TRIP_PROGRESS_UPDATE":
-                    case "trip_progress_update":
-                    case "progress_update":
-                        handleTripUpdatedEvent(message, trip);
-                        break;
-                    default:
-                        logger.info("📋 Unhandled trip event type: '{}', treating as TRIP_UPDATED", event);
-                        logger.info("  - This includes events like: created, updated, etc.");
-                        // For unhandled events, still check trip status and send notifications
-                        handleTripUpdatedEvent(message, trip);
-                        break;
-                }
+                logger.info("ℹ️ Ignoring non-core trip event from Trip Service: {}", event);
             }
 
         } catch (Exception e) {
@@ -163,7 +122,7 @@ public class RabbitMQListenerService {
             logger.error("  - Trip ID: {}",
                     message != null && message.getData() != null ? message.getData().getId() : "null");
         }
-        logger.info("✅ Finished processing message from trips.queue");
+        logger.info("✅ Finished processing trip event from Trip Service fanout");
         logger.info("═══════════════════════════════════════════════════════════════");
     }
 
@@ -223,36 +182,11 @@ public class RabbitMQListenerService {
             // Don't fail the main flow - continue processing
         }
 
-        // Forward to MQTT for other services
-        mqttService.publishTrip(message);
-        logger.info("✅ TRIP_STARTED/TRIP_CREATED event processed and forwarded to MQTT");
+        // NOTE: Trip update events are now published by NavigaService to cavgomqt.trip.updates fanout
+        // when Naviga API calls complete. Removed MQTT/RabbitMQ republishing here.
+        logger.info("✅ TRIP_STARTED/TRIP_CREATED event processed by NavigaService");
     }
 
-    private void handleTripCompletedEvent(TripEventMessage message, Trip trip) {
-        logger.info("✅ Processing TRIP_COMPLETED event from RabbitMQ:");
-        logger.info("  - Trip ID: {}", trip.getId());
-        logger.info("  - Vehicle: {} ({})",
-                trip.getVehicle() != null ? trip.getVehicle().getLicensePlate() : "unknown",
-                trip.getVehicle() != null ? trip.getVehicle().getCompanyName() : "unknown");
-        logger.info("  - Completion Time: {}", trip.getCompletionTime());
-
-        // Remove trip from Naviga database registry
-        if (trip.getId() != null) {
-            try {
-                navigaTripRepository.deleteByTripId(Long.valueOf(trip.getId()));
-                logger.info("🗑️ Removed completed trip from Naviga registry: tripId={}", trip.getId());
-            } catch (Exception e) {
-                logger.error("❌ Failed to remove trip from Naviga registry: {}", e.getMessage());
-            }
-        }
-
-        // Send completion notification
-        tripNotificationService.sendCompletionNotification(trip);
-
-        // Forward to MQTT for other services
-        mqttService.publishTrip(message);
-        logger.info("✅ TRIP_COMPLETED event processed and forwarded to MQTT");
-    }
 
     private void handleTripCancelledEvent(TripEventMessage message, Trip trip) {
         logger.info("❌ Processing TRIP_CANCELLED event from RabbitMQ:");
@@ -272,63 +206,9 @@ public class RabbitMQListenerService {
             }
         }
 
-        // Forward to MQTT for other services
-        mqttService.publishTrip(message);
-        logger.info("✅ TRIP_CANCELLED event processed and forwarded to MQTT");
+        // NOTE: Trip update events are now published by NavigaService to cavgomqt.trip.updates fanout
+        logger.info("✅ TRIP_CANCELLED event processed by NavigaService");
     }
 
-    private void handleTripUpdatedEvent(TripEventMessage message, Trip trip) {
-        logger.info("🔄 Processing TRIP_UPDATED/TRIP_PROGRESS_UPDATE event from RabbitMQ:");
-        logger.info("  - Trip ID: {}", trip.getId());
-        logger.info("  - Vehicle: {} ({})",
-                trip.getVehicle() != null ? trip.getVehicle().getLicensePlate() : "unknown",
-                trip.getVehicle() != null ? trip.getVehicle().getCompanyName() : "unknown");
-        logger.info("  - Status: {}", trip.getStatus());
-
-        // Log location and progress information
-        if (trip.getCurrentLatitude() != null && trip.getCurrentLongitude() != null) {
-            logger.info("  - Current Location: {}, {}", trip.getCurrentLatitude(), trip.getCurrentLongitude());
-        }
-
-        if (trip.getCurrentSpeed() != null) {
-            logger.info("  - Current Speed: {} km/h", trip.getCurrentSpeed());
-        }
-
-        if (trip.getRemainingTimeToDestination() != null) {
-            logger.info("  - Remaining Time: {} seconds", trip.getRemainingTimeToDestination());
-        }
-
-        if (trip.getRemainingDistanceToDestination() != null) {
-            logger.info("  - Remaining Distance: {} meters", trip.getRemainingDistanceToDestination());
-        }
-
-        // Log waypoint information
-        if (trip.getWaypoints() != null && !trip.getWaypoints().isEmpty()) {
-            logger.info("  - Waypoints: {} total", trip.getWaypoints().size());
-            trip.getWaypoints().forEach(waypoint -> {
-                if (waypoint.getLocation() != null) {
-                    logger.info("    - Waypoint {}: {} (passed: {}, next: {})",
-                            waypoint.getOrder(),
-                            waypoint.getLocation().getCustomName() != null ? waypoint.getLocation().getCustomName()
-                                    : waypoint.getLocation().getGooglePlaceName(),
-                            waypoint.getIsPassed(),
-                            waypoint.getIsNext());
-                }
-            });
-        }
-
-        // Check trip status - if completed, send completion notification
-        if (trip.getStatus() == TripStatus.COMPLETED) {
-            logger.info("📢 Trip status is COMPLETED, sending completion notification");
-            handleTripCompletedEvent(message, trip);
-            return;
-        }
-
-        // Check and send "about to complete" notification if conditions are met
-        tripNotificationService.checkAndSendAboutToCompleteNotification(trip);
-
-        // Forward to MQTT for other services
-        mqttService.publishTrip(message);
-        logger.info("✅ TRIP_UPDATED/TRIP_PROGRESS_UPDATE event processed and forwarded to MQTT");
-    }
+    // Removed TRIP_UPDATED handler; only 'created' and 'cancelled' are processed from Trip Service fanout
 }

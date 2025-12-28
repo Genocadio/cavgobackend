@@ -2,6 +2,7 @@ package com.nexxserve.cavgomqt.service;
 
 import com.nexxserve.cavgomqt.proto.LocationProto.LocationBatch;
 import com.nexxserve.cavgomqt.proto.LocationProto.LocationPoint;
+import com.nexxserve.cavgomqt.dto.naviga.NavigaLocationUpdateEvent;
 import com.google.protobuf.InvalidProtocolBufferException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +33,9 @@ public class MqttLocationListenerService {
 
     @Autowired
     private NavigaService navigaService;
+
+    @Autowired
+    private RabbitMQNavigaLocationUpdatePublisher rabbitMQNavigaLocationUpdatePublisher;
 
     /**
      * Process incoming location batch message from MQTT
@@ -124,6 +128,39 @@ public class MqttLocationListenerService {
                 // Send all GPS updates in a single batch to Naviga API
                 if (!gpsUpdates.isEmpty()) {
                     try {
+                        // Step 1: Publish location batch to RabbitMQ fanout before sending to Naviga
+                        try {
+                            java.util.List<NavigaLocationUpdateEvent.NavigaLocationDto> locationDtos = 
+                                new java.util.ArrayList<>();
+                            for (com.nexxserve.cavgomqt.dto.naviga.NavigaGpsUpdateRequest gpsUpdate : gpsUpdates) {
+                                locationDtos.add(new NavigaLocationUpdateEvent.NavigaLocationDto(
+                                    batch.getVehicleId(),
+                                    gpsUpdate.getLatitude(),
+                                    gpsUpdate.getLongitude(),
+                                    gpsUpdate.getSpeed(),
+                                    gpsUpdate.getHeading(),
+                                    gpsUpdate.getAccuracy(),
+                                    gpsUpdate.getTimestamp()
+                                ));
+                            }
+                            
+                            NavigaLocationUpdateEvent locationEvent = new NavigaLocationUpdateEvent(
+                                batch.getVehicleId(),
+                                locationDtos,
+                                "location-batch"
+                            );
+                            
+                            if (rabbitMQNavigaLocationUpdatePublisher.isConnectionAvailable()) {
+                                rabbitMQNavigaLocationUpdatePublisher.publishLocationUpdateEvent(locationEvent);
+                            } else {
+                                logger.debug("⚠️ RabbitMQ unavailable; skipping location fanout publish (will continue with Naviga)");
+                            }
+                        } catch (Exception rabbitError) {
+                            logger.warn("⚠️ Failed to publish to location fanout (continuing with Naviga): {}", 
+                                    rabbitError.getMessage());
+                        }
+                        
+                        // Step 2: Send GPS batch to Naviga API as normal
                         // NavigaService will validate registry presence and log outcomes
                         navigaService.updateGpsBatch(batch.getVehicleId(), gpsUpdates);
                     } catch (Exception e) {

@@ -6,6 +6,7 @@ import com.nexxserve.cavgomqt.dto.TripWaypoint;
 import com.nexxserve.cavgomqt.dto.naviga.NavigaTripRequest;
 import com.nexxserve.cavgomqt.dto.naviga.NavigaWaypoint;
 import com.nexxserve.cavgomqt.dto.naviga.NavigaGpsUpdateRequest;
+import com.nexxserve.cavgomqt.dto.naviga.NavigaTripUpdateEvent;
 import com.nexxserve.cavgomqt.entity.NavigaTripEntity;
 import com.nexxserve.cavgomqt.repository.NavigaTripRepository;
 import org.slf4j.Logger;
@@ -51,6 +52,9 @@ public class NavigaService {
 
     @Autowired
     private NavigaTripRepository navigaTripRepository;
+
+    @Autowired
+    private RabbitMQNavigaTripUpdatePublisher rabbitMQNavigaTripUpdatePublisher;
 
     /**
      * Check if Naviga integration is enabled
@@ -111,10 +115,11 @@ public class NavigaService {
             // Build waypoints: origin -> waypoints (sorted by order) -> destination
             List<NavigaWaypoint> waypoints = new ArrayList<>();
 
-            // Add origin
+            // Add origin with ID from route.originId
             Location origin = trip.getRoute().getOrigin();
             String originName = origin.getCustomName() != null ? origin.getCustomName() : origin.getGooglePlaceName();
-            waypoints.add(new NavigaWaypoint(origin.getLatitude(), origin.getLongitude(), originName));
+            Integer originId = trip.getRoute().getOriginId() != null ? trip.getRoute().getOriginId() : origin.getId();
+            waypoints.add(new NavigaWaypoint(originId, origin.getLatitude(), origin.getLongitude(), originName));
 
             // Add intermediate waypoints (sorted by order)
             if (trip.getWaypoints() != null && !trip.getWaypoints().isEmpty()) {
@@ -128,17 +133,20 @@ public class NavigaService {
                         Location location = tripWaypoint.getLocation();
                         String waypointName = location.getCustomName() != null ? location.getCustomName()
                                 : location.getGooglePlaceName();
+                        // Use waypoint ID if available, otherwise use location ID
+                        Integer waypointId = tripWaypoint.getId() != null ? tripWaypoint.getId() : location.getId();
                         waypoints
-                                .add(new NavigaWaypoint(location.getLatitude(), location.getLongitude(), waypointName));
+                                .add(new NavigaWaypoint(waypointId, location.getLatitude(), location.getLongitude(), waypointName));
                     }
                 }
             }
 
-            // Add destination
+            // Add destination with ID from route.destinationId
             Location destination = trip.getRoute().getDestination();
             String destinationName = destination.getCustomName() != null ? destination.getCustomName()
                     : destination.getGooglePlaceName();
-            waypoints.add(new NavigaWaypoint(destination.getLatitude(), destination.getLongitude(), destinationName));
+            Integer destinationId = trip.getRoute().getDestinationId() != null ? trip.getRoute().getDestinationId() : destination.getId();
+            waypoints.add(new NavigaWaypoint(destinationId, destination.getLatitude(), destination.getLongitude(), destinationName));
 
             // Build request
             NavigaTripRequest request = new NavigaTripRequest();
@@ -191,6 +199,24 @@ public class NavigaService {
                         request.getCarId(), trip.getId());
                 } catch (Exception dbError) {
                     logger.error("❌ Failed to store trip in database: {}", dbError.getMessage());
+                }
+                
+                // Publish trip update event to RabbitMQ fanout exchange
+                try {
+                    // Parse full response to extract trip data, waypointProgresses, and currentLocation
+                    NavigaTripUpdateEvent.NavigaTripDto tripDto = parseNavigaTripResponse(response.getBody());
+                    if (tripDto == null) {
+                        // Fallback to minimal data if parsing fails
+                        tripDto = new NavigaTripUpdateEvent.NavigaTripDto(
+                                Long.valueOf(trip.getId()),
+                                request.getCarId(),
+                                "CREATED");
+                    }
+                    NavigaTripUpdateEvent event = new NavigaTripUpdateEvent(tripDto, "naviga-trip-create");
+                    rabbitMQNavigaTripUpdatePublisher.publishTripUpdateEvent(event);
+                    logger.info("📤 Published trip creation event to cavgomqt.trip.updates fanout");
+                } catch (Exception pubError) {
+                    logger.warn("⚠️ Failed to publish trip creation event: {}", pubError.getMessage());
                 }
             } else {
                 logger.warn("⚠️ Unexpected response from Naviga API: status={}, body={}",
@@ -365,16 +391,23 @@ public class NavigaService {
                         gpsUpdateRequests.size(), normalizedCarId);
 
                 try {
-                    // Parse response to check trip status
-                    JsonNode root = objectMapper.readTree(response.getBody());
-                    JsonNode tripNode = root.get("trip");
-                    if (tripNode != null && !tripNode.isNull()) {
-                        String status = tripNode.has("status") ? tripNode.get("status").asText() : null;
-                        Long tripId = tripNode.has("id") ? tripNode.get("id").asLong() : null;
+                    // Parse full response to extract trip data, waypointProgresses, and currentLocation
+                    NavigaTripUpdateEvent.NavigaTripDto tripDto = parseNavigaTripResponse(response.getBody());
+                    if (tripDto != null) {
+                        String status = tripDto.getStatus();
+                        Long tripId = tripDto.getId();
 
                         if (status != null) {
                             logger.info("📝 Naviga trip response: status={} tripId={} carId={}", status, tripId,
                                     normalizedCarId);
+
+                            // Publish GPS update event to RabbitMQ fanout exchange
+                            try {
+                                NavigaTripUpdateEvent event = new NavigaTripUpdateEvent(tripDto, "naviga-gps-batch");
+                                rabbitMQNavigaTripUpdatePublisher.publishTripUpdateEvent(event);
+                            } catch (Exception pubError) {
+                                logger.warn("⚠️ Failed to publish GPS batch event: {}", pubError.getMessage());
+                            }
 
                             if ("COMPLETED".equalsIgnoreCase(status)) {
                                 logger.info("🏁 Trip COMPLETED detected; removing from registry and Naviga: tripId={}",
@@ -474,6 +507,9 @@ public class NavigaService {
                 } catch (Exception dbError) {
                     logger.error("❌ Failed to remove trip from database: {}", dbError.getMessage());
                 }
+                
+                // Note: Not publishing trip deletion event to RabbitMQ (as per requirement)
+                logger.info("ℹ️ Trip deleted from Naviga - no RabbitMQ event published");
             } else {
                 logger.warn("⚠️ Unexpected response from Naviga DELETE API: status={}, body={}",
                         response.getStatusCode(), response.getBody());
@@ -497,6 +533,117 @@ public class NavigaService {
             logger.warn("⚠️ Failed to delete trip from Naviga API: {}", e.getMessage());
         } catch (Exception e) {
             logger.error("❌ Unexpected error deleting trip from Naviga API: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Parse Naviga API response and extract trip data including waypointProgresses and currentLocation.
+     * 
+     * @param responseBody JSON response body from Naviga API
+     * @return NavigaTripDto with full trip data, or null if parsing fails
+     */
+    private NavigaTripUpdateEvent.NavigaTripDto parseNavigaTripResponse(String responseBody) {
+        if (responseBody == null || responseBody.isEmpty()) {
+            return null;
+        }
+
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode tripNode = root.get("trip");
+            if (tripNode == null || tripNode.isNull()) {
+                return null;
+            }
+
+            NavigaTripUpdateEvent.NavigaTripDto tripDto = new NavigaTripUpdateEvent.NavigaTripDto();
+
+            // Basic trip fields
+            if (tripNode.has("id") && !tripNode.get("id").isNull()) {
+                tripDto.setId(tripNode.get("id").asLong());
+            }
+            if (tripNode.has("carId") && !tripNode.get("carId").isNull()) {
+                tripDto.setCarId(tripNode.get("carId").asText());
+            }
+            if (tripNode.has("status") && !tripNode.get("status").isNull()) {
+                tripDto.setStatus(tripNode.get("status").asText());
+            }
+            if (tripNode.has("createdAt") && !tripNode.get("createdAt").isNull()) {
+                tripDto.setCreatedAt(java.time.Instant.parse(tripNode.get("createdAt").asText()));
+            }
+            if (tripNode.has("completedAt") && !tripNode.get("completedAt").isNull()) {
+                tripDto.setCompletedAt(java.time.Instant.parse(tripNode.get("completedAt").asText()));
+            }
+
+            // Parse waypointProgresses array
+            if (tripNode.has("waypointProgresses") && tripNode.get("waypointProgresses").isArray()) {
+                java.util.List<NavigaTripUpdateEvent.WaypointProgressDto> waypointProgresses = new java.util.ArrayList<>();
+                for (JsonNode wpNode : tripNode.get("waypointProgresses")) {
+                    NavigaTripUpdateEvent.WaypointProgressDto wpDto = new NavigaTripUpdateEvent.WaypointProgressDto();
+                    
+                    if (wpNode.has("waypointIndex") && !wpNode.get("waypointIndex").isNull()) {
+                        wpDto.setWaypointIndex(wpNode.get("waypointIndex").asInt());
+                    }
+                    if (wpNode.has("waypointId") && !wpNode.get("waypointId").isNull()) {
+                        wpDto.setWaypointId(wpNode.get("waypointId").asText());
+                    }
+                    if (wpNode.has("waypointName") && !wpNode.get("waypointName").isNull()) {
+                        wpDto.setWaypointName(wpNode.get("waypointName").asText());
+                    }
+                    if (wpNode.has("latitude") && !wpNode.get("latitude").isNull()) {
+                        wpDto.setLatitude(wpNode.get("latitude").asDouble());
+                    }
+                    if (wpNode.has("longitude") && !wpNode.get("longitude").isNull()) {
+                        wpDto.setLongitude(wpNode.get("longitude").asDouble());
+                    }
+                    if (wpNode.has("state") && !wpNode.get("state").isNull()) {
+                        wpDto.setState(wpNode.get("state").asText());
+                    }
+                    if (wpNode.has("arrivedAt") && !wpNode.get("arrivedAt").isNull()) {
+                        wpDto.setArrivedAt(java.time.Instant.parse(wpNode.get("arrivedAt").asText()));
+                    }
+                    if (wpNode.has("remainingDistance") && !wpNode.get("remainingDistance").isNull()) {
+                        wpDto.setRemainingDistance(wpNode.get("remainingDistance").asDouble());
+                    }
+                    if (wpNode.has("remainingTime") && !wpNode.get("remainingTime").isNull()) {
+                        wpDto.setRemainingTime(wpNode.get("remainingTime").asDouble());
+                    }
+                    
+                    waypointProgresses.add(wpDto);
+                }
+                tripDto.setWaypointProgresses(waypointProgresses);
+            }
+
+            // Parse currentLocation object
+            JsonNode currentLocationNode = root.get("currentLocation");
+            if (currentLocationNode != null && !currentLocationNode.isNull()) {
+                NavigaTripUpdateEvent.CurrentLocationDto currentLocation = new NavigaTripUpdateEvent.CurrentLocationDto();
+                
+                if (currentLocationNode.has("carId") && !currentLocationNode.get("carId").isNull()) {
+                    currentLocation.setCarId(currentLocationNode.get("carId").asText());
+                }
+                if (currentLocationNode.has("latitude") && !currentLocationNode.get("latitude").isNull()) {
+                    currentLocation.setLatitude(currentLocationNode.get("latitude").asDouble());
+                }
+                if (currentLocationNode.has("longitude") && !currentLocationNode.get("longitude").isNull()) {
+                    currentLocation.setLongitude(currentLocationNode.get("longitude").asDouble());
+                }
+                if (currentLocationNode.has("speed") && !currentLocationNode.get("speed").isNull()) {
+                    currentLocation.setSpeed(currentLocationNode.get("speed").asDouble());
+                }
+                if (currentLocationNode.has("heading") && !currentLocationNode.get("heading").isNull()) {
+                    currentLocation.setHeading(currentLocationNode.get("heading").asDouble());
+                }
+                if (currentLocationNode.has("timestamp") && !currentLocationNode.get("timestamp").isNull()) {
+                    currentLocation.setTimestamp(java.time.Instant.parse(currentLocationNode.get("timestamp").asText()));
+                }
+                
+                tripDto.setCurrentLocation(currentLocation);
+            }
+
+            return tripDto;
+
+        } catch (Exception e) {
+            logger.warn("⚠️ Failed to parse Naviga API response: {}", e.getMessage());
+            return null;
         }
     }
 }

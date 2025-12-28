@@ -9,7 +9,7 @@ import (
 )
 
 // StartBookingMonitor starts a background goroutine that checks for expired pending bookings every minute.
-func StartBookingMonitor(repo repository.BookingRepository, publisher *RabbitMQPublisher) {
+func StartBookingMonitor(repo repository.BookingRepository, publisher *RabbitMQPublisher, snapshotService TripSnapshotService) {
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
@@ -24,11 +24,23 @@ func StartBookingMonitor(repo repository.BookingRepository, publisher *RabbitMQP
 					continue
 				}
 				for _, booking := range bookings {
+					fmt.Printf("[BookingMonitor] Processing expired booking: bookingId=%s tripId=%d\n", booking.ID, booking.TripID)
+
 					err := repo.CancelBookingAndFailPayment(ctx, booking.ID)
 					if err != nil {
 						fmt.Printf("[BookingMonitor] Failed to cancel booking %s: %v\n", booking.ID, err)
 						continue
 					}
+
+					// Update snapshot after booking expired/cancelled
+					fmt.Printf("[BookingMonitor] Updating snapshot for expired booking: bookingId=%s\n", booking.ID)
+					if err := snapshotService.OnBookingExpired(ctx, booking.TripID, booking.PickupLocationID, booking.DropoffLocationID, booking.NumberOfTickets); err != nil {
+						fmt.Printf("[BookingMonitor] ERROR: Failed to update snapshot: %v\n", err)
+						// Don't fail, just log the error
+					} else {
+						fmt.Printf("[BookingMonitor] Snapshot updated successfully for expired booking: bookingId=%s\n", booking.ID)
+					}
+
 					// Publish cancellation event
 					if publisher != nil {
 						resp := map[string]interface{}{

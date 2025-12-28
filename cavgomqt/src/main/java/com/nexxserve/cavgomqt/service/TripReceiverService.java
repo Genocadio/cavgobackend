@@ -1,16 +1,18 @@
 package com.nexxserve.cavgomqt.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nexxserve.cavgomqt.dto.*;
 import com.nexxserve.cavgomqt.dto.incoming.*;
-import com.nexxserve.cavgomqt.repository.NavigaTripRepository;
+import com.nexxserve.cavgomqt.dto.naviga.NavigaGpsUpdateRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -27,22 +29,7 @@ public class TripReceiverService {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private VehicleRegistryService vehicleRegistryService;
-
-    @Autowired
-    private RabbitMQTripPublisherService rabbitMQTripPublisherService;
-
-    @Autowired
-    private TripNotificationService tripNotificationService;
-
-    @Autowired
-    private RabbitMQVehicleLocationPublisherService vehicleLocationPublisherService;
-
-    @Autowired
     private NavigaService navigaService;
-
-    @Autowired
-    private NavigaTripRepository navigaTripRepository;
 
     /**
      * Process incoming trip event message from MQTT
@@ -69,48 +56,39 @@ public class TripReceiverService {
             IncomingTripEventMessage incomingMessage = objectMapper.readValue(payload, IncomingTripEventMessage.class);
             logger.info("✅ Successfully deserialized message with event: {}", incomingMessage.getEvent());
 
-            // Convert to internal format
-            logger.info("🔄 Converting to internal format...");
-            TripEventMessage internalMessage = convertToInternalFormat(incomingMessage);
-            logger.info("✅ Successfully converted to internal format");
-
-            // Determine timestamp from message or fallback to current time
-            Long eventTimestamp = System.currentTimeMillis();
-            Trip tripData = internalMessage.getData();
-            if (tripData != null) {
-                try {
-                    // Try to get updatedAt, then createdAt
-                    String timeStr = tripData.getUpdatedAt();
-                    if (timeStr == null) {
-                        timeStr = tripData.getCreatedAt();
-                    }
-
-                    if (timeStr != null) {
-                        // Parse ISO 8601 string to epoch millis
-                        // Handle potential format differences (Z vs offset)
-                        eventTimestamp = Instant.parse(timeStr).toEpochMilli();
-                    }
-                } catch (Exception e) {
-                    logger.warn("⚠️ Failed to parse timestamp from trip data, using current time: {}", e.getMessage());
-                }
+            // Extract location only; ignore non-location trip data
+            Trip tripData = convertTripData(incomingMessage.getData());
+            if (tripData == null) {
+                logger.warn("⚠️ No trip data present; skipping Naviga update");
+                return;
             }
-            logger.info("⏰ Using timestamp for location update: {}", eventTimestamp);
 
-            // Check if trip has location data and publish vehicle location update
-            checkAndPublishVehicleLocation(carId, internalMessage.getData(), eventTimestamp);
+            Double latitude = tripData.getCurrentLatitude();
+            Double longitude = tripData.getCurrentLongitude();
 
-            // Process the trip event
-            logger.info("🔄 Processing trip event...");
-            processTripEvent(carId, internalMessage);
-            logger.info("✅ Successfully processed trip event");
+            if (latitude == null || longitude == null) {
+                logger.info("ℹ️ Trip event has no location; skipping Naviga forwarding (event={})", incomingMessage.getEvent());
+                return;
+            }
 
-            // Publish to RabbitMQ for further processing
-            logger.info("🔄 Publishing to RabbitMQ...");
-            publishToRabbitMQ(internalMessage, topic, carId);
-            logger.info("✅ Successfully published to RabbitMQ");
+            // Always use current time to avoid back-dated GPS writes
+            Long eventTimestamp = System.currentTimeMillis();
 
-            logger.info("✅ Successfully processed trip event: {} for car: {}",
-                    internalMessage.getEvent(), carId);
+            NavigaGpsUpdateRequest gpsUpdate = new NavigaGpsUpdateRequest();
+            gpsUpdate.setLatitude(latitude);
+            gpsUpdate.setLongitude(longitude);
+            if (tripData.getCurrentSpeed() != null) {
+                gpsUpdate.setSpeed(tripData.getCurrentSpeed());
+            }
+            gpsUpdate.setTimestamp(DateTimeFormatter.ISO_INSTANT.format(Instant.ofEpochMilli(eventTimestamp)));
+
+            logger.info("📡 Forwarding MQTT trip location to Naviga (carId={}, lat={}, lon={}, ts={})",
+                    carId, latitude, longitude, eventTimestamp);
+
+            // NavigaService will publish the resulting trip update fanout event
+            navigaService.updateGpsBatch(carId, Collections.singletonList(gpsUpdate));
+
+            logger.info("✅ Finished location-only processing for trip event: {}", incomingMessage.getEvent());
 
         } catch (JsonProcessingException e) {
             logger.error("❌ Failed to deserialize trip event message: {}", e.getMessage());
@@ -151,23 +129,13 @@ public class TripReceiverService {
     }
 
     /**
-     * Convert incoming trip event message to internal format
-     */
-    private TripEventMessage convertToInternalFormat(IncomingTripEventMessage incoming) {
-        TripEventMessage internal = new TripEventMessage();
-        internal.setEvent(incoming.getEvent());
-
-        // Convert trip data
-        Trip trip = convertTripData(incoming.getData());
-        internal.setData(trip);
-
-        return internal;
-    }
-
-    /**
      * Convert incoming trip data to internal Trip DTO
      */
     private Trip convertTripData(TripEventData incomingData) {
+        if (incomingData == null) {
+            return null;
+        }
+
         Trip trip = new Trip();
 
         // Basic trip information
@@ -248,6 +216,8 @@ public class TripReceiverService {
     private Route convertRouteData(IncomingRouteData incoming) {
         Route route = new Route();
         route.setId(incoming.getId());
+        route.setOriginId(incoming.getOriginId());
+        route.setDestinationId(incoming.getDestinationId());
 
         if (incoming.getOrigin() != null) {
             route.setOrigin(convertLocationData(incoming.getOrigin()));
@@ -336,212 +306,4 @@ public class TripReceiverService {
         }
     }
 
-    /**
-     * Process the converted trip event
-     * This is where you can add business logic for handling different trip events
-     */
-    private void processTripEvent(String carId, TripEventMessage tripEvent) {
-        String event = tripEvent.getEvent();
-        Trip tripData = tripEvent.getData();
-
-        logger.info("Processing trip event: {} for car: {}", event, carId);
-
-        switch (event) {
-            case "TRIP_STARTED":
-            case "trip_started":
-            case "started":
-            case "TRIP_CREATED":
-            case "trip_created":
-            case "created":
-                handleTripStarted(carId, tripData);
-                break;
-            case "TRIP_COMPLETED":
-            case "trip_completed":
-                handleTripCompleted(carId, tripData);
-                break;
-            case "TRIP_CANCELLED":
-            case "trip_cancelled":
-                handleTripCancelled(carId, tripData);
-                break;
-            case "TRIP_UPDATED":
-            case "trip_updated":
-            case "TRIP_PROGRESS_UPDATE":
-            case "trip_progress_update":
-            case "progress_update":
-                handleTripUpdated(carId, tripData);
-                break;
-            default:
-                logger.info("Unhandled trip event: {}", event);
-                // Even for unhandled events, check trip status and send notifications if needed
-                handleTripUpdated(carId, tripData);
-                break;
-        }
-    }
-
-    private void handleTripStarted(String carId, Trip tripData) {
-        logger.info("🚗 Trip started/created for car: {}, trip ID: {}", carId, tripData.getId());
-
-        // Create trip in Naviga
-        try {
-            logger.info("🗺️ Forwarding trip creation to Naviga API...");
-            navigaService.createTrip(tripData);
-        } catch (Exception e) {
-            logger.error("❌ Failed to create trip in Naviga API from MQTT event: {}", e.getMessage());
-        }
-
-        // Update vehicle registry with active trip
-        if (tripData.getId() != null) {
-            vehicleRegistryService.setActiveTrip(Long.valueOf(carId), tripData.getId().toString());
-        }
-    }
-
-    private void handleTripCompleted(String carId, Trip tripData) {
-        logger.info("✅ Trip completed for car: {}, trip ID: {}", carId, tripData.getId());
-        
-        // Remove trip from Naviga database registry
-        if (tripData.getId() != null) {
-            try {
-                navigaTripRepository.deleteByTripId(Long.valueOf(tripData.getId()));
-                logger.info("🗑️ Removed completed trip from Naviga registry: tripId={}", tripData.getId());
-            } catch (Exception e) {
-                logger.error("❌ Failed to remove trip from Naviga registry: {}", e.getMessage());
-            }
-        }
-        
-        // Clear active trip from vehicle registry
-        vehicleRegistryService.clearActiveTrip(Long.valueOf(carId));
-        // Send completion notification
-        tripNotificationService.sendCompletionNotification(tripData);
-    }
-
-    private void handleTripCancelled(String carId, Trip tripData) {
-        logger.info("❌ Trip cancelled for car: {}, trip ID: {}", carId, tripData.getId());
-        
-        // Delete trip from Naviga API
-        if (tripData.getId() != null) {
-            try {
-                logger.info("🗑️ Deleting cancelled trip from Naviga API...");
-                navigaService.deleteTrip(Long.valueOf(tripData.getId()));
-            } catch (Exception e) {
-                logger.error("❌ Failed to delete trip from Naviga API: {}", e.getMessage());
-            }
-        }
-        
-        // Clear active trip from vehicle registry
-        vehicleRegistryService.clearActiveTrip(Long.valueOf(carId));
-    }
-
-    private void handleTripUpdated(String carId, Trip tripData) {
-        logger.info("🔄 Trip updated for car: {}, trip ID: {}", carId, tripData.getId());
-        logger.info("📊 Trip status: {}, Remaining distance: {}m",
-                tripData.getStatus(), tripData.getRemainingDistanceToDestination());
-
-        // Check trip status first - if completed, send completion notification
-        if (tripData.getStatus() == TripStatus.COMPLETED) {
-            logger.info("📢 Trip status is COMPLETED, sending completion notification");
-            handleTripCompleted(carId, tripData);
-            return;
-        }
-
-        // Update trip information in registry or database
-        // This could include location updates, status changes, etc.
-        // Check and send "about to complete" notification if conditions are met
-        logger.info("🔔 Checking if 'about to complete' notification should be sent...");
-        tripNotificationService.checkAndSendAboutToCompleteNotification(tripData);
-    }
-
-    /**
-     * Check if trip data has location information and publish vehicle location
-     * update
-     * 
-     * @param carId     The car ID
-     * @param tripData  The trip data containing location information
-     * @param timestamp The timestamp of the event
-     */
-    private void checkAndPublishVehicleLocation(String carId, Trip tripData, Long timestamp) {
-        if (tripData == null) {
-            return;
-        }
-
-        // Use provided timestamp or fallback to current time
-        long effectiveTimestamp = (timestamp != null) ? timestamp : System.currentTimeMillis();
-
-        // Check if latitude and longitude are not null
-        if (tripData.getCurrentLatitude() != null && tripData.getCurrentLongitude() != null) {
-            logger.info("📍 Trip data contains location: ({}, {}) at time {}",
-                    tripData.getCurrentLatitude(), tripData.getCurrentLongitude(), effectiveTimestamp);
-
-            // Create vehicle location update message
-            VehicleLocationUpdateMessage locationMsg = new VehicleLocationUpdateMessage();
-            locationMsg.setCarId(carId);
-            locationMsg.setStatus("ONLINE");
-            locationMsg.setTimestamp(effectiveTimestamp);
-            locationMsg.setCurrentLatitude(tripData.getCurrentLatitude());
-            locationMsg.setCurrentLongitude(tripData.getCurrentLongitude());
-
-            // Include speed if available
-            if (tripData.getCurrentSpeed() != null) {
-                locationMsg.setCurrentSpeed(tripData.getCurrentSpeed());
-            }
-
-            // Accuracy and bearing are not available in trip data, leave as null
-
-            // Publish to RabbitMQ
-            try {
-                vehicleLocationPublisherService.publish(locationMsg);
-                logger.info("✅ Published vehicle location update from trip data for car: {}", carId);
-            } catch (Exception e) {
-                logger.error("❌ Failed to publish vehicle location update from trip data: {}", e.getMessage(), e);
-            }
-
-            // Send GPS update to Naviga API
-            try {
-                navigaService.updateGps(
-                        carId,
-                        tripData.getCurrentLatitude(),
-                        tripData.getCurrentLongitude(),
-                        tripData.getCurrentSpeed(),
-                        null, // bearing not available in trip data
-                        null, // accuracy not available in trip data
-                        System.currentTimeMillis()); // Use current time to avoid 'older timestamp' rejection
-            } catch (Exception e) {
-                logger.warn("⚠️ Failed to update GPS in Naviga API: {}", e.getMessage());
-                // Don't fail the main flow - continue processing
-            }
-        } else {
-            logger.debug("📍 Trip data does not contain location information (lat: {}, lng: {})",
-                    tripData.getCurrentLatitude(), tripData.getCurrentLongitude());
-        }
-    }
-
-    /**
-     * Publish trip event to RabbitMQ for further processing
-     * 
-     * @param tripEventMessage The converted trip event message
-     * @param originalTopic    The original MQTT topic
-     * @param carId            The car ID
-     */
-    private void publishToRabbitMQ(TripEventMessage tripEventMessage, String originalTopic, String carId) {
-        try {
-            logger.info("📤 Publishing trip event to RabbitMQ: {} for car: {}",
-                    tripEventMessage.getEvent(), carId);
-
-            // Check if RabbitMQ connection is available
-            if (!rabbitMQTripPublisherService.isConnectionAvailable()) {
-                logger.warn("⚠️ RabbitMQ connection not available, skipping trip event publication");
-                return;
-            }
-
-            // Publish with metadata
-            rabbitMQTripPublisherService.publishTripEventWithMetadata(tripEventMessage, originalTopic, carId);
-
-            logger.info("✅ Successfully published trip event to RabbitMQ");
-
-        } catch (Exception e) {
-            logger.error("❌ Failed to publish trip event to RabbitMQ: {}", e.getMessage(), e);
-            // Don't throw the exception to avoid breaking the MQTT processing flow
-            // The trip event was already processed locally, so we just log the RabbitMQ
-            // publishing failure
-        }
-    }
 }

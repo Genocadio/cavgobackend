@@ -35,9 +35,7 @@ public class RabbitMQTripPublisherService {
             // Publish to the trips publisher queue (separate from listener queue)
             rabbitTemplate.convertAndSend(RabbitMQConfig.TRIPS_PUBLISHER_QUEUE, tripEventMessage);
             
-            // Also publish to fanout exchange for multiple services to consume
-            rabbitTemplate.convertAndSend(RabbitMQConfig.TRIPS_FANOUT_EXCHANGE, "", tripEventMessage);
-            logger.debug("📤 Also published to fanout exchange: {}", RabbitMQConfig.TRIPS_FANOUT_EXCHANGE);
+            // Fanout publishing removed; consolidated publishing handled by NavigaService
 
             logger.info("✅ Successfully published trip event: {} for trip ID: {}", 
                        tripEventMessage.getEvent(), 
@@ -79,9 +77,7 @@ public class RabbitMQTripPublisherService {
             // For now, we'll just log it and publish the original message
             rabbitTemplate.convertAndSend(RabbitMQConfig.TRIPS_PUBLISHER_QUEUE, tripEventMessage);
             
-            // Also publish to fanout exchange for multiple services to consume
-            rabbitTemplate.convertAndSend(RabbitMQConfig.TRIPS_FANOUT_EXCHANGE, "", tripEventMessage);
-            logger.debug("📤 Also published to fanout exchange: {}", RabbitMQConfig.TRIPS_FANOUT_EXCHANGE);
+            // Fanout publishing removed; consolidated publishing handled by NavigaService
 
             logger.info("✅ Successfully published trip event with metadata to RabbitMQ");
 

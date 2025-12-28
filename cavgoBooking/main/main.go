@@ -34,6 +34,7 @@ func main() {
 	config := loadConfig()
 
 	// --- GORM Auto-Migration Block ---
+	// Note: Trip snapshot uses sqlx with manual JSON columns, not GORM
 	gormDB, err := gorm.Open(postgres.Open(config.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database with GORM: %v", err)
@@ -42,10 +43,7 @@ func main() {
 		&models.Booking{},
 		&models.Ticket{},
 		&models.Payment{},
-		// &models.Trip{},
-		// &models.Location{},
-		// &models.Route{},
-		// &models.TripWaypoint{},
+		// Trip snapshots use sqlx, not GORM - see migration SQL
 	); err != nil {
 		log.Fatalf("Failed to auto-migrate tables: %v", err)
 	}
@@ -107,9 +105,28 @@ func main() {
 
 	// Initialize services
 	tripService := service.NewHTTPTripService(config.TripServiceURL)
+
+	// Initialize trip snapshot repository and service (db is already *sqlx.DB)
+	tripSnapshotRepo := repository.NewTripSnapshotRepository(db)
+	// Ensure trip snapshot schema exists (no external migrations needed)
+	if err := tripSnapshotRepo.EnsureSchema(context.Background()); err != nil {
+		log.Printf("Warning: Failed to ensure trip_snapshots schema: %v", err)
+	} else {
+		log.Printf("Trip snapshot schema ensured")
+	}
+
+	// Configure snapshot exchange for publisher
+	snapshotExchange := getEnv("SNAPSHOT_EXCHANGE", "bookingservice.trip.snapshot")
+	if rabbitPublisher != nil {
+		rabbitPublisher.SetSnapshotExchange(snapshotExchange)
+		log.Printf("[RabbitMQ] Snapshot exchange configured: %s", snapshotExchange)
+	}
+
+	tripSnapshotService := service.NewTripSnapshotService(tripSnapshotRepo, rabbitPublisher)
+
 	// Remove MockUserService and update bookingService initialization
 	// userService := &MockUserService{}
-	bookingService := service.NewBookingService(bookingRepo, tripService, rabbitPublisher, bundlePublisher)
+	bookingService := service.NewBookingService(bookingRepo, tripService, tripSnapshotService, rabbitPublisher, bundlePublisher)
 
 	// Log booking service initialization
 	if bundlePublisher != nil {
@@ -119,7 +136,7 @@ func main() {
 	}
 
 	// Start background booking monitor
-	service.StartBookingMonitor(bookingRepo, rabbitPublisher)
+	service.StartBookingMonitor(bookingRepo, rabbitPublisher, tripSnapshotService)
 
 	// Initialize and start RabbitMQ consumer for booking bundles
 	if bundlePublisher != nil {

@@ -1,0 +1,78 @@
+spring:
+  application:
+    name: Navigation
+
+  datasource:
+    url: jdbc:postgresql://postgres:5432/navigation
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  rabbitmq:
+    host: rabbitmq
+    port: 5672
+    username: admin
+    password: admin
+  
+  data:
+    redis:
+      host: redis
+      port: 6379
+      timeout: 2000ms
+
+  cloud:
+    discovery:
+      enabled: true
+
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://eurekacavgo:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${random.value}
+
+server:
+  port: 6040
+
+logging:
+  level:
+    org.springframework.web.filter.CommonsRequestLoggingFilter: DEBUG
+
+osrm:
+  url: ${OSRM_URL:http://localhost:5000}
+  timeout:
+    seconds: 10
+
+navigation:
+  off-route:
+    city:
+      distance-threshold-meters: 25  # Reduced from 40m for faster rerouting response
+      consecutive-updates: 1  # Reduced from 2 - reroute after 1 off-route detection in city
+    non-city:
+      distance-threshold-meters: 30  # Reduced from 40m for faster rerouting response
+      consecutive-updates: 2  # Reduced from 3 - reroute after 2 consecutive off-route detections
+  arrival:
+    radius-meters: 20
+    pass-threshold-meters: 10
+  gps:
+    min-speed-ms: 0.5
+    max-age-seconds: 30
+    min-accuracy-meters: 100
+    validate-age: true
+    map-matching:
+      enabled: false  # Set to false to use raw GPS coordinates instead of snapping to route
+      post-match: false # If true, returns snapped location in API but keeps raw GPS for internal state (if enabled is false)
+  persistence:
+    periodic-save-interval-seconds: 10
+    snapshot-retention-days: 30

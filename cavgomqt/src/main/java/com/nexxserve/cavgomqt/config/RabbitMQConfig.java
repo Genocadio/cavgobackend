@@ -1,5 +1,7 @@
 package com.nexxserve.cavgomqt.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.annotation.EnableRabbit;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
@@ -13,17 +15,22 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @EnableRabbit
 public class RabbitMQConfig {
+    private static final Logger logger = LoggerFactory.getLogger(RabbitMQConfig.class);
 
     public static final String BOOKINGS_QUEUE = "bookings.queue";
     public static final String TRIPS_QUEUE = "tripservicesend";
     public static final String TRIPS_PUBLISHER_QUEUE = "trips.publisher.queue";
-    public static final String TRIPS_FANOUT_EXCHANGE = "trips.fanout";
+    // Trip Service fanout exchange we must subscribe to
+    public static final String TRIP_SERVICE_TRIPS_UPDATES_EXCHANGE = "tripservice.trips.updates";
     public static final String BOOKINGS_BUNDLE_QUEUE = "bookingbundles.queue";
     public static final String BOOKINGS_BUNDLE_REPLY_QUEUE = "bookingbundles.reply.queue";
     public static final String VEHICLE_LOCATION_UPDATES_QUEUE = "vehicle.location.updates";
     public static final String VEHICLE_LOCATION_UPDATES_EXCHANGE = "vehicle.location.updates.fanout";
     public static final String VEHICLE_SETTINGS_QUEUE = "vehicle.settings.queue";
     public static final String VEHICLE_SETTINGS_EXCHANGE = "vehicle.settings.exchange";
+    // Navigation API fanout exchange for completed trips
+    public static final String NAVIGATION_TRIP_UPDATE_EXCHANGE = "navigation.trip.update";
+    public static final String NAVIGATION_TRIP_UPDATE_QUEUE = "navigation.trip.update.queue";
 
     @Bean
     public FanoutExchange bookingsFanoutExchange() {
@@ -117,9 +124,53 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(vehicleLocationUpdatesQueue).to(vehicleLocationUpdatesFanoutExchange);
     }
 
+    // Removed local trips fanout (trips.fanout) as it's no longer used
+
+    /**
+     * Bind our local trips queue to the Trip Service fanout exchange so we receive
+     * created/cancelled trip events from the Trip Service.
+     */
     @Bean
-    public FanoutExchange tripsFanoutExchange() {
-        return new FanoutExchange(TRIPS_FANOUT_EXCHANGE);
+    public FanoutExchange tripServiceTripsUpdatesExchange() {
+        logger.info("Declaring Trip Service fanout exchange: {}", TRIP_SERVICE_TRIPS_UPDATES_EXCHANGE);
+        return new FanoutExchange(TRIP_SERVICE_TRIPS_UPDATES_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public Binding tripServiceTripsUpdatesBinding(Queue tripsQueue, FanoutExchange tripServiceTripsUpdatesExchange) {
+        Binding binding = BindingBuilder.bind(tripsQueue).to(tripServiceTripsUpdatesExchange);
+        logger.info("Binding queue '{}' to exchange '{}' (fanout)", TRIPS_QUEUE, TRIP_SERVICE_TRIPS_UPDATES_EXCHANGE);
+        return binding;
+    }
+
+    /**
+     * Navigation API fanout exchange for completed trip events.
+     * This exchange is published to by the Navigation API when trips complete.
+     */
+    @Bean
+    public FanoutExchange navigationTripUpdateExchange() {
+        logger.info("Declaring Navigation API fanout exchange: {}", NAVIGATION_TRIP_UPDATE_EXCHANGE);
+        return new FanoutExchange(NAVIGATION_TRIP_UPDATE_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public Queue navigationTripUpdateQueue() {
+        return QueueBuilder.durable(NAVIGATION_TRIP_UPDATE_QUEUE)
+                .withArgument("x-dead-letter-exchange", "")
+                .withArgument("x-dead-letter-routing-key", NAVIGATION_TRIP_UPDATE_QUEUE + ".dlq")
+                .build();
+    }
+
+    @Bean
+    public Queue navigationTripUpdateDeadLetterQueue() {
+        return QueueBuilder.durable(NAVIGATION_TRIP_UPDATE_QUEUE + ".dlq").build();
+    }
+
+    @Bean
+    public Binding navigationTripUpdateBinding(Queue navigationTripUpdateQueue, FanoutExchange navigationTripUpdateExchange) {
+        Binding binding = BindingBuilder.bind(navigationTripUpdateQueue).to(navigationTripUpdateExchange);
+        logger.info("Binding queue '{}' to exchange '{}' (fanout)", NAVIGATION_TRIP_UPDATE_QUEUE, NAVIGATION_TRIP_UPDATE_EXCHANGE);
+        return binding;
     }
 
     @Bean

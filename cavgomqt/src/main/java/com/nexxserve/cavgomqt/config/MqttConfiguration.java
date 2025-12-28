@@ -72,24 +72,45 @@ public class MqttConfiguration {
 
     @Bean
     public MqttPahoClientFactory mqttClientFactory() {
+        logger.info("═══════════════════════════════════════════════════════════════");
+        logger.info("📡 INITIALIZING MQTT CLIENT FACTORY");
+        logger.info("  - Broker URL: {}", brokerUrl);
+        logger.info("  - Client ID: {}", clientId);
+        logger.info("  - Username: {}", username.isEmpty() ? "(none)" : username);
+        logger.info("  - Password: {}", password.isEmpty() ? "(none)" : "***set***");
+        logger.info("═══════════════════════════════════════════════════════════════");
+        
         DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
         MqttConnectOptions options = new MqttConnectOptions();
 
-        // Connection settings optimized for HiveMQ Cloud
+        // Connection settings optimized for HiveMQ Cloud stability
         options.setCleanSession(false); // Persistent session for reliable delivery
-        options.setConnectionTimeout(60); // Increased for SSL connections
-        options.setKeepAliveInterval(30); // Reduced for better connection stability
-        options.setAutomaticReconnect(true);
-        options.setMaxInflight(50); // Reduced to prevent overwhelming the broker
+        options.setConnectionTimeout(90); // Increased timeout for stable cloud connections
+        options.setKeepAliveInterval(60); // Increased to reduce unnecessary traffic and false drops
+        options.setAutomaticReconnect(true); // Auto-reconnect on connection loss
+        options.setMaxReconnectDelay(128000); // Max 128 seconds between reconnection attempts
+        options.setMaxInflight(100); // Increased for better throughput
         options.setMqttVersion(4); // Use MQTT 3.1.1 for better compatibility
+        
+        // Add connection listener for better diagnostics
+        logger.info("⚙️ Connection Settings:");
+        logger.info("  - Clean Session: {}", options.isCleanSession());
+        logger.info("  - Connection Timeout: {}s", options.getConnectionTimeout());
+        logger.info("  - Keep Alive Interval: {}s", options.getKeepAliveInterval());
+        logger.info("  - Auto Reconnect: {}", options.isAutomaticReconnect());
+        logger.info("  - Max Inflight: {}", options.getMaxInflight());
 
         // SSL Configuration for HiveMQ Cloud
         if (brokerUrl.startsWith("ssl://")) {
+            logger.info("🔒 SSL mode detected - configuring SSL properties");
             options.setHttpsHostnameVerificationEnabled(false); // Disable for cloud brokers
             options.setSSLProperties(new java.util.Properties());
+        } else {
+            logger.info("🔓 Non-SSL mode (using tcp://)");
         }
 
         if (!username.isEmpty()) {
+            logger.info("👤 Authentication enabled with username: {}", username);
             options.setUserName(username);
         }
         if (!password.isEmpty()) {
@@ -100,6 +121,7 @@ public class MqttConfiguration {
         // sessions
 
         factory.setConnectionOptions(options);
+        logger.info("✅ MQTT Client Factory configured successfully");
         return factory;
     }
 
@@ -109,12 +131,27 @@ public class MqttConfiguration {
             if (event instanceof MqttConnectionFailedEvent) {
                 MqttConnectionFailedEvent e = (MqttConnectionFailedEvent) event;
                 Throwable cause = e.getCause();
-                logger.warn("MQTT connection failed: {}", cause != null ? cause.getMessage() : "unknown");
+                logger.error("═══════════════════════════════════════════════════════════════");
+                logger.error("❌ MQTT CONNECTION FAILED");
+                logger.error("  - Time: {}", java.time.Instant.now());
+                logger.error("  - Source: {}", e.getSource());
+                logger.error("  - Cause: {}", cause != null ? cause.getClass().getSimpleName() : "Unknown");
+                logger.error("  - Message: {}", cause != null ? cause.getMessage() : "No details");
+                if (cause != null && cause.getCause() != null) {
+                    logger.error("  - Root Cause: {}", cause.getCause().getMessage());
+                }
+                logger.error("  - Broker: {}", brokerUrl);
+                logger.error("═══════════════════════════════════════════════════════════════");
             } else if (event instanceof MqttSubscribedEvent) {
-                logger.info("MQTT subscribed: {}", ((MqttSubscribedEvent) event).getMessage());
+                logger.info("📌 MQTT subscribed to topic: {}", ((MqttSubscribedEvent) event).getMessage());
             } else if ("org.springframework.integration.mqtt.event.MqttConnectionEstablishedEvent"
                     .equals(event.getClass().getName())) {
-                logger.info("MQTT connected: {}", event.getSource());
+                logger.info("═══════════════════════════════════════════════════════════════");
+                logger.info("✅ MQTT CONNECTION ESTABLISHED");
+                logger.info("  - Time: {}", java.time.Instant.now());
+                logger.info("  - Source: {}", event.getSource());
+                logger.info("  - Broker: {}", brokerUrl);
+                logger.info("═══════════════════════════════════════════════════════════════");
             } else if (event instanceof MqttSubscribedEvent) {
                 logger.info("MQTT subscribed: {}", ((MqttSubscribedEvent) event).getMessage());
             } else {
@@ -186,88 +223,137 @@ public class MqttConfiguration {
 
     @Bean
     public MessageProducer carStatusInbound() {
+        String adapterClientId = clientId + "-status-" + System.currentTimeMillis();
+        String topic = "car/+/status";
+        logger.info("🔔 Setting up MQTT inbound adapter:");
+        logger.info("  - Topic: {}", topic);
+        logger.info("  - Adapter Client ID: {}", adapterClientId);
+        logger.info("  - Broker: {}", brokerUrl);
+        
         MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
                 brokerUrl,
-                clientId + "-status-" + System.currentTimeMillis(),
+                adapterClientId,
                 mqttClientFactory(),
-                "car/+/status");
+                topic);
         adapter.setCompletionTimeout(10000); // Increased timeout for SSL
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(carStatusChannel());
+        logger.info("✅ Car status inbound adapter configured");
         return adapter;
     }
 
     @Bean
     public MessageProducer tripUpdatesInbound() {
+        String adapterClientId = clientId + "-trip-updates-" + System.currentTimeMillis();
+        String topic = "car/+/trip/updates";
+        logger.info("🔔 Setting up MQTT inbound adapter:");
+        logger.info("  - Topic: {}", topic);
+        logger.info("  - Adapter Client ID: {}", adapterClientId);
+        logger.info("  - Broker: {}", brokerUrl);
+        
         MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
                 brokerUrl,
-                clientId + "-trip-updates-" + System.currentTimeMillis(),
+                adapterClientId,
                 mqttClientFactory(),
-                "car/+/trip/updates");
+                topic);
         adapter.setCompletionTimeout(10000); // Increased timeout for SSL
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(tripUpdatesChannel());
+        logger.info("✅ Trip updates inbound adapter configured");
         return adapter;
     }
 
     @Bean
     public MessageProducer heartbeatInbound() {
+        String adapterClientId = clientId + "-heartbeat-" + System.currentTimeMillis();
+        String topic = "car/+/pong";
+        logger.info("🔔 Setting up MQTT inbound adapter:");
+        logger.info("  - Topic: {}", topic);
+        logger.info("  - Adapter Client ID: {}", adapterClientId);
+        logger.info("  - Broker: {}", brokerUrl);
+        
         MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
                 brokerUrl,
-                clientId + "-heartbeat-" + System.currentTimeMillis(),
+                adapterClientId,
                 mqttClientFactory(),
-                "car/+/pong");
+                topic);
         adapter.setCompletionTimeout(10000); // Increased timeout for SSL
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(heartbeatChannel());
+        logger.info("✅ Heartbeat inbound adapter configured");
         return adapter;
     }
 
     @Bean
     public MessageProducer vehicleHeartbeatInbound() {
+        String adapterClientId = clientId + "-vehicle-heartbeat-" + System.currentTimeMillis();
+        String topic = "car/+/heartbeat";
+        logger.info("🔔 Setting up MQTT inbound adapter:");
+        logger.info("  - Topic: {}", topic);
+        logger.info("  - Adapter Client ID: {}", adapterClientId);
+        logger.info("  - Broker: {}", brokerUrl);
+        
         MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
                 brokerUrl,
-                clientId + "-vehicle-heartbeat-" + System.currentTimeMillis(),
+                adapterClientId,
                 mqttClientFactory(),
-                "car/+/heartbeat");
+                topic);
         adapter.setCompletionTimeout(10000); // Increased timeout for SSL
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(heartbeatInboundChannel());
+        logger.info("✅ Vehicle heartbeat inbound adapter configured");
         return adapter;
     }
 
     @Bean
     public MessageProducer bookingBundleInbound() {
+        String adapterClientId = clientId + "-booking-bundle-" + System.currentTimeMillis();
+        String topic = "trip/+/booking_bundle/inbound";
+        logger.info("🔔 Setting up MQTT inbound adapter:");
+        logger.info("  - Topic: {}", topic);
+        logger.info("  - Adapter Client ID: {}", adapterClientId);
+        logger.info("  - Broker: {}", brokerUrl);
+        
         MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
                 brokerUrl,
-                clientId + "-booking-bundle-" + System.currentTimeMillis(),
+                adapterClientId,
                 mqttClientFactory(),
                 // Listen only to inbound bundles from edge devices to avoid reply loop
-                "trip/+/booking_bundle/inbound");
+                topic);
         adapter.setCompletionTimeout(10000);
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
         adapter.setOutputChannel(bookingBundleChannel());
+        logger.info("✅ Booking bundle inbound adapter configured");
         return adapter;
     }
 
     @Bean
     public MessageProducer locationBatchInbound() {
+        String adapterClientId = clientId + "-location-batch-" + System.currentTimeMillis();
+        String topic = "vehicles/+/location/batch";
+        logger.info("🔔 Setting up MQTT inbound adapter (PROTOBUF):");
+        logger.info("  - Topic: {}", topic);
+        logger.info("  - Adapter Client ID: {}", adapterClientId);
+        logger.info("  - Broker: {}", brokerUrl);
+        logger.info("  - Format: Binary Protobuf");
+        
         MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
                 brokerUrl,
-                clientId + "-location-batch-" + System.currentTimeMillis(),
+                adapterClientId,
                 mqttClientFactory(),
-                "vehicles/+/location/batch");
+                topic);
         adapter.setCompletionTimeout(10000);
         DefaultPahoMessageConverter converter = new DefaultPahoMessageConverter();
         converter.setPayloadAsBytes(true); // Ensure protobuf payload stays binary
         adapter.setConverter(converter);
         adapter.setQos(1); // QoS 1 as per documentation
         adapter.setOutputChannel(locationBatchChannel());
+        logger.info("✅ Location batch inbound adapter configured");
         return adapter;
     }
 
@@ -277,6 +363,8 @@ public class MqttConfiguration {
     @ServiceActivator(inputChannel = "carStatusChannel")
     public MessageHandler carStatusHandler() {
         return message -> {
+            logger.info("🚗 ✅ MQTT MESSAGE ARRIVED: car/+/status");
+            
             String payload = (String) message.getPayload();
             String topic = (String) message
                     .getHeaders()
@@ -367,6 +455,8 @@ public class MqttConfiguration {
     @ServiceActivator(inputChannel = "tripUpdatesChannel")
     public MessageHandler tripUpdatesHandler() {
         return message -> {
+            logger.info("🚗 ✅ MQTT MESSAGE ARRIVED: car/+/trip/updates");
+            
             String payload = (String) message.getPayload();
             String topic = (String) message
                     .getHeaders()
@@ -386,6 +476,8 @@ public class MqttConfiguration {
     @ServiceActivator(inputChannel = "heartbeatChannel")
     public MessageHandler heartbeatHandler() {
         return message -> {
+            logger.info("💓 ✅ MQTT MESSAGE ARRIVED: car/+/pong");
+            
             String payload = (String) message.getPayload();
             String topic = (String) message
                     .getHeaders()
@@ -408,6 +500,8 @@ public class MqttConfiguration {
     @ServiceActivator(inputChannel = "heartbeatInboundChannel")
     public MessageHandler vehicleHeartbeatHandler() {
         return message -> {
+            logger.info("💓 ✅ MQTT MESSAGE ARRIVED: car/+/heartbeat");
+            
             String payload = (String) message.getPayload();
             String topic = (String) message
                     .getHeaders()
@@ -498,6 +592,8 @@ public class MqttConfiguration {
     @ServiceActivator(inputChannel = "bookingBundleChannel")
     public MessageHandler bookingBundleHandler() {
         return message -> {
+            logger.info("📦 ✅ MQTT MESSAGE ARRIVED: trip/+/booking_bundle/inbound");
+            
             String payload = (String) message.getPayload();
             String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
 
@@ -539,6 +635,10 @@ public class MqttConfiguration {
     @ServiceActivator(inputChannel = "locationBatchChannel")
     public MessageHandler locationBatchHandler() {
         return message -> {
+            logger.info("📍 ✅ MQTT MESSAGE ARRIVED: vehicles/+/location/batch");
+            logger.info("  - Payload type: {}", message.getPayload().getClass().getName());
+            logger.info("  - Payload size: {} bytes", ((byte[]) message.getPayload()).length);
+            
             byte[] payload = (byte[]) message.getPayload();
             String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
 

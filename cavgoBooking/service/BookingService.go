@@ -34,10 +34,11 @@ type BookingService interface {
 
 type bookingService struct {
 	bookingRepo     repository.BookingRepository
-	tripService     TripService        // Interface to trip service
-	rabbitPublisher *RabbitMQPublisher // Add publisher
-	bundlePublisher *BundlePublisher   // Add bundle publisher
-	fromRabbitMQ    bool               // Track if booking came from RabbitMQ
+	tripService     TripService         // Interface to trip service
+	snapshotService TripSnapshotService // Add snapshot service
+	rabbitPublisher *RabbitMQPublisher  // Add publisher
+	bundlePublisher *BundlePublisher    // Add bundle publisher
+	fromRabbitMQ    bool                // Track if booking came from RabbitMQ
 }
 
 // TripService interface for trip service integration (now HTTP-based)
@@ -55,10 +56,11 @@ type TripService interface {
 // Remove User struct
 // type User struct { ... }
 
-func NewBookingService(bookingRepo repository.BookingRepository, tripService TripService, publisher *RabbitMQPublisher, bundlePublisher *BundlePublisher) BookingService {
+func NewBookingService(bookingRepo repository.BookingRepository, tripService TripService, snapshotService TripSnapshotService, publisher *RabbitMQPublisher, bundlePublisher *BundlePublisher) BookingService {
 	return &bookingService{
 		bookingRepo:     bookingRepo,
 		tripService:     tripService,
+		snapshotService: snapshotService,
 		rabbitPublisher: publisher,
 		bundlePublisher: bundlePublisher,
 		fromRabbitMQ:    false,
@@ -66,7 +68,7 @@ func NewBookingService(bookingRepo repository.BookingRepository, tripService Tri
 }
 
 func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingRequest) (*models.BookingResponse, error) {
-	fmt.Printf("[BookingService] [STEP 1/8] Starting booking creation: tripId=%d pickupLocationId=%s dropoffLocationId=%s numberOfTickets=%d userName=%s userPhone=%s\n", 
+	fmt.Printf("[BookingService] [STEP 1/8] Starting booking creation: tripId=%d pickupLocationId=%s dropoffLocationId=%s numberOfTickets=%d userName=%s userPhone=%s\n",
 		req.TripID, req.PickupLocationID, req.DropoffLocationID, req.NumberOfTickets, req.UserName, req.UserPhone)
 
 	// Validate request (user_name and user_phone required)
@@ -85,18 +87,27 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 		return nil, fmt.Errorf("trip validation failed: %w", err)
 	}
 	fmt.Printf("[BookingService] [STEP 3/8] Trip fetched: tripId=%d status=%s seats=%d\n", trip.ID, trip.Status, trip.Seats)
-	
+
 	if trip.Status != "SCHEDULED" && trip.Status != "IN_PROGRESS" {
 		fmt.Printf("[BookingService] [STEP 3/8] ERROR: Trip not available: status=%s\n", trip.Status)
 		return nil, fmt.Errorf("trip is not available: status is %s", trip.Status)
 	}
 
-	// Ensure requested tickets do not exceed or equal available seats
-	if req.NumberOfTickets >= trip.Seats {
-		fmt.Printf("[BookingService] [STEP 3/8] ERROR: Too many tickets requested: requested=%d available=%d\n", req.NumberOfTickets, trip.Seats)
-		return nil, fmt.Errorf("requested number of tickets (%d) must be less than available seats (%d)", req.NumberOfTickets, trip.Seats)
+	// Validate bookable location based on trip status and location progression
+	fmt.Printf("[BookingService] [STEP 3.1/8] Validating bookable location: pickupLocationId=%s tripStatus=%s\n", req.PickupLocationID, trip.Status)
+	if err := s.snapshotService.ValidateBookableLocation(trip, req.PickupLocationID); err != nil {
+		fmt.Printf("[BookingService] [STEP 3.1/8] ERROR: Location not bookable: %v\n", err)
+		return nil, fmt.Errorf("location validation failed: %w", err)
 	}
-	fmt.Printf("[BookingService] [STEP 3/8] Seat availability check PASSED\n")
+	fmt.Printf("[BookingService] [STEP 3.1/8] Location validation PASSED\n")
+
+	// Check seat availability from snapshot
+	fmt.Printf("[BookingService] [STEP 3.2/8] Checking seat availability from snapshot...\n")
+	if err := s.snapshotService.CheckSeatAvailability(ctx, req.TripID, req.PickupLocationID, req.NumberOfTickets); err != nil {
+		fmt.Printf("[BookingService] [STEP 3.2/8] ERROR: %v\n", err)
+		return nil, err
+	}
+	fmt.Printf("[BookingService] [STEP 3.2/8] Snapshot seat availability check PASSED\n")
 
 	// Calculate price based on pickup and dropoff
 	fmt.Printf("[BookingService] [STEP 4/8] Calculating price: pickupLocationId=%s dropoffLocationId=%s\n", req.PickupLocationID, req.DropoffLocationID)
@@ -187,10 +198,10 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 	tickets := s.generateTickets(booking.ID, req.NumberOfTickets, trip, req.PickupLocationID, req.DropoffLocationID)
 	fmt.Printf("[BookingService] [STEP 6/8] Generated %d tickets: bookingId=%s\n", len(tickets), booking.ID)
 	for i, ticket := range tickets {
-		fmt.Printf("[BookingService] [STEP 6/8] Ticket %d: ticketId=%s ticketNumber=%s qrCode=%s\n", 
+		fmt.Printf("[BookingService] [STEP 6/8] Ticket %d: ticketId=%s ticketNumber=%s qrCode=%s\n",
 			i+1, ticket.ID, ticket.TicketNumber, ticket.QRCode)
 	}
-	
+
 	fmt.Printf("[BookingService] [STEP 6/8] Saving tickets to database...\n")
 	if err := s.bookingRepo.CreateTickets(ctx, tickets); err != nil {
 		fmt.Printf("[BookingService] [STEP 6/8] ERROR: Failed to save tickets: bookingId=%s error=%v\n", booking.ID, err)
@@ -211,7 +222,7 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}
-	fmt.Printf("[BookingService] [STEP 7/8] Payment object created: paymentId=%s bookingId=%s amount=%.2f status=%s method=%s\n", 
+	fmt.Printf("[BookingService] [STEP 7/8] Payment object created: paymentId=%s bookingId=%s amount=%.2f status=%s method=%s\n",
 		paymentID, booking.ID, totalAmount, payment.Status, req.PaymentMethod)
 
 	fmt.Printf("[BookingService] [STEP 7/8] Saving payment to database...\n")
@@ -220,6 +231,15 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 		return nil, fmt.Errorf("failed to create payment: %w", err)
 	}
 	fmt.Printf("[BookingService] [STEP 7/8] Payment saved successfully: paymentId=%s\n", paymentID)
+
+	// Update snapshot after booking created (pending payment)
+	fmt.Printf("[BookingService] [STEP 7.1/8] Updating trip snapshot (booking created)...\n")
+	if err := s.snapshotService.OnBookingCreated(ctx, req.TripID, req.PickupLocationID, req.DropoffLocationID, req.NumberOfTickets, trip); err != nil {
+		fmt.Printf("[BookingService] [STEP 7.1/8] ERROR: Failed to update snapshot: %v\n", err)
+		// Don't fail the booking, just log the error
+	} else {
+		fmt.Printf("[BookingService] [STEP 7.1/8] Snapshot updated successfully\n")
+	}
 
 	// Load full booking with relations
 	booking.Tickets = tickets
@@ -235,7 +255,7 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 	fmt.Printf("[BookingService] [STEP 8/8] Publishing booking events to RabbitMQ: bookingId=%s\n", booking.ID)
 	s.publishBookingEvents("created", resp)
 	fmt.Printf("[BookingService] [STEP 8/8] Finished publishing booking events: bookingId=%s\n", booking.ID)
-	fmt.Printf("[BookingService] [COMPLETE] Booking creation successful: bookingId=%s bookingReference=%s paymentId=%s tickets=%d\n", 
+	fmt.Printf("[BookingService] [COMPLETE] Booking creation successful: bookingId=%s bookingReference=%s paymentId=%s tickets=%d\n",
 		booking.ID, booking.BookingReference, payment.ID, len(tickets))
 
 	return resp, nil
@@ -366,9 +386,21 @@ func (s *bookingService) CancelBooking(ctx context.Context, id string) error {
 	}
 
 	if payment.Status == models.PaymentStatusCompleted {
-		return s.RefundPayment(ctx, id)
+		// For confirmed payments, process refund and then publish current snapshot
+		if err := s.RefundPayment(ctx, id); err != nil {
+			return err
+		}
+		// Publish current snapshot (no counter changes defined for refunds)
+		if err := s.snapshotService.PublishCurrentSnapshot(ctx, booking.TripID); err != nil {
+			fmt.Printf("[CancelBooking] WARNING: Failed to publish snapshot after refund: %v\n", err)
+		}
+		return nil
 	}
 
+	// If payment is pending, release held seats in snapshot and publish
+	if err := s.snapshotService.OnBookingExpired(ctx, booking.TripID, booking.PickupLocationID, booking.DropoffLocationID, booking.NumberOfTickets); err != nil {
+		fmt.Printf("[CancelBooking] WARNING: Failed to update snapshot for pending cancellation: %v\n", err)
+	}
 	return nil
 }
 
@@ -435,6 +467,19 @@ func (s *bookingService) ProcessPayment(ctx context.Context, bookingID string, p
 	// Update booking status
 	if err := s.bookingRepo.UpdateBookingStatus(ctx, bookingID, models.BookingStatusConfirmed); err != nil {
 		return nil, fmt.Errorf("failed to update booking status: %w", err)
+	}
+
+	// Update snapshot after payment confirmed
+	fmt.Printf("[ProcessPayment] Updating trip snapshot (payment confirmed): bookingId=%s\n", bookingID)
+	// Get booking to extract trip info
+	tempBooking, _ := s.bookingRepo.GetBookingByID(ctx, bookingID)
+	if tempBooking != nil {
+		if err := s.snapshotService.OnPaymentConfirmed(ctx, tempBooking.TripID, tempBooking.PickupLocationID, tempBooking.DropoffLocationID, tempBooking.NumberOfTickets); err != nil {
+			fmt.Printf("[ProcessPayment] ERROR: Failed to update snapshot: %v\n", err)
+			// Don't fail the payment, just log the error
+		} else {
+			fmt.Printf("[ProcessPayment] Snapshot updated successfully\n")
+		}
 	}
 
 	// Load full booking with relations

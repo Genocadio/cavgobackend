@@ -61,9 +61,12 @@ public class RabbitMQListenerRegistrationLogger {
         // Also log expected queues
         logger.info("📌 Expected Queues Being Listened:");
         logger.info("   1. {} - Trip events from backend services", RabbitMQConfig.TRIPS_QUEUE);
+        logger.info("      └─ Bound to exchange: {} (fanout)", RabbitMQConfig.TRIP_SERVICE_TRIPS_UPDATES_EXCHANGE);
         logger.info("   2. {} - Booking events from backend services", RabbitMQConfig.BOOKINGS_QUEUE);
         logger.info("   3. {} - Booking bundle replies", RabbitMQConfig.BOOKINGS_BUNDLE_REPLY_QUEUE);
         logger.info("   4. {} - Vehicle settings updates", RabbitMQConfig.VEHICLE_SETTINGS_QUEUE);
+        logger.info("   5. {} - Completed trip events from Navigation API", RabbitMQConfig.NAVIGATION_TRIP_UPDATE_QUEUE);
+        logger.info("      └─ Bound to exchange: {} (fanout)", RabbitMQConfig.NAVIGATION_TRIP_UPDATE_EXCHANGE);
         logger.info("");
         logger.info("═══════════════════════════════════════════════════════════════");
     }

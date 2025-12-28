@@ -75,6 +75,32 @@ func (r *RabbitMQService) PublishTripEvent(event string, trip models.Trip) error
 	)
 }
 
+// PublishTripEventToExchange publishes trip events to a fanout exchange
+func (r *RabbitMQService) PublishTripEventToExchange(exchangeName string, event string, trip models.Trip) error {
+	msg := models.TripEventMessage{
+		Event: event,
+		Data:  trip,
+	}
+	body, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	// Log the full JSON structure to the console
+	log.Printf("[RabbitMQ Publish Fanout] Exchange: %s, Event: %s, Message: %s\n", exchangeName, event, string(body))
+
+	return r.channel.Publish(
+		exchangeName, // fanout exchange
+		"",           // routing key (empty for fanout)
+		false,        // mandatory
+		false,        // immediate
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        body,
+		},
+	)
+}
+
 func (r *RabbitMQService) ListenTripEvents(handler func(models.TripEventMessage)) error {
 	msgs, err := r.channel.Consume(
 		r.queue.Name,
@@ -301,4 +327,28 @@ func (r *RabbitMQService) ListQueues() error {
 func (r *RabbitMQService) Close() {
 	r.channel.Close()
 	r.conn.Close()
+}
+
+// ListenFanoutQueue consumes JSON messages from a bound queue and unmarshals into dest type via handler
+func (r *RabbitMQService) ListenFanoutQueue(queueName string, rawHandler func([]byte)) error {
+	msgs, err := r.channel.Consume(
+		queueName,
+		"",    // consumer
+		true,  // auto-ack
+		false, // exclusive
+		false, // no-local
+		false, // no-wait
+		nil,   // args
+	)
+	if err != nil {
+		return fmt.Errorf("failed to start consumer for queue %s: %w", queueName, err)
+	}
+
+	go func() {
+		for d := range msgs {
+			rawHandler(d.Body)
+		}
+		log.Printf("[RabbitMQ] Consumer for queue %s exited", queueName)
+	}()
+	return nil
 }

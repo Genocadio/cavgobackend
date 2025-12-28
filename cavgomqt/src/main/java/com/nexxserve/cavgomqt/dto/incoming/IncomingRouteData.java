@@ -13,6 +13,8 @@ import lombok.Setter;
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public class IncomingRouteData {
     private Integer id;
+    private Integer originId;
+    private Integer destinationId;
     private IncomingLocationData origin;
     private IncomingLocationData destination;
 

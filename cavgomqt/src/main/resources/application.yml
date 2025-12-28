@@ -30,7 +30,7 @@ mqtt:
   client.id: cavgomqt
   username: genoyves
   password: Cadio*11.
-  broker.url: ssl://73d5ec93cbe843ab83b8f29e68f6979e.s1.eu.hivemq.cloud:8883
+  broker.url: ssl://123b850a73774bcd84d2019d168d7f13.s1.eu.hivemq.cloud:8883
 logging:
   level:
     org:

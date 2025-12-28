@@ -28,6 +28,7 @@ type TripService struct {
 	poster            *TripUpdatePoster
 	batchQueues       map[int64][]models.Trip // Company ID -> queue of trips for batch updates
 	batchQueueMu      sync.RWMutex
+	tripExchange      string // Fanout exchange name for trip events
 }
 
 func NewTripService(tripRepo repository.TripRepository, routeRepo repository.RouteRepository, locationRepo repository.LocationRepository, vehicleServiceURL string, rabbitMQService *RabbitMQService, sseService *SSEService, sessionService *SessionService, tripLogService *TripLogService, scheduler *TripUpdateScheduler, poster *TripUpdatePoster) *TripService {
@@ -44,13 +45,18 @@ func NewTripService(tripRepo repository.TripRepository, routeRepo repository.Rou
 		poster:            poster,
 		batchQueues:       make(map[int64][]models.Trip),
 	}
-	
+
 	// Start batch processor if poster is available
 	if poster != nil {
 		go service.processBatchQueues()
 	}
-	
+
 	return service
+}
+
+// SetTripExchange sets the fanout exchange name for publishing trip events
+func (s *TripService) SetTripExchange(exchangeName string) {
+	s.tripExchange = exchangeName
 }
 
 func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Trip, error) {
@@ -341,9 +347,9 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		}
 	}
 
-	// Publish event to RabbitMQ
-	if s.rabbitMQService != nil {
-		_ = s.rabbitMQService.PublishTripEvent("created", *createdTrip)
+	// Publish event to RabbitMQ fanout exchange
+	if s.rabbitMQService != nil && s.tripExchange != "" {
+		_ = s.rabbitMQService.PublishTripEventToExchange(s.tripExchange, "created", *createdTrip)
 	}
 
 	// Broadcast SSE event
@@ -495,9 +501,9 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 		companyID := updatedTrip.Vehicle.CompanyID
 		if s.scheduler.IsTimerActive(companyID) {
 			// Check if this is a status change that requires immediate posting
-			isStatusChange := update.Status != nil && 
+			isStatusChange := update.Status != nil &&
 				(*update.Status == "IN_PROGRESS" || *update.Status == "CANCELLED" || *update.Status == "COMPLETED")
-			
+
 			if isStatusChange {
 				// Post immediately for status changes
 				s.poster.PostTripUpdate(companyID, updatedTrip)
@@ -794,6 +800,162 @@ func (s *TripService) GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error)
 	return trips, nil
 }
 
+// UpdateTripFromNavigaEvent consumes a NavigaTripUpdateEvent and maps it to our DB schema
+func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent) (*models.Trip, error) {
+	tripID := evt.Trip.ID
+	// Ensure trip exists and load waypoints
+	trip, err := s.tripRepo.GetByIDWithRelations(tripID)
+	if err != nil {
+		return nil, fmt.Errorf("trip not found: %w", err)
+	}
+
+	log.Printf("[NavigaUpdate] Inbound trip=%d status=%s source=%s ts=%d waypoints=%d", tripID, evt.Trip.Status, evt.Source, evt.Timestamp.Unix(), len(evt.Trip.WaypointProgresses))
+
+	// Do not update trip if already cancelled in database
+	if trip.Status == "CANCELLED" {
+		log.Printf("[NavigaUpdate] Trip %d is CANCELLED, skipping status update from Naviga", tripID)
+		return trip, nil
+	}
+
+	// Map Naviga status to local status
+	statusMap := map[string]string{
+		"CREATED":   "SCHEDULED",
+		"ACTIVE":    "IN_PROGRESS",
+		"COMPLETED": "COMPLETED",
+		"DELETED":   "CANCELLED",
+	}
+	mappedStatus, has := statusMap[evt.Trip.Status]
+	if !has {
+		mappedStatus = trip.Status // keep existing if unknown
+	}
+
+	updates := map[string]interface{}{
+		"updated_at": time.Now(),
+	}
+	if mappedStatus != "" && mappedStatus != trip.Status {
+		updates["status"] = mappedStatus
+	}
+
+	// Current location updates (convert m/s to km/h for speed)
+	if evt.Trip.CurrentLocation != nil {
+		spdKmh := evt.Trip.CurrentLocation.Speed * 3.6
+		updates["current_speed"] = spdKmh
+		updates["current_latitude"] = evt.Trip.CurrentLocation.Latitude
+		updates["current_longitude"] = evt.Trip.CurrentLocation.Longitude
+	}
+
+	// Waypoint progress mapping (origin not included; first element is first waypoint, last is destination)
+	if len(evt.Trip.WaypointProgresses) > 0 {
+		lastIdx := len(evt.Trip.WaypointProgresses) - 1
+		// Build order->waypoint map from existing trip
+		byOrder := make(map[int]*models.TripWaypoint, len(trip.Waypoints))
+		for i := range trip.Waypoints {
+			wp := &trip.Waypoints[i]
+			byOrder[wp.Order] = wp
+		}
+
+		// Update destination remaining values to trip-level
+		destProg := evt.Trip.WaypointProgresses[lastIdx]
+		rd := destProg.RemainingDistance
+		rt := destProg.RemainingTime
+		rdPtr := rd
+		rtInt := int64(rt)
+		updates["remaining_distance_to_destination"] = rdPtr
+		updates["remaining_time_to_destination"] = rtInt
+
+		log.Printf("[NavigaUpdate] Parsed trip=%d mapped_status=%s dest_state=%s remaining_distance=%.2f remaining_time=%.0f", tripID, mappedStatus, destProg.State, destProg.RemainingDistance, destProg.RemainingTime)
+
+		// Apply waypoint updates for all non-destination waypoints (index -> order = index+1)
+		for idx, prog := range evt.Trip.WaypointProgresses {
+			if idx == lastIdx {
+				continue // destination handled separately
+			}
+			order := idx + 1 // first progress maps to first waypoint (order=1)
+			if wp, ok := byOrder[order]; ok {
+				wupd := map[string]interface{}{
+					"updated_at":         time.Now(),
+					"remaining_distance": prog.RemainingDistance,
+					"remaining_time":     int64(prog.RemainingTime),
+				}
+				// Passed logic: mark DONE or ARRIVED as passed
+				if prog.State == "DONE" || prog.State == "ARRIVED" {
+					wupd["is_passed"] = true
+					if prog.ArrivedAt != nil {
+						wupd["passed_timestamp"] = prog.ArrivedAt.Unix()
+					} else {
+						wupd["passed_timestamp"] = evt.Timestamp.Unix()
+					}
+				}
+				if err := s.tripRepo.UpdateWaypointProgress(wp.ID, wupd); err != nil {
+					log.Printf("[NavigaUpdate] Failed to update waypoint %d (order=%d): %v", wp.ID, order, err)
+				}
+			}
+		}
+
+		// If destination reached, complete trip and mark all intermediates as passed
+		if destProg.State == "ARRIVED" || destProg.State == "DONE" || evt.Trip.Status == "COMPLETED" {
+			updates["status"] = "COMPLETED"
+			if destProg.ArrivedAt != nil {
+				updates["completion_time"] = destProg.ArrivedAt.Unix()
+			} else if evt.Trip.CompletedAt != nil {
+				updates["completion_time"] = evt.Trip.CompletedAt.Unix()
+			} else {
+				updates["completion_time"] = time.Now().Unix()
+			}
+			for order, wp := range byOrder { // mark all non-destination waypoints as passed
+				// destination corresponds to lastIdx+1; skip it
+				if order <= 0 || order >= lastIdx+1 {
+					continue
+				}
+				wupd := map[string]interface{}{
+					"is_passed":  true,
+					"updated_at": time.Now(),
+				}
+				if destProg.ArrivedAt != nil {
+					wupd["passed_timestamp"] = destProg.ArrivedAt.Unix()
+				} else {
+					wupd["passed_timestamp"] = evt.Timestamp.Unix()
+				}
+				_ = s.tripRepo.UpdateWaypointProgress(wp.ID, wupd)
+			}
+		}
+	}
+
+	if err := s.tripRepo.UpdateProgress(tripID, updates); err != nil {
+		return nil, err
+	}
+
+	// Refresh and broadcast
+	updatedTrip, err := s.tripRepo.GetByIDWithRelations(tripID)
+	if err != nil {
+		return nil, err
+	}
+	updatedTrip.Route.Waypoints = nil
+	adjustRouteForReversed(updatedTrip)
+
+	// Log and SSE broadcast (do not republish to Rabbit for inbound updates)
+	if s.tripLogService != nil {
+		_, _ = s.tripLogService.LogTripUpdate(updatedTrip, "updated")
+	}
+	if s.sseService != nil {
+		s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{Event: "updated", Data: *updatedTrip})
+	}
+
+	// Optional posting
+	if s.poster != nil && s.scheduler != nil {
+		companyID := updatedTrip.Vehicle.CompanyID
+		if s.scheduler.IsTimerActive(companyID) {
+			if updatedTrip.Status == "COMPLETED" || updatedTrip.Status == "CANCELLED" || updatedTrip.Status == "IN_PROGRESS" {
+				s.poster.PostTripUpdate(companyID, updatedTrip)
+			} else {
+				s.queueTripForBatch(companyID, *updatedTrip)
+			}
+		}
+	}
+
+	return updatedTrip, nil
+}
+
 // UpdateTripFields updates arbitrary fields for a trip by id
 func (s *TripService) UpdateTripFields(id int64, updates map[string]interface{}) error {
 	return s.tripRepo.UpdateProgress(id, updates)
@@ -849,9 +1011,9 @@ func (s *TripService) DeleteTrip(id int64) error {
 			_, _ = s.tripLogService.LogTripUpdate(updatedTrip, "cancelled")
 		}
 
-		// Publish event to RabbitMQ
-		if s.rabbitMQService != nil {
-			_ = s.rabbitMQService.PublishTripEvent("TRIP_CANCELLED", *updatedTrip)
+		// Publish event to RabbitMQ fanout exchange
+		if s.rabbitMQService != nil && s.tripExchange != "" {
+			_ = s.rabbitMQService.PublishTripEventToExchange(s.tripExchange, "cancelled", *updatedTrip)
 		}
 
 		// Broadcast SSE event for trip cancellation
@@ -1059,9 +1221,9 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 		companyID := updatedTrip.Vehicle.CompanyID
 		if s.scheduler.IsTimerActive(companyID) {
 			// Check if this is a status change that requires immediate posting
-			isStatusChange := mqttTrip.Status != "" && 
+			isStatusChange := mqttTrip.Status != "" &&
 				(mqttTrip.Status == "IN_PROGRESS" || mqttTrip.Status == "CANCELLED" || mqttTrip.Status == "COMPLETED")
-			
+
 			if isStatusChange {
 				// Post immediately for status changes
 				s.poster.PostTripUpdate(companyID, updatedTrip)
@@ -1132,7 +1294,7 @@ func (s *TripService) GetTripLogs(tripID int64) ([]models.TripLog, error) {
 func (s *TripService) queueTripForBatch(companyID int64, trip models.Trip) {
 	s.batchQueueMu.Lock()
 	defer s.batchQueueMu.Unlock()
-	
+
 	// Use trip ID as key to avoid duplicates - keep only the latest version
 	// Find and replace if exists, otherwise append
 	found := false
@@ -1152,7 +1314,7 @@ func (s *TripService) queueTripForBatch(companyID int64, trip models.Trip) {
 func (s *TripService) processBatchQueues() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		s.batchQueueMu.Lock()
 		queues := make(map[int64][]models.Trip)
@@ -1164,7 +1326,7 @@ func (s *TripService) processBatchQueues() {
 			}
 		}
 		s.batchQueueMu.Unlock()
-		
+
 		// Process each company's queue
 		for companyID, trips := range queues {
 			if s.scheduler != nil && s.scheduler.IsTimerActive(companyID) && s.poster != nil {

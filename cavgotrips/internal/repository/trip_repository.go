@@ -115,20 +115,31 @@ func (r *tripRepository) GetTripsByFilters(origin, destination, company string) 
 		return nil, err
 	}
 
-	// Remove waypoints where is_passed is true from each trip
-	for i := range trips {
-		filteredWaypoints := make([]models.TripWaypoint, 0, len(trips[i].Waypoints))
-		for _, wp := range trips[i].Waypoints {
-			if !wp.IsPassed {
-				filteredWaypoints = append(filteredWaypoints, wp)
-			}
-		}
-		trips[i].Waypoints = filteredWaypoints
-	}
-
-	// Filter by origin/destination in Go (route or any non-passed waypoint)
+	// Remove passed waypoints and drop trips that only have the destination left
 	filteredTrips := make([]models.Trip, 0, len(trips))
 	for _, trip := range trips {
+		hadWaypoints := len(trip.Waypoints) > 0
+		filteredWaypoints := make([]models.TripWaypoint, 0, len(trip.Waypoints))
+		hasNonDestinationRemaining := false
+
+		for _, wp := range trip.Waypoints {
+			if wp.IsPassed {
+				continue
+			}
+			filteredWaypoints = append(filteredWaypoints, wp)
+			if wp.LocationID != trip.Route.DestinationID {
+				hasNonDestinationRemaining = true
+			}
+		}
+
+		// Skip trips where every remaining waypoint is the destination (e.g., A-B-C-D with A/B/C already passed)
+		if hadWaypoints && !hasNonDestinationRemaining {
+			continue
+		}
+
+		trip.Waypoints = filteredWaypoints
+
+		// Filter by origin/destination in Go (route or any non-passed waypoint)
 		matchOrigin := false
 		matchDestination := false
 
@@ -176,6 +187,11 @@ func (r *tripRepository) GetTripsByFilters(origin, destination, company string) 
 
 		// If both origin and destination are found as waypoints, check order
 		if matchOrigin && matchDestination {
+			// Skip in-progress trips for direct origin/destination results
+			if trip.Status == "IN_PROGRESS" {
+				continue
+			}
+
 			if originWaypointOrder != -1 && destinationWaypointOrder != -1 {
 				if originWaypointOrder < destinationWaypointOrder {
 					filteredTrips = append(filteredTrips, trip)
@@ -215,20 +231,31 @@ func (r *tripRepository) GetTripsByFiltersPaginated(origin, destination, company
 		return nil, 0, err
 	}
 
-	// Remove waypoints where is_passed is true from each trip
-	for i := range trips {
-		filteredWaypoints := make([]models.TripWaypoint, 0, len(trips[i].Waypoints))
-		for _, wp := range trips[i].Waypoints {
-			if !wp.IsPassed {
-				filteredWaypoints = append(filteredWaypoints, wp)
-			}
-		}
-		trips[i].Waypoints = filteredWaypoints
-	}
-
-	// Filter by origin/destination in Go (route or any non-passed waypoint)
+	// Remove passed waypoints and drop trips that only have the destination left
 	filteredTrips := make([]models.Trip, 0, len(trips))
 	for _, trip := range trips {
+		hadWaypoints := len(trip.Waypoints) > 0
+		filteredWaypoints := make([]models.TripWaypoint, 0, len(trip.Waypoints))
+		hasNonDestinationRemaining := false
+
+		for _, wp := range trip.Waypoints {
+			if wp.IsPassed {
+				continue
+			}
+			filteredWaypoints = append(filteredWaypoints, wp)
+			if wp.LocationID != trip.Route.DestinationID {
+				hasNonDestinationRemaining = true
+			}
+		}
+
+		// Skip trips where every remaining waypoint is the destination (e.g., A-B-C-D with A/B/C already passed)
+		if hadWaypoints && !hasNonDestinationRemaining {
+			continue
+		}
+
+		trip.Waypoints = filteredWaypoints
+
+		// Filter by origin/destination in Go (route or any non-passed waypoint)
 		matchOrigin := false
 		matchDestination := false
 
@@ -276,6 +303,11 @@ func (r *tripRepository) GetTripsByFiltersPaginated(origin, destination, company
 
 		// If both origin and destination are found as waypoints, check order
 		if matchOrigin && matchDestination {
+			// Skip in-progress trips for direct origin/destination results
+			if trip.Status == "IN_PROGRESS" {
+				continue
+			}
+
 			if originWaypointOrder != -1 && destinationWaypointOrder != -1 {
 				if originWaypointOrder < destinationWaypointOrder {
 					filteredTrips = append(filteredTrips, trip)
@@ -472,20 +504,31 @@ func (r *tripRepository) GetTripsByFiltersWithCityRoute(origin, destination, com
 		return nil, 0, err
 	}
 
-	// Remove waypoints where is_passed is true from each trip
-	for i := range trips {
-		filteredWaypoints := make([]models.TripWaypoint, 0, len(trips[i].Waypoints))
-		for _, wp := range trips[i].Waypoints {
-			if !wp.IsPassed {
-				filteredWaypoints = append(filteredWaypoints, wp)
-			}
-		}
-		trips[i].Waypoints = filteredWaypoints
-	}
-
-	// Filter by origin/destination in Go (route or any non-passed waypoint)
+	// Remove passed waypoints and drop trips that only have the destination left
 	filteredTrips := make([]models.Trip, 0, len(trips))
 	for _, trip := range trips {
+		hadWaypoints := len(trip.Waypoints) > 0
+		filteredWaypoints := make([]models.TripWaypoint, 0, len(trip.Waypoints))
+		hasNonDestinationRemaining := false
+
+		for _, wp := range trip.Waypoints {
+			if wp.IsPassed {
+				continue
+			}
+			filteredWaypoints = append(filteredWaypoints, wp)
+			if wp.LocationID != trip.Route.DestinationID {
+				hasNonDestinationRemaining = true
+			}
+		}
+
+		// Skip trips where every remaining waypoint is the destination (e.g., A-B-C-D with A/B/C already passed)
+		if hadWaypoints && !hasNonDestinationRemaining {
+			continue
+		}
+
+		trip.Waypoints = filteredWaypoints
+
+		// Filter by origin/destination in Go (route or any non-passed waypoint)
 		matchOrigin := false
 		matchDestination := false
 
@@ -533,6 +576,11 @@ func (r *tripRepository) GetTripsByFiltersWithCityRoute(origin, destination, com
 
 		// If both origin and destination are found as waypoints, check order
 		if matchOrigin && matchDestination {
+			// Skip in-progress trips for direct origin/destination results
+			if trip.Status == "IN_PROGRESS" {
+				continue
+			}
+
 			if originWaypointOrder != -1 && destinationWaypointOrder != -1 {
 				if originWaypointOrder < destinationWaypointOrder {
 					filteredTrips = append(filteredTrips, trip)

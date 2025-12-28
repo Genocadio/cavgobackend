@@ -9,6 +9,7 @@ import lombok.Setter;
 @Getter
 @Setter
 public class NavigaWaypoint {
+    private Integer id;
     private Double latitude;
     private Double longitude;
     private String name;
@@ -16,6 +17,13 @@ public class NavigaWaypoint {
     public NavigaWaypoint() {}
 
     public NavigaWaypoint(Double latitude, Double longitude, String name) {
+        this.latitude = latitude;
+        this.longitude = longitude;
+        this.name = name;
+    }
+
+    public NavigaWaypoint(Integer id, Double latitude, Double longitude, String name) {
+        this.id = id;
         this.latitude = latitude;
         this.longitude = longitude;
         this.name = name;

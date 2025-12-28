@@ -29,7 +29,7 @@ type TripWaypoint struct {
 	IsNext            bool      `json:"is_next" db:"is_next"`
 	PassedTimestamp   *int64    `json:"passed_timestamp,omitempty" db:"passed_timestamp"`
 	RemainingTime     *int64    `json:"remaining_time,omitempty" db:"remaining_time"`
-	RemainingDistance *int64    `json:"remaining_distance,omitempty" db:"remaining_distance"`
+	RemainingDistance *float64  `json:"remaining_distance,omitempty" db:"remaining_distance"`
 	IsCustom          bool      `json:"is_custom" db:"is_custom"`
 	CreatedAt         time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at" db:"updated_at"`
@@ -65,7 +65,7 @@ type Trip struct {
 	Notes                          *string        `json:"notes,omitempty" db:"notes"`
 	Seats                          int            `json:"seats" db:"seats"`
 	RemainingTimeToDestination     *int64         `json:"remaining_time_to_destination,omitempty" db:"remaining_time_to_destination"`
-	RemainingDistanceToDestination *int64         `json:"remaining_distance_to_destination,omitempty" db:"remaining_distance_to_destination"`
+	RemainingDistanceToDestination *float64       `json:"remaining_distance_to_destination,omitempty" db:"remaining_distance_to_destination"`
 	IsReversed                     bool           `json:"is_reversed" db:"is_reversed"`
 	CurrentSpeed                   *float64       `json:"current_speed,omitempty" db:"current_speed"`
 	CurrentLatitude                *float64       `json:"current_latitude,omitempty" db:"current_latitude"`

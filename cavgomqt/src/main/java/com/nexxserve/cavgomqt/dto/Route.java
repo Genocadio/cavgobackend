@@ -16,8 +16,8 @@ public class Route {
     private Long distanceMeters;
     private Long estimatedDurationSeconds;
     private String googleRouteId;
-    private String originId;
-    private String destinationId;
+    private Integer originId;
+    private Integer destinationId;
     private Double routePrice;
     private Boolean cityRoute;
     private String createdAt;
