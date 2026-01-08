@@ -127,44 +127,6 @@ func (r *RabbitMQService) ListenTripEvents(handler func(models.TripEventMessage)
 	return nil
 }
 
-// ListenBookingEvents listens for booking events from the bookings.queue
-func (r *RabbitMQService) ListenBookingEvents(queueName string, handler func(models.BookingEventMessage)) error {
-	log.Printf("[Booking MQ] Setting up consumer for queue: %s", queueName)
-	msgs, err := r.channel.Consume(
-		queueName,
-		"",    // consumer
-		true,  // auto-ack
-		false, // exclusive
-		false, // no-local
-		false, // no-wait
-		nil,   // args
-	)
-	if err != nil {
-		log.Printf("[Booking MQ] ERROR: Failed to start consumer for queue %s: %v", queueName, err)
-		return err
-	}
-	log.Printf("[Booking MQ] Consumer started for queue: %s", queueName)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("[Booking MQ] PANIC in booking consumer goroutine: %v", r)
-			}
-		}()
-		log.Printf("[Booking MQ] Booking consumer goroutine running for queue: %s", queueName)
-		for d := range msgs {
-			log.Printf("[Booking MQ] Raw message: %s", string(d.Body))
-			var event models.BookingEventMessage
-			if err := json.Unmarshal(d.Body, &event); err != nil {
-				log.Printf("Failed to unmarshal booking event: %v", err)
-				continue
-			}
-			handler(event)
-		}
-		log.Printf("[Booking MQ] Consumer goroutine for queue %s has exited (channel closed)", queueName)
-	}()
-	return nil
-}
-
 // DeclareFanoutExchange declares a fanout exchange and binds a queue to it
 func (r *RabbitMQService) DeclareFanoutExchange(exchangeName, queueName string) error {
 	// Declare the fanout exchange
@@ -207,6 +169,74 @@ func (r *RabbitMQService) DeclareFanoutExchange(exchangeName, queueName string) 
 	}
 
 	log.Printf("[RabbitMQ] Successfully declared fanout exchange '%s' and bound queue '%s' to it", exchangeName, queueName)
+	return nil
+}
+
+// ListenTripSnapshots listens for trip snapshot messages from the booking snapshot fanout exchange
+func (r *RabbitMQService) ListenTripSnapshots(queueName string, handler func(models.TripSnapshot)) error {
+	log.Printf("[TripSnapshot MQ] Setting up consumer for queue: %s", queueName)
+
+	msgs, err := r.channel.Consume(
+		queueName,
+		"",    // consumer
+		false, // auto-ack (manual ack for reliability)
+		false, // exclusive
+		false, // no-local
+		false, // no-wait
+		nil,   // args
+	)
+	if err != nil {
+		log.Printf("[TripSnapshot MQ] ERROR: Failed to start consumer for queue %s: %v", queueName, err)
+		return err
+	}
+
+	log.Printf("[TripSnapshot MQ] ✅ Consumer started for queue: %s", queueName)
+	log.Printf("[TripSnapshot MQ] ⏳ Waiting for snapshot messages on queue: %s", queueName)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[TripSnapshot MQ] 🚨 PANIC in snapshot consumer goroutine: %v", r)
+			}
+		}()
+
+		log.Printf("[TripSnapshot MQ] 🎯 Snapshot consumer goroutine started - listening on queue: %s", queueName)
+		messageCount := 0
+
+		for d := range msgs {
+			messageCount++
+			log.Printf("[TripSnapshot MQ] 📨 Message #%d received from queue %s (size: %d bytes)",
+				messageCount, queueName, len(d.Body))
+			log.Printf("[TripSnapshot MQ] 📋 Raw message content: %s", string(d.Body))
+
+			var snapshot models.TripSnapshot
+			if err := json.Unmarshal(d.Body, &snapshot); err != nil {
+				log.Printf("[TripSnapshot MQ] ❌ Failed to unmarshal snapshot message: %v", err)
+				log.Printf("[TripSnapshot MQ] 🔍 Problematic message: %s", string(d.Body))
+				d.Nack(false, false) // Don't requeue malformed messages
+				continue
+			}
+
+			log.Printf("[TripSnapshot MQ] ✅ Successfully unmarshaled snapshot")
+			log.Printf("[TripSnapshot MQ] 📊 Trip: %s | Status: %s | Available Seats: %d | Occupied: %d | Pending: %d",
+				snapshot.TripID, snapshot.TripStatus,
+				snapshot.Capacity.AvailableSeats,
+				snapshot.Capacity.OccupiedSeats,
+				snapshot.Capacity.PendingPaymentSeats)
+			log.Printf("[TripSnapshot MQ] ⏰ Snapshot timestamp: %s", snapshot.LastUpdated)
+
+			log.Printf("[TripSnapshot MQ] 🔄 Calling handler to process snapshot for trip %s", snapshot.TripID)
+			handler(snapshot)
+			log.Printf("[TripSnapshot MQ] ✅ Handler completed for snapshot #%d", messageCount)
+
+			d.Ack(false) // Acknowledge successful processing
+			log.Printf("[TripSnapshot MQ] 📤 Message #%d acknowledged and removed from queue", messageCount)
+		}
+
+		log.Printf("[TripSnapshot MQ] 🛑 Consumer goroutine for queue %s has exited (channel closed)", queueName)
+		log.Printf("[TripSnapshot MQ] 📊 Total snapshots processed: %d", messageCount)
+	}()
+
 	return nil
 }
 

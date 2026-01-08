@@ -104,6 +104,11 @@ func main() {
 	routeService := service.NewRouteService(routeRepo, changeTrackingService)
 	tripService := service.NewTripService(tripRepo, routeRepo, locationRepo, cfg.VehicleServiceURL, rabbitMQService, sseService, sessionService, tripLogService, tripUpdateScheduler, tripUpdatePoster)
 
+	// Backfill remaining_seats for existing trips (sets to seats where null)
+	if err := tripService.BackfillRemainingSeats(); err != nil {
+		log.Printf("[TripInit] Failed to backfill remaining_seats: %v", err)
+	}
+
 	// Set the trip fanout exchange name for trip service
 	tripService.SetTripExchange(tripExchangeName)
 
@@ -113,10 +118,36 @@ func main() {
 		log.Printf("[TripLogService] Cleanup scheduler started")
 	}
 
-	// Listen to booking events from fanout exchange
-	// Disabled: booking events no longer consumed
+	// Listen to trip snapshots from booking service fanout exchange
+	go func() {
+		exchangeName := cfg.RabbitMQ.SnapshotExchange
+		if exchangeName == "" {
+			exchangeName = "bookingservice.trip.snapshot"
+		}
+		queueName := "cavgotrips.trip-snapshots"
 
-	// Disabled: legacy MQTT trip queue consumer no longer used
+		log.Printf("[TripSnapshot] 🚀 Initializing trip snapshots consumer...")
+		log.Printf("[TripSnapshot] 🔗 Exchange: %s | Queue: %s", exchangeName, queueName)
+
+		if err := rabbitMQService.DeclareFanoutExchange(exchangeName, queueName); err != nil {
+			log.Printf("[TripSnapshot] ❌ Failed to setup exchange: %v", err)
+			return
+		}
+
+		log.Printf("[TripSnapshot] ✅ Exchange and queue setup successful")
+		log.Printf("[TripSnapshot] 📡 Starting snapshot listener...")
+
+		err := rabbitMQService.ListenTripSnapshots(queueName, func(snapshot models.TripSnapshot) {
+			tripService.HandleTripSnapshot(snapshot)
+		})
+
+		if err != nil {
+			log.Printf("[TripSnapshot] ❌ Failed to start consumer: %v", err)
+			return
+		}
+
+		log.Printf("[TripSnapshot] ✅ Snapshot consumer successfully started and listening")
+	}()
 
 	// Listen to Naviga trip updates from fanout exchange cavgomqt.trip.updates
 	go func() {

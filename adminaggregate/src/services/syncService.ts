@@ -9,6 +9,7 @@ import * as driverRepository from "../repositories/drivers";
 import * as assignmentRepository from "../repositories/assignments";
 import * as tripRepository from "../repositories/trips";
 import * as metricsRepository from "../repositories/metrics";
+import * as snapshotRepository from "../repositories/snapshots";
 import { updateTripMetrics } from "./tripMetricsService";
 
 interface PendingAssignment {
@@ -254,6 +255,8 @@ export async function syncTrips(): Promise<void> {
           updatedCount++;
         } else {
           await tripRepository.createTrip(localTrip);
+          // Create initial snapshot with all seats available
+          await snapshotRepository.createInitialSnapshot(localTrip, localTrip.carDriver.car.capacity);
           createdCount++;
         }
         

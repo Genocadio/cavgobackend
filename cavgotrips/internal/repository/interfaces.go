@@ -52,6 +52,7 @@ type TripRepository interface {
 	GetAll() ([]models.Trip, error)
 	GetByID(id int64) (*models.Trip, error)
 	GetByIDWithRelations(id int64) (*models.Trip, error)
+	BackfillRemainingSeats() error
 	UpdateProgress(id int64, updates map[string]interface{}) error
 	UpdateWaypointProgress(waypointID int64, updates map[string]interface{}) error
 	MarkWaypointPassed(waypointID int64, timestamp int64) error

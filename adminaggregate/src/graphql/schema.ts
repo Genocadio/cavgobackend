@@ -76,6 +76,13 @@ const typeDefs = gql`
     companyId: ID!
   }
 
+  type CarPage {
+    items: [Car!]!
+    total: Int!
+    limit: Int!
+    offset: Int!
+  }
+
   type DriverCarAssignment {
     car: Car!
     driver: Driver
@@ -207,14 +214,52 @@ const typeDefs = gql`
     scheduled: Int!
   }
 
+  type SnapshotSeats {
+    pickup: Int!
+    dropoff: Int!
+    pendingPayment: Int!
+    availableFromHere: Int!
+  }
+
+  type SnapshotLocation {
+    locationId: ID!
+    type: String!
+    order: Int!
+    status: String!
+    seats: SnapshotSeats!
+  }
+
+  type SnapshotCapacity {
+    totalSeats: Int!
+    availableSeats: Int!
+    occupiedSeats: Int!
+    pendingPaymentSeats: Int!
+  }
+
+  type SnapshotSummary {
+    totalTickets: Int!
+    paidTickets: Int!
+    pendingPayments: Int!
+    completedDropoffs: Int!
+  }
+
+  type TripSnapshot {
+    tripId: ID!
+    tripStatus: String!
+    lastUpdated: String!
+    capacity: SnapshotCapacity!
+    locations: [SnapshotLocation!]!
+    summary: SnapshotSummary!
+  }
+
   type Query {
     driver(id: ID!): Driver
     car(id: ID!): Car
     tripsByCar(carId: ID!): [Trip!]!
     tripsByDriver(driverId: ID!): [Trip!]!
-    carsByCompany(companyId: ID!): [Car!]!
+    carsByCompany(companyId: ID!, limit: Int, offset: Int): CarPage!
     driversByCompany(companyId: ID!): [Driver!]!
-    getCarsByCompany(companyId: ID!): [Car!]!
+    getCarsByCompany(companyId: ID!, limit: Int, offset: Int): CarPage!
     getDriversByCompany(companyId: ID!): [Driver!]!
     driverMetrics(driverId: ID!): DriverMetrics
     carMetrics(carId: ID!, startDate: String, endDate: String): CarMetrics
@@ -223,10 +268,13 @@ const typeDefs = gql`
     companyMetrics(companyId: ID!, startTime: Int, endTime: Int): CompanyPeriodMetrics
     tripsByCompany(companyId: ID!): [Trip!]!
     getActiveCompanyTrips(companyId: ID!): [Trip!]!
+    getTripSnapshot(tripId: ID!): TripSnapshot
   }
 
   type Subscription {
     activeCompanyTrips(companyId: ID!): [Trip!]!
+    trip(tripId: ID!): Trip
+    tripSnapshot(tripId: ID!): TripSnapshot
   }
 `;
 
@@ -299,12 +347,32 @@ const resolvers = {
       (await db.tripRepository.getTripsByCarId(carId)).map(wrapTrip),
     tripsByDriver: async (_: unknown, { driverId }: { driverId: string }) =>
       (await db.tripRepository.getTripsByDriverId(driverId)).map(wrapTrip),
-    carsByCompany: async (_: unknown, { companyId }: { companyId: string }) =>
-      (await db.carRepository.getCarsByCompany(companyId)).map(wrapCar),
+    carsByCompany: async (
+      _: unknown,
+      { companyId, limit, offset }: { companyId: string; limit?: number; offset?: number }
+    ) => {
+      const result = await db.carRepository.getCarsByCompany(companyId, limit, offset);
+      return {
+        items: result.items.map(wrapCar),
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+      };
+    },
     driversByCompany: async (_: unknown, { companyId }: { companyId: string }) =>
       (await db.driverRepository.getDriversByCompany(companyId)).map(wrapDriver),
-    getCarsByCompany: async (_: unknown, { companyId }: { companyId: string }) =>
-      (await db.carRepository.getCarsByCompany(companyId)).map(wrapCar),
+    getCarsByCompany: async (
+      _: unknown,
+      { companyId, limit, offset }: { companyId: string; limit?: number; offset?: number }
+    ) => {
+      const result = await db.carRepository.getCarsByCompany(companyId, limit, offset);
+      return {
+        items: result.items.map(wrapCar),
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+      };
+    },
     getDriversByCompany: async (_: unknown, { companyId }: { companyId: string }) =>
       (await db.driverRepository.getDriversByCompany(companyId)).map(wrapDriver),
     driverMetrics: async (_: unknown, { driverId }: { driverId: string }) =>
@@ -333,6 +401,19 @@ const resolvers = {
       (await db.tripRepository.getTripsByCompanyId(companyId)).map(wrapTrip),
     getActiveCompanyTrips: async (_: unknown, { companyId }: { companyId: string }) =>
       (await db.tripRepository.getActiveTripsByCompanyId(companyId)).map(wrapTrip),
+    getTripSnapshot: async (_: unknown, { tripId }: { tripId: string }) => {
+      // Try existing snapshot first
+      const existing = await db.snapshotRepository.getSnapshot(tripId);
+      if (existing) return existing;
+
+      // If no snapshot yet, attempt to create an initial zeroed snapshot
+      const trip = await db.tripRepository.getTripById(tripId);
+      if (!trip) {
+        throw new Error(`Trip ${tripId} not found, cannot create snapshot`);
+      }
+
+      return db.snapshotRepository.createInitialSnapshot(trip, trip.carDriver.car.capacity);
+    },
   },
   Subscription: {
     activeCompanyTrips: {
@@ -361,11 +442,61 @@ const resolvers = {
         return payload.activeCompanyTrips.map(wrapTrip);
       },
     },
+    trip: {
+      subscribe: async (_: unknown, { tripId }: { tripId: string }) => {
+        // Get initial trip data
+        const initialTrip = await db.tripRepository.getTripById(tripId);
+        
+        // Create async iterator for trip updates
+        const trigger = TRIGGERS.TRIP_UPDATED(tripId);
+        const asyncIterable = pubsub.asyncIterator<{ trip: Trip | null }>([trigger]);
+        
+        // Create an async generator that yields initial data, then streams updates
+        async function* subscriptionGenerator() {
+          // Yield initial data immediately
+          yield { trip: initialTrip };
+          
+          // Then yield updates from the pubsub
+          for await (const payload of asyncIterable) {
+            yield payload;
+          }
+        }
+        
+        return subscriptionGenerator();
+      },
+      resolve: (payload: { trip: Trip | null }) => {
+        return payload.trip ? wrapTrip(payload.trip) : null;
+      },
+    },
+    tripSnapshot: {
+      subscribe: async (_: unknown, { tripId }: { tripId: string }) => {
+        // Get initial snapshot data
+        const initialSnapshot = await db.snapshotRepository.getSnapshot(tripId);
+        
+        // Create async iterator for snapshot updates
+        const trigger = TRIGGERS.TRIP_SNAPSHOT_UPDATED(tripId);
+        const asyncIterable = pubsub.asyncIterator<{ tripSnapshot: any }>([trigger]);
+        
+        // Create an async generator that yields initial data, then streams updates
+        async function* subscriptionGenerator() {
+          // Yield initial data immediately
+          if (initialSnapshot) {
+            yield { tripSnapshot: initialSnapshot };
+          }
+          
+          // Then yield updates from the pubsub
+          for await (const payload of asyncIterable) {
+            yield payload;
+          }
+        }
+        
+        return subscriptionGenerator();
+      },
+      resolve: (payload: { tripSnapshot: any }) => {
+        return payload.tripSnapshot;
+      },
+    },
   },
 };
 
 export { typeDefs, resolvers };
-
-
-
-

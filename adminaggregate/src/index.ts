@@ -75,6 +75,10 @@ export async function main(): Promise<void> {
       onDriverEvent: eventHandlers.handleDriverEvent,
       onLocationUpdate: eventHandlers.handleLocationUpdate,
       onTripEvent: eventHandlers.handleTripEvent,
+      onNavigaTripUpdate: eventHandlers.handleNavigaTripUpdate,
+      onNavigaLocationUpdate: eventHandlers.handleNavigaLocationUpdate,
+      onTripServiceEvent: eventHandlers.handleTripServiceEvent,
+      onTripSnapshotUpdate: eventHandlers.handleTripSnapshotUpdate,
     });
   } catch (error) {
     console.error("Failed to setup RabbitMQ subscriptions:", error);

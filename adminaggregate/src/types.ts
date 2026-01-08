@@ -456,3 +456,176 @@ export interface TripApiResponse {
   page: number;
   total_pages: number;
 }
+
+// Naviga RabbitMQ Event Types
+export interface NavigaWaypointProgressDto {
+  waypointIndex: number;
+  waypointId: string | null;
+  waypointName: string | null;
+  latitude: number;
+  longitude: number;
+  state: "APPROACHING" | "ARRIVED" | "DONE";
+  arrivedAt: string | null; // ISO 8601
+  remainingDistance: number;
+  remainingTime: number;
+}
+
+export interface NavigaCurrentLocationDto {
+  carId: string;
+  latitude: number;
+  longitude: number;
+  speed: number;
+  heading: number | null;
+  timestamp: string; // ISO 8601
+}
+
+export interface NavigaTripDto {
+  id: number;
+  carId: string;
+  status: "CREATED" | "ACTIVE" | "COMPLETED" | "DELETED";
+  createdAt: string; // ISO 8601
+  completedAt: string | null; // ISO 8601
+  waypointProgresses: NavigaWaypointProgressDto[] | null;
+  currentLocation: NavigaCurrentLocationDto | null;
+}
+
+export interface NavigaTripUpdateEvent {
+  eventType: "updates";
+  trip: NavigaTripDto;
+  timestamp: string; // ISO 8601
+  source: "naviga-trip-create" | "naviga-gps-batch" | "naviga-trip-delete";
+}
+
+export interface NavigaLocationDto {
+  carId: string;
+  latitude: number;
+  longitude: number;
+  speed: number;
+  heading: number | null;
+  accuracy: number | null;
+  timestamp: string; // ISO 8601
+}
+
+export interface NavigaLocationUpdateEvent {
+  eventType: "updates";
+  carId: string;
+  locations: NavigaLocationDto[];
+  timestamp: string; // ISO 8601
+  source: "location-batch";
+}
+
+// Trip Service RabbitMQ Event Types
+export interface TripServiceDriverSnapshot {
+  id: number;
+  name: string;
+  phone: string;
+}
+
+export interface TripServiceVehicle {
+  id: number;
+  company_id: number;
+  company_name: string;
+  capacity: number;
+  license_plate: string;
+  driver: TripServiceDriverSnapshot | null;
+}
+
+export interface TripServiceRoute {
+  id: number;
+  origin: string;
+  destination: string;
+  route_price: number;
+  distance: number;
+  duration: number;
+  city_route: boolean;
+  waypoints: any | null;
+}
+
+export interface TripServiceWaypoint {
+  id: number;
+  trip_id: number;
+  location_id: number;
+  location_name: string;
+  order: number;
+  price: number | null;
+  is_custom: boolean;
+  is_pass_through: boolean;
+  remaining_distance: number;
+  remaining_time: number;
+  is_passed: boolean;
+  passed_timestamp: number | null;
+}
+
+export interface TripServiceTrip {
+  id: number;
+  route_id: number;
+  vehicle_id: number;
+  vehicle: TripServiceVehicle;
+  status: "SCHEDULED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+  departure_time: number;
+  connection_mode: string;
+  price: number;
+  notes: string | null;
+  seats: number;
+  is_reversed: boolean;
+  has_custom_waypoints: boolean;
+  created_at: number;
+  updated_at: number;
+  route: TripServiceRoute;
+  waypoints: TripServiceWaypoint[];
+}
+
+export interface TripServiceEvent {
+  event: "created" | "cancelled" | "completed";
+  data: TripServiceTrip;
+}
+
+// Booking Service Trip Snapshots (from bookingservice.trip.snapshot fanout)
+export interface SnapshotSeats {
+  pickup: number;
+  dropoff: number;
+  pendingPayment: number;
+  availableFromHere: number;
+}
+
+export interface SnapshotLocation {
+  locationId: string;
+  type: "ORIGIN" | "WAYPOINT" | "DESTINATION";
+  order: number;
+  status: "UPCOMING" | "CURRENT" | "PASSED";
+  seats: SnapshotSeats;
+}
+
+export interface SnapshotCapacity {
+  totalSeats: number;
+  availableSeats: number;
+  occupiedSeats: number;
+  pendingPaymentSeats: number;
+}
+
+export interface SnapshotSummary {
+  totalTickets: number;
+  paidTickets: number;
+  pendingPayments: number;
+  completedDropoffs: number;
+}
+
+export interface TripSnapshot {
+  tripId: string;
+  tripStatus: "SCHEDULED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+  lastUpdated: string;
+  capacity: SnapshotCapacity;
+  locations: SnapshotLocation[];
+  summary: SnapshotSummary;
+}
+
+export type TripSnapshotEventType = "INITIALIZED" | "BOOKING_CREATED" | "PAYMENT_CONFIRMED" | "BOOKING_EXPIRED";
+
+export interface TripSnapshotPublish {
+  tripId: string;
+  tripStatus: string;
+  lastUpdated: string;
+  capacity: SnapshotCapacity;
+  locations: SnapshotLocation[];
+  summary: SnapshotSummary;
+}

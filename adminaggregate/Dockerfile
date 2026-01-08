@@ -1,23 +1,20 @@
 # Use Node.js LTS
 FROM node:18-alpine
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
-
 # Create app directory
 WORKDIR /usr/src/app
 
 # Copy package files
-COPY package.json pnpm-lock.yaml ./
+COPY package.json ./
 
 # Install all dependencies (including dev dependencies for build)
-RUN pnpm install --frozen-lockfile
+RUN npm install
 
 # Copy source code
 COPY . .
 
 # Build the app
-RUN pnpm run build
+RUN npm run build
 
 # Expose the app port
 EXPOSE 4000

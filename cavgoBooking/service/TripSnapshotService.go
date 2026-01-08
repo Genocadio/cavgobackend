@@ -122,6 +122,9 @@ func (s *tripSnapshotService) OnBookingCreated(ctx context.Context, tripID int, 
 		}
 	}
 
+	// Log BEFORE booking update
+	s.logSnapshotState(snapshot, "BEFORE BOOKING_CREATED")
+
 	// Update trip status
 	snapshot.TripStatus = trip.Status
 
@@ -149,6 +152,9 @@ func (s *tripSnapshotService) OnBookingCreated(ctx context.Context, tripID int, 
 
 	// Update location statuses based on current trip state
 	s.updateLocationStatuses(snapshot, trip)
+
+	// Log AFTER booking update (before commit)
+	s.logSnapshotState(snapshot, "AFTER BOOKING_CREATED (before commit)")
 
 	// Save snapshot
 	err = s.repo.UpdateSnapshotInTx(ctx, tx, snapshot)
@@ -189,6 +195,9 @@ func (s *tripSnapshotService) OnPaymentConfirmed(ctx context.Context, tripID int
 		return fmt.Errorf("snapshot not found for trip %d", tripID)
 	}
 
+	// Log BEFORE payment confirmation
+	s.logSnapshotState(snapshot, "BEFORE PAYMENT_CONFIRMED")
+
 	// Update capacity: convert pending to occupied
 	snapshot.Capacity.PendingPaymentSeats -= numberOfTickets
 	snapshot.Capacity.OccupiedSeats += numberOfTickets
@@ -212,6 +221,9 @@ func (s *tripSnapshotService) OnPaymentConfirmed(ctx context.Context, tripID int
 
 	// Recalculate availableFromHere for all locations
 	s.recalculateAvailableSeats(snapshot)
+
+	// Log AFTER payment confirmation (before commit)
+	s.logSnapshotState(snapshot, "AFTER PAYMENT_CONFIRMED (before commit)")
 
 	// Save snapshot
 	err = s.repo.UpdateSnapshotInTx(ctx, tx, snapshot)
@@ -252,6 +264,9 @@ func (s *tripSnapshotService) OnBookingExpired(ctx context.Context, tripID int, 
 		return fmt.Errorf("snapshot not found for trip %d", tripID)
 	}
 
+	// Log BEFORE booking expiration
+	s.logSnapshotState(snapshot, "BEFORE BOOKING_EXPIRED")
+
 	// Update capacity: release held seats
 	snapshot.Capacity.PendingPaymentSeats -= numberOfTickets
 	snapshot.Capacity.AvailableSeats += numberOfTickets
@@ -273,6 +288,9 @@ func (s *tripSnapshotService) OnBookingExpired(ctx context.Context, tripID int, 
 
 	// Recalculate availableFromHere for all locations
 	s.recalculateAvailableSeats(snapshot)
+
+	// Log AFTER booking expiration (before commit)
+	s.logSnapshotState(snapshot, "AFTER BOOKING_EXPIRED (before commit)")
 
 	// Save snapshot
 	err = s.repo.UpdateSnapshotInTx(ctx, tx, snapshot)
@@ -328,12 +346,33 @@ func (s *tripSnapshotService) ValidateBookableLocation(trip *models.Trip, pickup
 		return fmt.Errorf("invalid pickup location ID: %s", pickupLocationID)
 	}
 
-	// SCHEDULED: only origin is bookable
+	// SCHEDULED: For city trips, allow booking from all unpassed origins; for non-city trips, only origin is bookable
 	if trip.Status == "SCHEDULED" {
-		if pickupLocID == trip.Route.OriginID {
-			return nil
+		if trip.Route.CityRoute {
+			// City trip: Check if location is available (origin or unpassed waypoints)
+			if pickupLocID == trip.Route.OriginID {
+				return nil
+			}
+
+			// Check waypoints - must not be passed
+			for _, waypoint := range trip.Waypoints {
+				if waypoint.LocationID == pickupLocID {
+					if waypoint.IsPassed {
+						return fmt.Errorf("location %s has already been passed and is not bookable", pickupLocationID)
+					}
+					// Location is a waypoint and not passed - bookable
+					return nil
+				}
+			}
+
+			return fmt.Errorf("location %s is not found in trip route", pickupLocationID)
+		} else {
+			// Non-city trip: only origin is bookable
+			if pickupLocID == trip.Route.OriginID {
+				return nil
+			}
+			return fmt.Errorf("trip is SCHEDULED, only origin (ID: %d) is bookable as pickup", trip.Route.OriginID)
 		}
-		return fmt.Errorf("trip is SCHEDULED, only origin (ID: %d) is bookable as pickup", trip.Route.OriginID)
 	}
 
 	// IN_PROGRESS: origin is not bookable, only unpassed waypoints
@@ -574,6 +613,32 @@ func (s *tripSnapshotService) publishSnapshot(snapshot *models.TripSnapshot, eve
 	if s.publisher != nil {
 		if err := s.publisher.PublishTripSnapshot(publishSnapshot); err != nil {
 			fmt.Printf("[TripSnapshotService] ERROR: Failed to publish snapshot: %v\n", err)
+		} else {
+			fmt.Printf("[TripSnapshotService] ✓ Successfully published snapshot [%s] to RabbitMQ for TripID=%s\n", eventType, publishSnapshot.TripID)
 		}
+	} else {
+		fmt.Printf("[TripSnapshotService] ⚠ Publisher is nil, snapshot not published to RabbitMQ\n")
 	}
+}
+
+// logSnapshotState logs the current snapshot state for debugging
+func (s *tripSnapshotService) logSnapshotState(snapshot *models.TripSnapshot, stage string) {
+	fmt.Printf("\n========== SNAPSHOT STATE [%s] ==========\n", stage)
+	fmt.Printf("TripID: %d | Status: %s\n", snapshot.TripID, snapshot.TripStatus)
+	fmt.Printf("Capacity: Total=%d Available=%d Occupied=%d Pending=%d\n",
+		snapshot.Capacity.TotalSeats,
+		snapshot.Capacity.AvailableSeats,
+		snapshot.Capacity.OccupiedSeats,
+		snapshot.Capacity.PendingPaymentSeats)
+	fmt.Printf("Summary: TotalTickets=%d PaidTickets=%d PendingPayments=%d\n",
+		snapshot.Summary.TotalTickets,
+		snapshot.Summary.PaidTickets,
+		snapshot.Summary.PendingPayments)
+	fmt.Printf("Locations: %d\n", len(snapshot.Locations))
+	for _, loc := range snapshot.Locations {
+		fmt.Printf("  [%s] %s: Pickup=%d Dropoff=%d Pending=%d AvailableFromHere=%d\n",
+			loc.Type, loc.LocationID, loc.Seats.Pickup, loc.Seats.Dropoff,
+			loc.Seats.PendingPayment, loc.Seats.AvailableFromHere)
+	}
+	fmt.Printf("===============================================\n\n")
 }

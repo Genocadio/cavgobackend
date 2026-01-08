@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
-import type { InferModel } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
 import { db } from "../db/client";
 import { cars } from "../db/schema";
 import type { Car, CurreLocation } from "../types";
 
-type CarRow = InferModel<typeof cars>;
+type CarRow = InferSelectModel<typeof cars>;
 
 const hasLocation = (row: CarRow): row is CarRow & {
   currentLocationLatitude: number;
@@ -109,8 +109,26 @@ export async function getCarById(id: string): Promise<Car | null> {
   return car ? mapCar(car) : null;
 }
 
-export async function getCarsByCompany(companyId: string): Promise<Car[]> {
-  const rows = await db.select().from(cars).where(eq(cars.companyId, companyId));
-  return rows.map(mapCar);
+export async function getCarsByCompany(
+  companyId: string,
+  limit?: number,
+  offset?: number
+): Promise<{ items: Car[]; total: number; limit: number; offset: number }> {
+  const baseQuery = db.select().from(cars).where(eq(cars.companyId, companyId));
+  const limitedQuery = typeof limit === "number" ? baseQuery.limit(limit) : baseQuery;
+  const finalQuery = typeof offset === "number" ? limitedQuery.offset(offset) : limitedQuery;
+
+  const [rows, totalResult] = await Promise.all([
+    finalQuery,
+    db.select({ count: count() }).from(cars).where(eq(cars.companyId, companyId)),
+  ]);
+
+  const total = totalResult[0]?.count ?? 0;
+  return {
+    items: rows.map(mapCar),
+    total,
+    limit: typeof limit === "number" ? limit : total,
+    offset: typeof offset === "number" ? offset : 0,
+  };
 }
 

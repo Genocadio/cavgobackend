@@ -1,4 +1,4 @@
-import type { RemoteTrip, RemoteLocation, RemoteWaypoint, RemoteRoute, Trip, TripLocation, Destination, TripApiItem, TripApiLocation, TripApiWaypoint, TripApiRoute } from "../types";
+import type { RemoteTrip, RemoteLocation, RemoteWaypoint, RemoteRoute, Trip, TripLocation, Destination, TripApiItem, TripApiLocation, TripApiWaypoint, TripApiRoute, TripServiceTrip, TripServiceWaypoint } from "../types";
 import * as locationRepository from "../repositories/locations";
 import * as assignmentRepository from "../repositories/assignments";
 
@@ -416,4 +416,89 @@ export async function mapTripApiItemToLocalTrip(
     updatedAt,
   };
 }
+
+async function mapTripServiceWaypointToDestination(
+  waypoint: TripServiceWaypoint,
+  tripId: string
+): Promise<Destination | null> {
+  const location: TripLocation = {
+    id: String(waypoint.location_id),
+    lat: 0, // We don't have coordinates from this event
+    lng: 0,
+    addres: waypoint.location_name,
+  };
+  
+  // Check if location exists, if not we'll need to skip or create minimal
+  const existingLocation = await locationRepository.getTripLocationById(location.id);
+  if (existingLocation) {
+    location.lat = existingLocation.lat;
+    location.lng = existingLocation.lng;
+  } else {
+    // Skip waypoints without location data
+    console.warn(JSON.stringify({
+      level: "WARN",
+      event: "TRIP_SERVICE_WAYPOINT_SKIPPED",
+      reason: "location_not_found",
+      tripId,
+      waypointId: waypoint.id,
+      locationId: waypoint.location_id,
+    }));
+    return null;
+  }
+  
+  return {
+    id: String(waypoint.location_id),
+    lat: location.lat,
+    lng: location.lng,
+    addres: location.addres,
+    index: waypoint.order - 1, // Convert 1-based to 0-based
+    fare: waypoint.price ?? 0,
+    remainingDistance: waypoint.remaining_distance,
+    isPassede: waypoint.is_passed,
+    passedTime: waypoint.remaining_time,
+  };
+}
+
+export async function mapTripServiceTripToLocalTrip(
+  tripServiceTrip: TripServiceTrip
+): Promise<Trip> {
+  const vehicleId = String(tripServiceTrip.vehicle_id);
+  const driverId = tripServiceTrip.vehicle.driver ? String(tripServiceTrip.vehicle.driver.id) : null;
+  
+  // Create origin from route origin (just use route name for now)
+  const originLocation: TripLocation = {
+    id: `route-origin-${tripServiceTrip.route_id}`,
+    lat: 0, // Coordinates not provided in event
+    lng: 0,
+    addres: tripServiceTrip.route.origin,
+  };
+  
+  // Map waypoints to destinations
+  const destinations: Destination[] = [];
+  for (const waypoint of tripServiceTrip.waypoints) {
+    const dest = await mapTripServiceWaypointToDestination(waypoint, String(tripServiceTrip.id));
+    if (dest) {
+      destinations.push(dest);
+    }
+  }
+  
+  // Get or create driver-car assignment
+  const assignmentId = await assignmentRepository.ensureDriverCarAssignment(driverId, vehicleId);
+  const assignment = await assignmentRepository.getDriverCarAssignmentById(assignmentId);
+  if (!assignment) {
+    throw new Error(`Failed to get driver-car assignment for vehicle ${vehicleId}`);
+  }
+  
+  return {
+    id: String(tripServiceTrip.id),
+    carDriver: assignment,
+    origin: originLocation,
+    destinations,
+    status: mapRemoteStatusToLocal(tripServiceTrip.status),
+    totalDistance: tripServiceTrip.route.distance,
+    createdAt: tripServiceTrip.created_at * 1000, // Convert seconds to milliseconds
+    updatedAt: tripServiceTrip.updated_at * 1000,
+  };
+}
+
 

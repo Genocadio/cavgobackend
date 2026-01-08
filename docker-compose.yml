@@ -354,7 +354,7 @@ services:
   # Navigation Service (Java)
   navigation:
     build: 
-      context: ../Navigation
+      context: ./Navigation
       dockerfile: Dockerfile
     container_name: cavgo-navigation
     environment:

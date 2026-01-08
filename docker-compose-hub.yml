@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   portainer:
     image: portainer/portainer-ce:latest
@@ -12,6 +10,7 @@ services:
       - portainer_data:/data
     networks:
       - cavgo-network
+
   rabbitmq:
     image: rabbitmq:4-management
     container_name: rabbitmq
@@ -21,8 +20,6 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: admin
       RABBITMQ_DEFAULT_PASS: admin
-    # volumes:
-    #   - /opt/cavgo-data/rabbitmq:/var/lib/rabbitmq
     networks:
       - cavgo-network
     restart: unless-stopped
@@ -50,8 +47,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
-    # ports:
-    #   - "5432:5432"
     volumes:
       - /opt/cavgo-data/postgres:/var/lib/postgresql/data
       - ./init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
@@ -63,6 +58,40 @@ services:
     networks:
       - cavgo-network
     restart: unless-stopped
+
+  # OSRM Data Preparation (Run once manually)
+  osrm-setup:
+    image: ghcr.io/project-osrm/osrm-backend
+    container_name: osrm-setup
+    volumes:
+      - osrm_data:/data
+      - ./osrm-setup.sh:/setup.sh:ro
+    entrypoint: ["/bin/sh", "/setup.sh"]
+    networks:
+      - cavgo-network
+    profiles:
+      - setup
+
+  # OSRM Routing Engine
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend
+    container_name: osrm-rwanda
+    command: osrm-routed --algorithm mld /data/rwanda-latest.osrm
+    ports:
+      - "5000:5000"
+    volumes:
+      - osrm_data:/data:ro
+    networks:
+      - cavgo-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- 'http://127.0.0.1:5000/route/v1/driving/30.0619,-1.9536;30.1044,-1.9706' 2>&1 | grep -q '\"code\":\"Ok\"' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      - redis
 
   # Eureka Service Discovery
   eurekacavgo:
@@ -318,7 +347,7 @@ services:
     ports:
       - "6090:6090"
     volumes:
-      - /opt/cavgo-data/firebase-credentials.json:/opt/cavgo-data/firebase-credentials.json:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/opt/cavgo-data/firebase-credentials.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -424,7 +453,7 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_TIMEOUT: 2000ms
-      OSRM_URL: http://host.docker.internal:5000
+      OSRM_URL: http://osrm:5000
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
     ports:
       - "6040:6040"
@@ -435,10 +464,10 @@ services:
         condition: service_healthy
       eurekacavgo:
         condition: service_healthy
+      osrm:
+        condition: service_healthy
     networks:
       - cavgo-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     healthcheck:
       test:
         [
@@ -457,6 +486,7 @@ services:
 
 volumes:
   portainer_data:
+  osrm_data:
 
 networks:
   cavgo-network:

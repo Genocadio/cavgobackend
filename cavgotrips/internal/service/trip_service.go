@@ -59,6 +59,11 @@ func (s *TripService) SetTripExchange(exchangeName string) {
 	s.tripExchange = exchangeName
 }
 
+// BackfillRemainingSeats sets remaining_seats to seats for existing trips where it is NULL
+func (s *TripService) BackfillRemainingSeats() error {
+	return s.tripRepo.BackfillRemainingSeats()
+}
+
 func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Trip, error) {
 	// Validate request fields before proceeding
 	if err := request.Validate(); err != nil {
@@ -165,6 +170,7 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		Price:              tripPrice,
 		Notes:              request.Notes,
 		Seats:              vehicle.Capacity,
+		RemainingSeats:     func(v int) *int { vv := v; return &vv }(vehicle.Capacity),
 		IsReversed:         request.IsReversed,
 		HasCustomWaypoints: !request.NoWaypoints && len(request.CustomWaypoints) > 0,
 	}
@@ -483,15 +489,21 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 		}
 	}
 
+	// Determine event name (use 'cancelled' when status becomes CANCELLED)
+	eventName := "updated"
+	if update.Status != nil && *update.Status == "CANCELLED" {
+		eventName = "cancelled"
+	}
+
 	// Publish event to RabbitMQ
 	if s.rabbitMQService != nil {
-		_ = s.rabbitMQService.PublishTripEvent("updated", *updatedTrip)
+		_ = s.rabbitMQService.PublishTripEvent(eventName, *updatedTrip)
 	}
 
 	// Broadcast SSE event
 	if s.sseService != nil {
 		s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{
-			Event: "updated",
+			Event: eventName,
 			Data:  *updatedTrip,
 		})
 	}
@@ -934,11 +946,18 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 	adjustRouteForReversed(updatedTrip)
 
 	// Log and SSE broadcast (do not republish to Rabbit for inbound updates)
+	eventName := "updated"
+	if status, ok := updates["status"]; ok {
+		if statusStr, ok2 := status.(string); ok2 && statusStr == "CANCELLED" {
+			eventName = "cancelled"
+		}
+	}
+
 	if s.tripLogService != nil {
-		_, _ = s.tripLogService.LogTripUpdate(updatedTrip, "updated")
+		_, _ = s.tripLogService.LogTripUpdate(updatedTrip, eventName)
 	}
 	if s.sseService != nil {
-		s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{Event: "updated", Data: *updatedTrip})
+		s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{Event: eventName, Data: *updatedTrip})
 	}
 
 	// Optional posting
@@ -1352,4 +1371,98 @@ func adjustRouteForReversed(trip *models.Trip) {
 	trip.Route.OriginID, trip.Route.DestinationID = trip.Route.DestinationID, trip.Route.OriginID
 	// Swap Locations
 	trip.Route.Origin, trip.Route.Destination = trip.Route.Destination, trip.Route.Origin
+}
+
+// HandleTripSnapshot processes incoming trip snapshot messages from the booking service
+// and updates the trip's remaining seats. This also triggers SSE updates to connected clients.
+func (s *TripService) HandleTripSnapshot(snapshot models.TripSnapshot) {
+	log.Printf("[TripSnapshot] 📥 Received snapshot message: TripID=%s, Status=%s, LastUpdated=%s",
+		snapshot.TripID, snapshot.TripStatus, snapshot.LastUpdated)
+	log.Printf("[TripSnapshot] 📊 Capacity snapshot - Total: %d, Available: %d, Occupied: %d, Pending: %d",
+		snapshot.Capacity.TotalSeats, snapshot.Capacity.AvailableSeats, snapshot.Capacity.OccupiedSeats, snapshot.Capacity.PendingPaymentSeats)
+
+	// Parse trip ID from string to int64
+	tripID, err := strconv.ParseInt(snapshot.TripID, 10, 64)
+	if err != nil {
+		log.Printf("[TripSnapshot] ❌ Invalid trip ID format: %s, error: %v", snapshot.TripID, err)
+		return
+	}
+
+	log.Printf("[TripSnapshot] 🔍 Processing snapshot for trip %d - Available seats: %d, Occupied: %d, Pending: %d",
+		tripID, snapshot.Capacity.AvailableSeats, snapshot.Capacity.OccupiedSeats, snapshot.Capacity.PendingPaymentSeats)
+
+	// Fetch existing trip to compare and log changes
+	existingTrip, err := s.tripRepo.GetByIDWithRelations(tripID)
+	if err != nil {
+		log.Printf("[TripSnapshot] ⚠️  Trip %d not found in database: %v - Creating with new remaining_seats", tripID, err)
+		existingTrip = &models.Trip{ID: tripID}
+	}
+
+	// Log comparison if trip existed
+	if existingTrip.ID != 0 {
+		existingSeats := "nil"
+		if existingTrip.RemainingSeats != nil {
+			existingSeats = fmt.Sprintf("%d", *existingTrip.RemainingSeats)
+		}
+		log.Printf("[TripSnapshot] 📈 Trip %d seats change - Before: %s, After: %d, Delta: %d",
+			tripID, existingSeats, snapshot.Capacity.AvailableSeats,
+			snapshot.Capacity.AvailableSeats-func() int {
+				if existingTrip.RemainingSeats != nil {
+					return *existingTrip.RemainingSeats
+				}
+				return 0
+			}())
+	}
+
+	// Update trip with remaining seats
+	remainingSeats := snapshot.Capacity.AvailableSeats
+	updates := map[string]interface{}{
+		"remaining_seats": remainingSeats,
+		"updated_at":      time.Now(),
+	}
+
+	log.Printf("[TripSnapshot] 💾 Updating database - Trip: %d, Setting remaining_seats to: %d", tripID, remainingSeats)
+
+	if err := s.tripRepo.UpdateProgress(tripID, updates); err != nil {
+		log.Printf("[TripSnapshot] ❌ Failed to update trip %d remaining seats in database: %v", tripID, err)
+		return
+	}
+
+	log.Printf("[TripSnapshot] ✅ Database update successful - Trip: %d, remaining_seats: %d", tripID, remainingSeats)
+
+	// Get the updated trip to send via SSE
+	trip, err := s.tripRepo.GetByIDWithRelations(tripID)
+	if err != nil {
+		log.Printf("[TripSnapshot] ❌ Failed to fetch updated trip %d after update: %v", tripID, err)
+		return
+	}
+
+	log.Printf("[TripSnapshot] 📋 Verified database update - Trip: %d, RemainingSeats from DB: %v", tripID, trip.RemainingSeats)
+
+	// Send SSE update to connected clients using standard 'updated' event
+	if s.sseService != nil {
+		event := models.TripEventMessage{
+			Event: "updated",
+			Data:  *trip,
+		}
+		log.Printf("[TripSnapshot] 📡 Broadcasting SSE 'updated' event for trip %d to connected clients", tripID)
+		s.sseService.BroadcastTripEventToSessions(event)
+		log.Printf("[TripSnapshot] ✅ SSE broadcast complete for trip %d", tripID)
+	} else {
+		log.Printf("[TripSnapshot] ⚠️  SSE service is nil, cannot broadcast for trip %d", tripID)
+	}
+
+	// Log the trip to database if logging is enabled
+	if s.tripLogService != nil {
+		log.Printf("[TripSnapshot] 📝 Logging trip %d snapshot to trip_logs", tripID)
+		if _, err := s.tripLogService.LogTripUpdate(trip, "snapshot_update"); err != nil {
+			log.Printf("[TripSnapshot] ⚠️  Failed to log trip %d to trip_logs: %v", tripID, err)
+		} else {
+			log.Printf("[TripSnapshot] ✅ Trip %d snapshot logged to trip_logs", tripID)
+		}
+	} else {
+		log.Printf("[TripSnapshot] ⚠️  Trip log service is nil, cannot log for trip %d", tripID)
+	}
+
+	log.Printf("[TripSnapshot] ✅ Snapshot processing complete for trip %d", tripID)
 }

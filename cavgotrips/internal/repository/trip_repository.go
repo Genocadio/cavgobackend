@@ -30,6 +30,13 @@ func (r *tripRepository) Create(trip *models.Trip) error {
 	return r.db.Create(trip).Error
 }
 
+// BackfillRemainingSeats sets remaining_seats to seats for trips where it is NULL
+func (r *tripRepository) BackfillRemainingSeats() error {
+	return r.db.Model(&models.Trip{}).
+		Where("remaining_seats IS NULL").
+		Update("remaining_seats", gorm.Expr("seats")).Error
+}
+
 func (r *tripRepository) CreateWaypoint(waypoint *models.TripWaypoint) error {
 	return r.db.Create(waypoint).Error
 }

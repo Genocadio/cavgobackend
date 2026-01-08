@@ -10,8 +10,8 @@ type Config struct {
 	Eureka            EurekaConfig
 	VehicleServiceURL string
 	// Add RabbitMQ config
-	RabbitMQ RabbitMQConfig
-	StoreLogs bool
+	RabbitMQ          RabbitMQConfig
+	StoreLogs         bool
 	TripUpdateBaseURL string
 }
 
@@ -25,11 +25,12 @@ type EurekaConfig struct {
 
 // Add RabbitMQConfig struct
 type RabbitMQConfig struct {
-	Host     string
-	User     string
-	Password string
-	Queue    string
-	Exchange string
+	Host             string
+	User             string
+	Password         string
+	Queue            string
+	Exchange         string
+	SnapshotExchange string
 }
 
 func Load() *Config {
@@ -45,13 +46,14 @@ func Load() *Config {
 		},
 		VehicleServiceURL: getEnv("VEHICLE_SERVICE_URL", "http://localhost:8060/main/vehicles/"),
 		RabbitMQ: RabbitMQConfig{
-			Host:     getEnv("RABBITMQ_HOST", "localhost:5672"),
-			User:     getEnv("RABBITMQ_USER", "admin"),
-			Password: getEnv("RABBITMQ_PASS", "admin"),
-			Queue:    getEnv("RABBITMQ_QUEUE", "trips.queue"),
-			Exchange: getEnv("RABBITMQ_EXCHANGE", "bookings.fanout"),
+			Host:             getEnv("RABBITMQ_HOST", "localhost:5672"),
+			User:             getEnv("RABBITMQ_USER", "admin"),
+			Password:         getEnv("RABBITMQ_PASS", "admin"),
+			Queue:            getEnv("RABBITMQ_QUEUE", "trips.queue"),
+			Exchange:         getEnv("RABBITMQ_EXCHANGE", "bookings.fanout"),
+			SnapshotExchange: getEnv("SNAPSHOT_EXCHANGE", "bookingservice.trip.snapshot"),
 		},
-		StoreLogs: getEnv("STORE_LOGS", "false") == "true",
+		StoreLogs:         getEnv("STORE_LOGS", "false") == "true",
 		TripUpdateBaseURL: getEnv("TRIP_UPDATE_BASE_URL", ""),
 	}
 }

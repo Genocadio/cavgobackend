@@ -36,7 +36,8 @@ type Trip struct {
 	ConnectionMode                 string    `json:"connection_mode" gorm:"not null"` // ONLINE, OFFLINE, HYBRID
 	Notes                          *string   `json:"notes"`
 	Seats                          int       `json:"seats" gorm:"not null"`
-	Price                          *float64  `json:"price"` // If not provided, will use route price
+	RemainingSeats                 *int      `json:"remaining_seats"` // Available seats from booking service snapshot
+	Price                          *float64  `json:"price"`           // If not provided, will use route price
 	RemainingTimeToDestination     *int64    `json:"remaining_time_to_destination"`
 	RemainingDistanceToDestination *float64  `json:"remaining_distance_to_destination"`
 	IsReversed                     bool      `json:"is_reversed" gorm:"default:false"`
@@ -274,10 +275,10 @@ type DriverMetrics struct {
 
 // DriverTripsResponse represents the response for driver trips with metrics
 type DriverTripsResponse struct {
-	Trips   []Trip         `json:"trips"`
-	Total   int64          `json:"total"`
-	Limit   int            `json:"limit"`
-	Offset  int            `json:"offset"`
-	Metrics DriverMetrics  `json:"metrics"`
-	SSEUUID string         `json:"sse_uuid,omitempty"` // UUID for SSE subscription
+	Trips   []Trip        `json:"trips"`
+	Total   int64         `json:"total"`
+	Limit   int           `json:"limit"`
+	Offset  int           `json:"offset"`
+	Metrics DriverMetrics `json:"metrics"`
+	SSEUUID string        `json:"sse_uuid,omitempty"` // UUID for SSE subscription
 }

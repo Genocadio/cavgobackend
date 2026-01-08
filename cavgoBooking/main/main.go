@@ -110,10 +110,9 @@ func main() {
 	tripSnapshotRepo := repository.NewTripSnapshotRepository(db)
 	// Ensure trip snapshot schema exists (no external migrations needed)
 	if err := tripSnapshotRepo.EnsureSchema(context.Background()); err != nil {
-		log.Printf("Warning: Failed to ensure trip_snapshots schema: %v", err)
-	} else {
-		log.Printf("Trip snapshot schema ensured")
+		log.Fatalf("Failed to ensure trip_snapshots schema: %v", err)
 	}
+	log.Printf("Trip snapshot schema ensured successfully")
 
 	// Configure snapshot exchange for publisher
 	snapshotExchange := getEnv("SNAPSHOT_EXCHANGE", "bookingservice.trip.snapshot")

@@ -10,6 +10,7 @@ export * as metricsRepository from "../repositories/metrics";
 export * as companyRepository from "../repositories/companies";
 export * as carLocationRepository from "../repositories/carLocations";
 export * as companyMetricsRepository from "../repositories/companyMetrics";
+export * as snapshotRepository from "../repositories/snapshots";
 
 
 
