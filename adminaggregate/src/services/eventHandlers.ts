@@ -762,7 +762,7 @@ export async function handleTripServiceEvent(message: Buffer): Promise<void> {
 export async function handleTripSnapshotUpdate(message: Buffer): Promise<void> {
   try {
     const snapshot: TripSnapshot = JSON.parse(message.toString());
-    const tripId = snapshot.tripId;
+    const tripId = snapshot.tripId; 
 
     // Check if this is the first snapshot for this trip (INITIALIZED event)
     const exists = await snapshotRepository.snapshotExists(tripId);

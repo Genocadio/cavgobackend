@@ -138,11 +138,11 @@ func (s *tripSnapshotService) OnBookingCreated(ctx context.Context, tripID int, 
 	// Update location seats
 	for i := range snapshot.Locations {
 		loc := &snapshot.Locations[i]
-		if loc.LocationID == pickupLocationID {
+		if s.locationMatches(loc, pickupLocationID) {
 			loc.Seats.PendingPayment += numberOfTickets
 			loc.Seats.TotalAmountPending += totalAmount
 		}
-		if loc.LocationID == dropoffLocationID {
+		if s.locationMatches(loc, dropoffLocationID) {
 			loc.Seats.PendingPayment += numberOfTickets
 			loc.Seats.TotalAmountPending += totalAmount
 		}
@@ -212,13 +212,13 @@ func (s *tripSnapshotService) OnPaymentConfirmed(ctx context.Context, tripID int
 	// Update location seats
 	for i := range snapshot.Locations {
 		loc := &snapshot.Locations[i]
-		if loc.LocationID == pickupLocationID {
+		if s.locationMatches(loc, pickupLocationID) {
 			loc.Seats.PendingPayment -= numberOfTickets
 			loc.Seats.Pickup += numberOfTickets
 			loc.Seats.TotalAmountPending -= totalAmount
 			loc.Seats.TotalAmountPaid += totalAmount
 		}
-		if loc.LocationID == dropoffLocationID {
+		if s.locationMatches(loc, dropoffLocationID) {
 			loc.Seats.PendingPayment -= numberOfTickets
 			loc.Seats.Dropoff += numberOfTickets
 			loc.Seats.TotalAmountPending -= totalAmount
@@ -286,11 +286,11 @@ func (s *tripSnapshotService) OnBookingExpired(ctx context.Context, tripID int, 
 	// Update location seats
 	for i := range snapshot.Locations {
 		loc := &snapshot.Locations[i]
-		if loc.LocationID == pickupLocationID {
+		if s.locationMatches(loc, pickupLocationID) {
 			loc.Seats.PendingPayment -= numberOfTickets
 			loc.Seats.TotalAmountPending -= totalAmount
 		}
-		if loc.LocationID == dropoffLocationID {
+		if s.locationMatches(loc, dropoffLocationID) {
 			loc.Seats.PendingPayment -= numberOfTickets
 			loc.Seats.TotalAmountPending -= totalAmount
 		}
@@ -438,7 +438,7 @@ func (s *tripSnapshotService) CheckSeatAvailability(ctx context.Context, tripID 
 
 	// Check availability from pickup location
 	for _, loc := range snapshot.Locations {
-		if loc.LocationID == pickupLocationID {
+		if s.locationMatches(&loc, pickupLocationID) {
 			if loc.Seats.AvailableFromHere < requestedSeats {
 				return fmt.Errorf("not enough seats available from location %s: requested=%d, available=%d",
 					pickupLocationID, requestedSeats, loc.Seats.AvailableFromHere)
@@ -457,10 +457,11 @@ func (s *tripSnapshotService) buildLocationsFromTrip(trip *models.Trip) []models
 	// Add origin
 	originStatus := s.determineLocationStatus(trip, trip.Route.OriginID, true, false)
 	locations = append(locations, models.SnapshotLocation{
-		LocationID: strconv.Itoa(trip.Route.OriginID),
-		Type:       models.LocationTypeOrigin,
-		Order:      0,
-		Status:     originStatus,
+		LocationID:      strconv.Itoa(trip.Route.OriginID),
+		RouteLocationID: trip.Route.OriginID,
+		Type:            models.LocationTypeOrigin,
+		Order:           0,
+		Status:          originStatus,
 		Seats: models.LocationSeats{
 			Pickup:             0,
 			Dropoff:            0,
@@ -475,10 +476,11 @@ func (s *tripSnapshotService) buildLocationsFromTrip(trip *models.Trip) []models
 	for _, waypoint := range trip.Waypoints {
 		status := s.determineLocationStatus(trip, waypoint.LocationID, false, false)
 		locations = append(locations, models.SnapshotLocation{
-			LocationID: strconv.Itoa(waypoint.LocationID),
-			Type:       models.LocationTypeWaypoint,
-			Order:      waypoint.Order,
-			Status:     status,
+			LocationID:      strconv.Itoa(waypoint.ID),
+			RouteLocationID: waypoint.LocationID,
+			Type:            models.LocationTypeWaypoint,
+			Order:           waypoint.Order,
+			Status:          status,
 			Seats: models.LocationSeats{
 				Pickup:             0,
 				Dropoff:            0,
@@ -493,10 +495,11 @@ func (s *tripSnapshotService) buildLocationsFromTrip(trip *models.Trip) []models
 	// Add destination
 	destStatus := s.determineLocationStatus(trip, trip.Route.DestinationID, false, true)
 	locations = append(locations, models.SnapshotLocation{
-		LocationID: strconv.Itoa(trip.Route.DestinationID),
-		Type:       models.LocationTypeDestination,
-		Order:      len(trip.Waypoints) + 1,
-		Status:     destStatus,
+		LocationID:      strconv.Itoa(trip.Route.DestinationID),
+		RouteLocationID: trip.Route.DestinationID,
+		Type:            models.LocationTypeDestination,
+		Order:           len(trip.Waypoints) + 1,
+		Status:          destStatus,
 		Seats: models.LocationSeats{
 			Pickup:             0,
 			Dropoff:            0,
@@ -549,12 +552,28 @@ func (s *tripSnapshotService) determineLocationStatus(trip *models.Trip, locatio
 func (s *tripSnapshotService) updateLocationStatuses(snapshot *models.TripSnapshot, trip *models.Trip) {
 	for i := range snapshot.Locations {
 		loc := &snapshot.Locations[i]
-		locID, _ := strconv.Atoi(loc.LocationID)
 
-		isOrigin := loc.Type == models.LocationTypeOrigin
-		isDestination := loc.Type == models.LocationTypeDestination
+		switch loc.Type {
+		case models.LocationTypeOrigin:
+			loc.RouteLocationID = trip.Route.OriginID
+			loc.Status = s.determineLocationStatus(trip, trip.Route.OriginID, true, false)
 
-		loc.Status = s.determineLocationStatus(trip, locID, isOrigin, isDestination)
+		case models.LocationTypeDestination:
+			loc.RouteLocationID = trip.Route.DestinationID
+			loc.Status = s.determineLocationStatus(trip, trip.Route.DestinationID, false, true)
+
+		case models.LocationTypeWaypoint:
+			waypoint := s.findWaypoint(trip.Waypoints, loc.LocationID, loc.RouteLocationID)
+			if waypoint != nil {
+				loc.RouteLocationID = waypoint.LocationID
+				loc.Status = s.determineLocationStatus(trip, waypoint.LocationID, false, false)
+			} else {
+				loc.Status = models.LocationStatusUpcoming
+			}
+
+		default:
+			loc.Status = models.LocationStatusUpcoming
+		}
 	}
 }
 
@@ -591,6 +610,42 @@ func (s *tripSnapshotService) recalculateAvailableSeats(snapshot *models.TripSna
 			loc.Seats.AvailableFromHere = 0
 		}
 	}
+}
+
+// locationMatches checks if the provided id matches either the snapshot location identifier or its underlying route location id.
+func (s *tripSnapshotService) locationMatches(loc *models.SnapshotLocation, targetID string) bool {
+	if loc.LocationID == targetID {
+		return true
+	}
+
+	if loc.RouteLocationID != 0 && strconv.Itoa(loc.RouteLocationID) == targetID {
+		return true
+	}
+
+	return false
+}
+
+// findWaypoint locates a waypoint using either the waypoint ID (preferred) or the route location id.
+func (s *tripSnapshotService) findWaypoint(waypoints []models.TripWaypoint, waypointID string, routeLocationID int) *models.TripWaypoint {
+	// Prefer direct waypoint ID match
+	if id, err := strconv.Atoi(waypointID); err == nil {
+		for i := range waypoints {
+			if waypoints[i].ID == id {
+				return &waypoints[i]
+			}
+		}
+	}
+
+	// Fallback to route location id
+	if routeLocationID != 0 {
+		for i := range waypoints {
+			if waypoints[i].LocationID == routeLocationID {
+				return &waypoints[i]
+			}
+		}
+	}
+
+	return nil
 }
 
 // publishSnapshot publishes the snapshot to RabbitMQ and logs to console

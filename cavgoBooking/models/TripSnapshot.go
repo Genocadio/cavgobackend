@@ -47,11 +47,12 @@ type SnapshotCapacity struct {
 
 // SnapshotLocation represents location-specific booking data
 type SnapshotLocation struct {
-	LocationID string         `json:"locationId"`
-	Type       LocationType   `json:"type"`
-	Order      int            `json:"order"`
-	Status     LocationStatus `json:"status"`
-	Seats      LocationSeats  `json:"seats"`
+	LocationID      string         `json:"locationId"`
+	RouteLocationID int            `json:"routeLocationId"`
+	Type            LocationType   `json:"type"`
+	Order           int            `json:"order"`
+	Status          LocationStatus `json:"status"`
+	Seats           LocationSeats  `json:"seats"`
 }
 
 // LocationSeats represents seat counts at a specific location

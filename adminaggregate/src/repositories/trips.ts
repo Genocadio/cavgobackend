@@ -159,12 +159,14 @@ export async function createTrip(trip: Trip): Promise<Trip> {
     trip.destinations.map(async (destination) => {
       await upsertTripLocation(destination);
       const destinationId = `${trip.id}-${destination.id}`;
+      // Use locationId if available (for waypoints), otherwise use id (for origin/final destination)
+      const locationRef = destination.locationId || destination.id;
       await db
         .insert(tripDestinations)
         .values({
           id: destinationId,
           tripId: trip.id,
-          locationId: destination.id,
+          locationId: locationRef,
           index: destination.index,
           fare: destination.fare.toString(),
           remainingDistance: destination.remainingDistance ?? null,
@@ -179,7 +181,7 @@ export async function createTrip(trip: Trip): Promise<Trip> {
             remainingDistance: destination.remainingDistance ?? null,
             isPassede: destination.isPassede,
             passedTime: destination.passedTime ?? null,
-            locationId: destination.id,
+            locationId: locationRef,
           },
         });
       return destinationId;

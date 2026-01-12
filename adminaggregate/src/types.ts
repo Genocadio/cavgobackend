@@ -67,6 +67,7 @@ export interface TripLocation extends LatLang {
 }
 
 export interface  Destination extends TripLocation {
+    locationId?: string; // Reference to trip_locations table (for waypoints, this differs from id)
     order?: number | null; // Original order from incoming waypoint (for validation/debugging)
     index: number;
     fare: number;

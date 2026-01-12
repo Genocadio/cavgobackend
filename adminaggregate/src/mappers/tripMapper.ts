@@ -92,7 +92,8 @@ async function mapRemoteWaypointToDestination(
   await locationRepository.upsertTripLocation(location);
   
   return {
-    id: String(waypoint.id || `waypoint-${index}`),
+    id: String(waypoint.id || `waypoint-${index}`), // Waypoint ID for destination identity
+    locationId: location.id, // Reference to trip_locations table
     lat: location.lat,
     lng: location.lng,
     addres: location.addres,
@@ -139,7 +140,8 @@ async function mapRouteDestinationToDestination(
   await locationRepository.upsertTripLocation(location);
   
   return {
-    id: String(route.destination.id),
+    id: String(route.destination.id), // For final destination, id = locationId (no separate waypoint)
+    locationId: String(route.destination.id), // Same as id for non-waypoint destinations
     lat: location.lat,
     lng: location.lng,
     addres: location.addres,
@@ -339,7 +341,8 @@ async function mapTripApiWaypointToDestination(
   await locationRepository.upsertTripLocation(location);
   
   return {
-    id: String(waypoint.id),
+    id: String(waypoint.id), // Waypoint ID for destination identity
+    locationId: location.id, // Reference to trip_locations table
     lat: location.lat,
     lng: location.lng,
     addres: location.addres,
@@ -365,7 +368,8 @@ async function mapTripApiRouteDestinationToDestination(
   await locationRepository.upsertTripLocation(location);
   
   return {
-    id: String(route.destination.id),
+    id: String(route.destination.id), // For final destination, id = locationId
+    locationId: String(route.destination.id), // Same as id for non-waypoint destinations
     lat: location.lat,
     lng: location.lng,
     addres: location.addres,
@@ -488,7 +492,8 @@ async function mapTripServiceWaypointToDestination(
   }
   
   return {
-    id: String(waypoint.location_id),
+    id: String(waypoint.id), // Waypoint ID for destination identity
+    locationId: String(waypoint.location_id), // Reference to trip_locations table
     lat: location.lat,
     lng: location.lng,
     addres: location.addres,
@@ -553,7 +558,8 @@ export async function mapTripServiceTripToLocalTrip(
     await locationRepository.upsertTripLocation(destLocation);
 
     destinations.push({
-      id: String(routeAny.destination.id),
+      id: String(routeAny.destination.id), // For final destination, id = locationId
+      locationId: String(routeAny.destination.id), // Same as id for non-waypoint destinations
       lat: destLocation.lat,
       lng: destLocation.lng,
       addres: destLocation.addres,

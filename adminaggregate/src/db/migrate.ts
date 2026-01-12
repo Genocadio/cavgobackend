@@ -278,7 +278,6 @@ export async function migrate(): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
-    `);
 
     // Alter car_locations table to make bearing and accuracy nullable (for existing tables)
     // This handles cases where the table already exists with NOT NULL constraints

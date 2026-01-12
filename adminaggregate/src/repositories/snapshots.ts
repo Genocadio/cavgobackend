@@ -24,33 +24,79 @@ async function normalizeSnapshot(snapshot: TripSnapshot, trip?: Trip | null): Pr
     }
   }
 
-  const locations: SnapshotLocation[] = (snapshot.locations || []).map((location) => {
-    let address = location.addres || "";
+  const locations: SnapshotLocation[] = await Promise.all(
+    (snapshot.locations || []).map(async (location) => {
+      let address = location.addres || "";
 
-    // If address is still missing, try to find it from trip data
-    if (!address && trip) {
-      if (location.order === 0) {
-        // Origin
-        address = trip.origin?.addres || "";
-      } else {
-        // Destination or waypoint - find by locationId
-        const destination = trip.destinations?.find((d) => String(d.id) === String(location.locationId));
-        if (destination) {
-          address = destination.addres || "";
+      // If address is still missing, try to find it from trip data
+      if (!address && trip) {
+        if (location.order === 0) {
+          // Origin
+          address = trip.origin?.addres || "";
+        } else {
+          // Destination or waypoint
+          // First try to match by destination.id (in case it matches)
+          let destination = trip.destinations?.find((d) => String(d.id) === String(location.locationId));
+          
+          // If not found, the locationId in snapshot refers to the trip_locations table id
+          // We need to query trip_destinations to find which destination references this locationId
+          if (!destination) {
+            try {
+              const { pgPool } = await import("../db/client");
+              const result = await pgPool.query(
+                `SELECT td.id, tl.address, tl.latitude, tl.longitude
+                 FROM trip_destinations td
+                 JOIN trip_locations tl ON td.location_id = tl.id
+                 WHERE td.trip_id = $1 AND td.location_id = $2
+                 LIMIT 1`,
+                [snapshot.tripId, String(location.locationId)]
+              );
+              
+              if (result.rows.length > 0) {
+                address = result.rows[0].address || "";
+                console.log(JSON.stringify({
+                  level: "DEBUG",
+                  event: "SNAPSHOT_ADDRESS_RESOLVED",
+                  tripId: snapshot.tripId,
+                  locationId: location.locationId,
+                  destinationId: result.rows[0].id,
+                  address,
+                }));
+              } else {
+                console.log(JSON.stringify({
+                  level: "WARN",
+                  event: "SNAPSHOT_ADDRESS_NOT_FOUND",
+                  tripId: snapshot.tripId,
+                  locationId: location.locationId,
+                  order: location.order,
+                }));
+              }
+            } catch (error) {
+              console.error(JSON.stringify({
+                level: "ERROR",
+                event: "SNAPSHOT_ADDRESS_LOOKUP_FAILED",
+                tripId: snapshot.tripId,
+                locationId: location.locationId,
+                error: error instanceof Error ? error.message : String(error),
+              }));
+            }
+          } else {
+            address = destination.addres || "";
+          }
         }
       }
-    }
 
-    return {
-      ...location,
-      addres: address,
-      seats: {
-        ...location.seats,
-        totalAmountPaid: location.seats.totalAmountPaid ?? 0,
-        totalAmountPending: location.seats.totalAmountPending ?? 0,
-      },
-    };
-  });
+      return {
+        ...location,
+        addres: address,
+        seats: {
+          ...location.seats,
+          totalAmountPaid: location.seats.totalAmountPaid ?? 0,
+          totalAmountPending: location.seats.totalAmountPending ?? 0,
+        },
+      };
+    })
+  );
 
   return {
     ...snapshot,
@@ -73,6 +119,12 @@ const snapshotStore = new Map<string, TripSnapshot>();
  * @returns The newly created snapshot
  */
 export async function createInitialSnapshot(trip: Trip, carCapacity: number): Promise<TripSnapshot> {
+  // If a snapshot already exists for this trip (e.g., persisted from bookings), don't overwrite it
+  const exists = await snapshotExists(trip.id);
+  if (exists) {
+    const existing = await getSnapshot(trip.id);
+    if (existing) return existing;
+  }
   // Initialize capacity with all seats available
   const capacity: SnapshotCapacity = {
     totalSeats: carCapacity,
@@ -106,8 +158,10 @@ export async function createInitialSnapshot(trip: Trip, carCapacity: number): Pr
   // Add destinations (waypoints and final destination)
   trip.destinations.forEach((dest, index) => {
     const locationType = index === trip.destinations.length - 1 ? "DESTINATION" : "WAYPOINT";
+    // Use locationId if available (for waypoints), otherwise use id
+    const locationRef = dest.locationId || dest.id;
     locations.push({
-      locationId: dest.id,
+      locationId: locationRef,
       addres: dest.addres || "",
       type: locationType,
       order: index + 1,
