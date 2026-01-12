@@ -18,14 +18,14 @@ export async function upsertTripLocation(location: TripLocation): Promise<TripLo
     .insert(tripLocations)
     .values({
       id: location.id,
-      address: location.addres,
+      address: location.addres ?? "",
       latitude: location.lat,
       longitude: location.lng,
     })
     .onConflictDoUpdate({
       target: tripLocations.id,
       set: {
-        address: location.addres,
+        address: location.addres ?? "",
         latitude: location.lat,
         longitude: location.lng,
       },

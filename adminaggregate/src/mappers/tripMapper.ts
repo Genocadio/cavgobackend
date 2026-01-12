@@ -2,6 +2,27 @@ import type { RemoteTrip, RemoteLocation, RemoteWaypoint, RemoteRoute, Trip, Tri
 import * as locationRepository from "../repositories/locations";
 import * as assignmentRepository from "../repositories/assignments";
 
+/**
+ * Normalize destination indices to ensure:
+ * - Ordering respects the incoming waypoint/destination order field when present
+ * - No duplicates, and indices are sequential 0..n after sorting
+ * - Route destination (if no order) is pushed to the end via a large sort key
+ */
+function normalizeDestinationIndices(destinations: Destination[]): Destination[] {
+  if (destinations.length === 0) return destinations;
+
+  const sorted = [...destinations].sort((a, b) => {
+    const keyA = a.order ?? a.index ?? Number.MAX_SAFE_INTEGER;
+    const keyB = b.order ?? b.index ?? Number.MAX_SAFE_INTEGER;
+    return keyA - keyB;
+  });
+
+  return sorted.map((dest, i) => ({
+    ...dest,
+    index: i,
+  }));
+}
+
 function mapRemoteStatusToLocal(remoteStatus: string | null): "scheduled" | "in_progress" | "completed" | "cancelled" {
   if (!remoteStatus) return "scheduled";
   
@@ -122,7 +143,8 @@ async function mapRouteDestinationToDestination(
     lat: location.lat,
     lng: location.lng,
     addres: location.addres,
-    index: waypointCount, // Destination is last
+    order: Number.MAX_SAFE_INTEGER, // Ensure final destination sorts last
+    index: waypointCount, // Will be normalized
     fare: route.route_price ?? 0,
     remainingDistance: null, // Final destination has no remaining distance
     isPassede: false,
@@ -276,11 +298,14 @@ export async function mapRemoteTripToLocalTrip(
     ? new Date(remoteTrip.updated_at).getTime()
     : Date.now();
   
+  // Normalize destination indices to ensure they are sequential without duplicates
+  const normalizedDestinations = normalizeDestinationIndices(waypointDestinations);
+  
   return {
     id: String(remoteTrip.id),
     carDriver: assignment,
     origin: originLocation,
-    destinations: waypointDestinations,
+    destinations: normalizedDestinations,
     status: mapRemoteStatusToLocal(remoteTrip.status),
     totalDistance: remoteTrip.route?.distance_meters ?? 0,
     createdAt,
@@ -318,6 +343,7 @@ async function mapTripApiWaypointToDestination(
     lat: location.lat,
     lng: location.lng,
     addres: location.addres,
+    order: waypoint.order ?? index,
     index: waypoint.order ?? index,
     fare: waypoint.price ?? 0,
     remainingDistance: waypoint.remaining_distance ?? null,
@@ -343,7 +369,8 @@ async function mapTripApiRouteDestinationToDestination(
     lat: location.lat,
     lng: location.lng,
     addres: location.addres,
-    index: waypointCount, // Destination is last
+    order: Number.MAX_SAFE_INTEGER,
+    index: waypointCount, // Will be normalized
     fare: route.route_price ?? 0,
     remainingDistance: null, // Final destination has no remaining distance
     isPassede: false,
@@ -405,11 +432,14 @@ export async function mapTripApiItemToLocalTrip(
     ? new Date(tripApiItem.updated_at).getTime()
     : Date.now();
   
+  // Normalize destination indices to ensure they are sequential without duplicates
+  const normalizedDestinations = normalizeDestinationIndices(waypointDestinations);
+  
   return {
     id: String(tripApiItem.id),
     carDriver: assignment,
     origin: originLocation,
-    destinations: waypointDestinations,
+    destinations: normalizedDestinations,
     status: mapRemoteStatusToLocal(tripApiItem.status),
     totalDistance: tripApiItem.route?.distance_meters ?? 0,
     createdAt,
@@ -433,6 +463,17 @@ async function mapTripServiceWaypointToDestination(
   if (existingLocation) {
     location.lat = existingLocation.lat;
     location.lng = existingLocation.lng;
+    // If the waypoint didn't include a name/address, prefer the stored one
+    if (!location.addres) {
+      location.addres = existingLocation.addres;
+    }
+  } else if (waypoint.location) {
+    // If the waypoint includes a nested `location` object, prefer fields from it
+    const nested = waypoint.location;
+    location.lat = nested.latitude ?? location.lat;
+    location.lng = nested.longitude ?? location.lng;
+    // Prefer custom_name, then google_place_name, then fallback to any provided location_name
+    location.addres = nested.custom_name || nested.google_place_name || location.addres || "";
   } else {
     // Skip waypoints without location data
     console.warn(JSON.stringify({
@@ -451,7 +492,8 @@ async function mapTripServiceWaypointToDestination(
     lat: location.lat,
     lng: location.lng,
     addres: location.addres,
-    index: waypoint.order - 1, // Convert 1-based to 0-based
+    order: waypoint.order, // Preserve original order for validation
+    index: waypoint.order - 1, // Convert 1-based to 0-based for DB indexing (will be normalized)
     fare: waypoint.price ?? 0,
     remainingDistance: waypoint.remaining_distance,
     isPassede: waypoint.is_passed,
@@ -466,12 +508,22 @@ export async function mapTripServiceTripToLocalTrip(
   const driverId = tripServiceTrip.vehicle.driver ? String(tripServiceTrip.vehicle.driver.id) : null;
   
   // Create origin from route origin (just use route name for now)
+  // Build origin using nested route.origin when available.
+  const routeOriginAny: any = tripServiceTrip.route && (tripServiceTrip.route as any).origin;
+  const originAddress = routeOriginAny
+    ? (routeOriginAny.custom_name || routeOriginAny.google_place_name || routeOriginAny.name || "")
+    : (typeof tripServiceTrip.route?.origin === "string" ? (tripServiceTrip.route.origin as unknown as string) : "");
+  const originLat = routeOriginAny && typeof routeOriginAny.latitude === "number" ? routeOriginAny.latitude : 0;
+  const originLng = routeOriginAny && typeof routeOriginAny.longitude === "number" ? routeOriginAny.longitude : 0;
+
   const originLocation: TripLocation = {
     id: `route-origin-${tripServiceTrip.route_id}`,
-    lat: 0, // Coordinates not provided in event
-    lng: 0,
-    addres: tripServiceTrip.route.origin,
+    lat: originLat,
+    lng: originLng,
+    addres: originAddress,
   };
+  // Upsert origin location so it's available in trip_locations
+  await locationRepository.upsertTripLocation(originLocation);
   
   // Map waypoints to destinations
   const destinations: Destination[] = [];
@@ -481,6 +533,38 @@ export async function mapTripServiceTripToLocalTrip(
       destinations.push(dest);
     }
   }
+
+  // Sort by incoming order to maintain correct sequence
+  destinations.sort((a, b) => {
+    const orderA = a.order ?? a.index;
+    const orderB = b.order ?? b.index;
+    return orderA - orderB;
+  });
+
+  // Append route destination as last destination when available
+  const routeAny: any = tripServiceTrip.route;
+  if (routeAny && routeAny.destination) {
+    const destLocation: TripLocation = {
+      id: String(routeAny.destination.id),
+      lat: routeAny.destination.latitude ?? 0,
+      lng: routeAny.destination.longitude ?? 0,
+      addres: routeAny.destination.custom_name || routeAny.destination.google_place_name || "",
+    };
+    await locationRepository.upsertTripLocation(destLocation);
+
+    destinations.push({
+      id: String(routeAny.destination.id),
+      lat: destLocation.lat,
+      lng: destLocation.lng,
+      addres: destLocation.addres,
+      order: Number.MAX_SAFE_INTEGER, // Force final destination to sort last
+      index: destinations.length, // Will be normalized
+      fare: routeAny.route_price ?? 0,
+      remainingDistance: null,
+      isPassede: false,
+      passedTime: null,
+    });
+  }
   
   // Get or create driver-car assignment
   const assignmentId = await assignmentRepository.ensureDriverCarAssignment(driverId, vehicleId);
@@ -489,15 +573,25 @@ export async function mapTripServiceTripToLocalTrip(
     throw new Error(`Failed to get driver-car assignment for vehicle ${vehicleId}`);
   }
   
+  const createdAtMs = typeof tripServiceTrip.created_at === "number" && isFinite(tripServiceTrip.created_at)
+    ? tripServiceTrip.created_at * 1000
+    : Date.now();
+  const updatedAtMs = typeof tripServiceTrip.updated_at === "number" && isFinite(tripServiceTrip.updated_at)
+    ? tripServiceTrip.updated_at * 1000
+    : createdAtMs;
+
+  // Normalize destination indices to ensure they are sequential without duplicates
+  const normalizedDestinations = normalizeDestinationIndices(destinations);
+
   return {
     id: String(tripServiceTrip.id),
     carDriver: assignment,
     origin: originLocation,
-    destinations,
+    destinations: normalizedDestinations,
     status: mapRemoteStatusToLocal(tripServiceTrip.status),
     totalDistance: tripServiceTrip.route.distance,
-    createdAt: tripServiceTrip.created_at * 1000, // Convert seconds to milliseconds
-    updatedAt: tripServiceTrip.updated_at * 1000,
+    createdAt: createdAtMs,
+    updatedAt: updatedAtMs,
   };
 }
 

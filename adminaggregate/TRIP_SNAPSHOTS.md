@@ -51,6 +51,8 @@ type SnapshotSeats {
   dropoff: Int!
   pendingPayment: Int!
   availableFromHere: Int!
+  totalAmountPaid: Float!
+  totalAmountPending: Float!
 }
 
 type SnapshotLocation {
@@ -66,6 +68,8 @@ type SnapshotCapacity {
   availableSeats: Int!
   occupiedSeats: Int!
   pendingPaymentSeats: Int!
+  totalAmountPaid: Float!
+  totalAmountPending: Float!
 }
 
 type SnapshotSummary {

@@ -110,12 +110,21 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 	fmt.Printf("[BookingService] [STEP 3.2/8] Snapshot seat availability check PASSED\n")
 
 	// Calculate price based on pickup and dropoff
+	// Price calculation logic:
+	// - Origin to Waypoint B: waypoint_B.price × tickets
+	// - Origin to Destination: trip.Route.RoutePrice × tickets
+	// - Waypoint B to Waypoint C: (waypoint_C.price - waypoint_B.price) × tickets
+	// - Waypoint C to Destination: (trip.Route.RoutePrice - waypoint_C.price) × tickets
 	fmt.Printf("[BookingService] [STEP 4/8] Calculating price: pickupLocationId=%s dropoffLocationId=%s\n", req.PickupLocationID, req.DropoffLocationID)
+
 	pickupOrder := -1
 	pickupPrice := 0.0
+	isPickupOrigin := false
+
 	if fmt.Sprintf("%d", trip.Route.OriginID) == req.PickupLocationID {
 		pickupOrder = -1
 		pickupPrice = 0.0
+		isPickupOrigin = true
 		fmt.Printf("[BookingService] [STEP 4/8] Pickup is at origin (order=-1, price=0.0)\n")
 	} else {
 		for _, wp := range trip.Waypoints {
@@ -130,9 +139,12 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 
 	dropoffOrder := -1
 	dropoffPrice := 0.0
+	isDropoffDestination := false
+
 	if fmt.Sprintf("%d", trip.Route.DestinationID) == req.DropoffLocationID {
 		dropoffOrder = 999999
 		dropoffPrice = trip.Route.RoutePrice
+		isDropoffDestination = true
 		fmt.Printf("[BookingService] [STEP 4/8] Dropoff is at destination (order=999999, price=%.2f)\n", trip.Route.RoutePrice)
 	} else {
 		for _, wp := range trip.Waypoints {
@@ -145,21 +157,38 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 		}
 	}
 
-	if pickupOrder == -1 && dropoffOrder == 999999 {
-		// Origin to destination, use route price
-		dropoffPrice = trip.Route.RoutePrice
-		pickupPrice = 0.0
-	}
-
+	// Validate order
 	if pickupOrder >= dropoffOrder {
 		fmt.Printf("[BookingService] [STEP 4/8] ERROR: Invalid location order: pickupOrder=%d dropoffOrder=%d\n", pickupOrder, dropoffOrder)
 		return nil, fmt.Errorf("incorrect location: pickup must be before dropoff")
 	}
 
-	pricePerTicket := dropoffPrice - pickupPrice
+	// Calculate price per ticket
+	var pricePerTicket float64
+
+	if isPickupOrigin && isDropoffDestination {
+		// A -> D: Use full route price
+		pricePerTicket = trip.Route.RoutePrice
+		fmt.Printf("[BookingService] [STEP 4/8] Origin to Destination: price=%.2f\n", pricePerTicket)
+	} else if isPickupOrigin && !isDropoffDestination {
+		// A -> B or A -> C: Use waypoint price
+		pricePerTicket = dropoffPrice
+		fmt.Printf("[BookingService] [STEP 4/8] Origin to Waypoint: price=%.2f\n", pricePerTicket)
+	} else if !isPickupOrigin && isDropoffDestination {
+		// B -> D or C -> D: (destination price - pickup waypoint price)
+		pricePerTicket = trip.Route.RoutePrice - pickupPrice
+		fmt.Printf("[BookingService] [STEP 4/8] Waypoint to Destination: (%.2f - %.2f) = %.2f\n", trip.Route.RoutePrice, pickupPrice, pricePerTicket)
+	} else {
+		// B -> C: (dropoff waypoint price - pickup waypoint price)
+		pricePerTicket = dropoffPrice - pickupPrice
+		fmt.Printf("[BookingService] [STEP 4/8] Waypoint to Waypoint: (%.2f - %.2f) = %.2f\n", dropoffPrice, pickupPrice, pricePerTicket)
+	}
+
+	// Ensure price is non-negative
 	if pricePerTicket < 0 {
 		pricePerTicket = 0
 	}
+
 	totalAmount := pricePerTicket * float64(req.NumberOfTickets)
 	fmt.Printf("[BookingService] [STEP 4/8] Price calculated: pricePerTicket=%.2f numberOfTickets=%d totalAmount=%.2f\n", pricePerTicket, req.NumberOfTickets, totalAmount)
 
@@ -234,7 +263,7 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 
 	// Update snapshot after booking created (pending payment)
 	fmt.Printf("[BookingService] [STEP 7.1/8] Updating trip snapshot (booking created)...\n")
-	if err := s.snapshotService.OnBookingCreated(ctx, req.TripID, req.PickupLocationID, req.DropoffLocationID, req.NumberOfTickets, trip); err != nil {
+	if err := s.snapshotService.OnBookingCreated(ctx, req.TripID, req.PickupLocationID, req.DropoffLocationID, req.NumberOfTickets, totalAmount, trip); err != nil {
 		fmt.Printf("[BookingService] [STEP 7.1/8] ERROR: Failed to update snapshot: %v\n", err)
 		// Don't fail the booking, just log the error
 	} else {
@@ -398,7 +427,7 @@ func (s *bookingService) CancelBooking(ctx context.Context, id string) error {
 	}
 
 	// If payment is pending, release held seats in snapshot and publish
-	if err := s.snapshotService.OnBookingExpired(ctx, booking.TripID, booking.PickupLocationID, booking.DropoffLocationID, booking.NumberOfTickets); err != nil {
+	if err := s.snapshotService.OnBookingExpired(ctx, booking.TripID, booking.PickupLocationID, booking.DropoffLocationID, booking.NumberOfTickets, booking.TotalAmount); err != nil {
 		fmt.Printf("[CancelBooking] WARNING: Failed to update snapshot for pending cancellation: %v\n", err)
 	}
 	return nil
@@ -474,7 +503,7 @@ func (s *bookingService) ProcessPayment(ctx context.Context, bookingID string, p
 	// Get booking to extract trip info
 	tempBooking, _ := s.bookingRepo.GetBookingByID(ctx, bookingID)
 	if tempBooking != nil {
-		if err := s.snapshotService.OnPaymentConfirmed(ctx, tempBooking.TripID, tempBooking.PickupLocationID, tempBooking.DropoffLocationID, tempBooking.NumberOfTickets); err != nil {
+		if err := s.snapshotService.OnPaymentConfirmed(ctx, tempBooking.TripID, tempBooking.PickupLocationID, tempBooking.DropoffLocationID, tempBooking.NumberOfTickets, tempBooking.TotalAmount); err != nil {
 			fmt.Printf("[ProcessPayment] ERROR: Failed to update snapshot: %v\n", err)
 			// Don't fail the payment, just log the error
 		} else {

@@ -1,6 +1,7 @@
 import type { Trip } from "../types";
 import * as carRepository from "../repositories/cars";
 import * as metricsRepository from "../repositories/metrics";
+import * as driverRepository from "../repositories/drivers";
 
 interface TripMetricsUpdateParams {
   trip: Trip;
@@ -19,6 +20,8 @@ interface TripMetricsUpdateParams {
  */
 export async function updateTripMetrics(params: TripMetricsUpdateParams): Promise<void> {
   const { trip, vehicleId, driverId, existingTrip, tripDistance, tripFare = 0, startedAt, completedAt } = params;
+
+  const safeTripDistance = typeof tripDistance === "number" && isFinite(tripDistance) ? tripDistance : 0;
 
   // Get the car to get companyId
   const car = await carRepository.getCarById(vehicleId);
@@ -41,7 +44,7 @@ export async function updateTripMetrics(params: TripMetricsUpdateParams): Promis
     // New trip created - increment if not cancelled
     if (shouldBeCounted) {
       tripCountDelta = 1;
-      distanceDelta = tripDistance;
+      distanceDelta = safeTripDistance;
     }
   } else {
     // Existing trip updated
@@ -56,7 +59,7 @@ export async function updateTripMetrics(params: TripMetricsUpdateParams): Promis
       distanceDelta = -existingTrip.totalDistance;
     } else if (wasCounted && shouldBeCounted) {
       // Status is still non-cancelled but distance might have changed
-      const distanceChange = tripDistance - existingTrip.totalDistance;
+      const distanceChange = safeTripDistance - existingTrip.totalDistance;
       if (distanceChange !== 0) {
         distanceDelta = distanceChange;
       }
@@ -84,20 +87,26 @@ export async function updateTripMetrics(params: TripMetricsUpdateParams): Promis
 
   // Update driver metrics if there's a change and driver exists
   if (driverId && (tripCountDelta !== 0 || distanceDelta !== 0)) {
-    const driverMetrics = await metricsRepository.getDriverMetrics(driverId);
+    // Guard against invalid driver IDs (e.g. 0) and only update if driver exists
+    const driverExists = await driverRepository.getDriverById(String(driverId));
+    if (!driverExists) {
+      console.warn(`[METRICS] Skipping driver metrics for invalid/missing driver ${driverId}`);
+    } else {
+      const driverMetrics = await metricsRepository.getDriverMetrics(driverId);
     const newTripCount = Math.max(0, (driverMetrics?.totalTrips || 0) + tripCountDelta);
     const newDistance = Math.max(0, (driverMetrics?.totalDistance || 0) + distanceDelta);
 
-    await metricsRepository.upsertDriverMetrics({
-      driverId: driverId,
-      totalRevenue: driverMetrics?.totalRevenue || 0, // Keep revenue unchanged for now
-      totalTrips: newTripCount,
-      totalDistance: newDistance,
-    });
+      await metricsRepository.upsertDriverMetrics({
+        driverId: driverId,
+        totalRevenue: driverMetrics?.totalRevenue || 0, // Keep revenue unchanged for now
+        totalTrips: newTripCount,
+        totalDistance: newDistance,
+      });
 
-    console.log(
-      `[METRICS] Updated driver metrics for ${driverId}: trips ${tripCountDelta >= 0 ? '+' : ''}${tripCountDelta}, distance ${distanceDelta >= 0 ? '+' : ''}${distanceDelta}`
-    );
+      console.log(
+        `[METRICS] Updated driver metrics for ${driverId}: trips ${tripCountDelta >= 0 ? '+' : ''}${tripCountDelta}, distance ${distanceDelta >= 0 ? '+' : ''}${distanceDelta}`
+      );
+    }
   }
 
   // Update trip-specific metrics for in_progress and completed status
@@ -109,7 +118,7 @@ export async function updateTripMetrics(params: TripMetricsUpdateParams): Promis
       tripId: trip.id,
       companyId: car.companyId,
       totalFare: 0, // Revenue will come from bookings, not from trip route_price/price
-      totalDistance: tripDistance,
+      totalDistance: safeTripDistance,
       totalDuration: existingMetrics?.totalDuration || 0,
       startedAt: startedAt || existingMetrics?.startedAt || trip.createdAt,
       completedAt: existingMetrics?.completedAt || null,
@@ -126,7 +135,7 @@ export async function updateTripMetrics(params: TripMetricsUpdateParams): Promis
       tripId: trip.id,
       companyId: car.companyId,
       totalFare: 0, // Revenue will come from bookings, not from trip route_price/price
-      totalDistance: tripDistance,
+      totalDistance: safeTripDistance,
       totalDuration: totalDuration,
       startedAt: computedStartedAt,
       completedAt: computedCompletedAt,

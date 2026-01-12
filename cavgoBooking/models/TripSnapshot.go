@@ -37,10 +37,12 @@ type TripSnapshot struct {
 
 // SnapshotCapacity represents the capacity information of a trip
 type SnapshotCapacity struct {
-	TotalSeats          int `json:"totalSeats"`
-	AvailableSeats      int `json:"availableSeats"`
-	OccupiedSeats       int `json:"occupiedSeats"`
-	PendingPaymentSeats int `json:"pendingPaymentSeats"`
+	TotalSeats          int     `json:"totalSeats"`
+	AvailableSeats      int     `json:"availableSeats"`
+	OccupiedSeats       int     `json:"occupiedSeats"`
+	PendingPaymentSeats int     `json:"pendingPaymentSeats"`
+	TotalAmountPaid     float64 `json:"totalAmountPaid"`
+	TotalAmountPending  float64 `json:"totalAmountPending"`
 }
 
 // SnapshotLocation represents location-specific booking data
@@ -54,10 +56,12 @@ type SnapshotLocation struct {
 
 // LocationSeats represents seat counts at a specific location
 type LocationSeats struct {
-	Pickup            int `json:"pickup"`
-	Dropoff           int `json:"dropoff"`
-	PendingPayment    int `json:"pendingPayment"`
-	AvailableFromHere int `json:"availableFromHere"`
+	Pickup             int     `json:"pickup"`
+	Dropoff            int     `json:"dropoff"`
+	PendingPayment     int     `json:"pendingPayment"`
+	AvailableFromHere  int     `json:"availableFromHere"`
+	TotalAmountPaid    float64 `json:"totalAmountPaid"`
+	TotalAmountPending float64 `json:"totalAmountPending"`
 }
 
 // SnapshotSummary represents summary statistics of bookings

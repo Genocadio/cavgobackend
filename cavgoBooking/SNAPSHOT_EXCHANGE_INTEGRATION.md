@@ -112,7 +112,9 @@ for msg := range msgs {
     "totalSeats": 4,
     "availableSeats": 2,
     "occupiedSeats": 1,
-    "pendingPaymentSeats": 1
+    "pendingPaymentSeats": 1,
+    "totalAmountPaid": 100.00,
+    "totalAmountPending": 100.00
   },
   "locations": [
     {
@@ -124,7 +126,9 @@ for msg := range msgs {
         "pickup": 2,
         "dropoff": 0,
         "pendingPayment": 1,
-        "availableFromHere": 2
+        "availableFromHere": 2,
+        "totalAmountPaid": 100.00,
+        "totalAmountPending": 100.00
       }
     },
     {
@@ -136,7 +140,9 @@ for msg := range msgs {
         "pickup": 1,
         "dropoff": 0,
         "pendingPayment": 0,
-        "availableFromHere": 2
+        "availableFromHere": 2,
+        "totalAmountPaid": 50.00,
+        "totalAmountPending": 0.00
       }
     },
     {
@@ -148,7 +154,9 @@ for msg := range msgs {
         "pickup": 0,
         "dropoff": 2,
         "pendingPayment": 0,
-        "availableFromHere": 2
+        "availableFromHere": 2,
+        "totalAmountPaid": 150.00,
+        "totalAmountPending": 100.00
       }
     }
   ],
@@ -173,6 +181,8 @@ for msg := range msgs {
 | `availableSeats` | int | Seats available for new bookings |
 | `occupiedSeats` | int | Seats with confirmed payments |
 | `pendingPaymentSeats` | int | Seats held pending payment confirmation |
+| `totalAmountPaid` | float | Total amount received from confirmed payments |
+| `totalAmountPending` | float | Total amount pending payment confirmation |
 
 **Relationship:** `totalSeats = availableSeats + occupiedSeats + pendingPaymentSeats`
 
@@ -193,6 +203,8 @@ for msg := range msgs {
 | `dropoff` | int | Number of passengers dropping off at this location |
 | `pendingPayment` | int | Seats held pending payment from this location |
 | `availableFromHere` | int | Seats still available for pickup from this location onwards |
+| `totalAmountPaid` | float | Total confirmed payment amount at this location |
+| `totalAmountPending` | float | Total pending payment amount at this location |
 
 ### Summary Object
 
@@ -221,6 +233,8 @@ Snapshots are published with the following event triggers:
   - `pendingPaymentSeats` increases
   - `totalTickets` increases
   - `pendingPayments` increases
+  - `totalAmountPending` increases (trip and location level)
+  - Location `totalAmountPending` increases at both pickup and dropoff
 - **Use Case:** Update available seat count in real-time
 
 ### 3. **PAYMENT_CONFIRMED**
@@ -230,6 +244,8 @@ Snapshots are published with the following event triggers:
   - `occupiedSeats` increases
   - `paidTickets` increases
   - `pendingPayments` decreases
+  - `totalAmountPending` decreases, `totalAmountPaid` increases (trip and location level)
+  - Location amounts move from pending to paid at both pickup and dropoff
 - **Use Case:** Confirm seat booking, send confirmation email
 
 ### 4. **BOOKING_EXPIRED**
@@ -239,6 +255,8 @@ Snapshots are published with the following event triggers:
   - `availableSeats` increases (seats released)
   - `totalTickets` decreases
   - `pendingPayments` decreases
+  - `totalAmountPending` decreases (trip and location level)
+  - Location `totalAmountPending` decreases at both pickup and dropoff
 - **Use Case:** Release seats back to pool, notify user
 
 ---

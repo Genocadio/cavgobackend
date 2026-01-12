@@ -18,13 +18,13 @@ type TripSnapshotService interface {
 	InitializeSnapshot(ctx context.Context, trip *models.Trip) error
 
 	// OnBookingCreated updates snapshot when a booking is created (pending payment)
-	OnBookingCreated(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int, trip *models.Trip) error
+	OnBookingCreated(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int, totalAmount float64, trip *models.Trip) error
 
 	// OnPaymentConfirmed updates snapshot when payment is confirmed
-	OnPaymentConfirmed(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int) error
+	OnPaymentConfirmed(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int, totalAmount float64) error
 
 	// OnBookingExpired updates snapshot when booking expires/is cancelled
-	OnBookingExpired(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int) error
+	OnBookingExpired(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int, totalAmount float64) error
 
 	// GetSnapshot retrieves the current snapshot for a trip
 	GetSnapshot(ctx context.Context, tripID int) (*models.TripSnapshot, error)
@@ -71,6 +71,8 @@ func (s *tripSnapshotService) InitializeSnapshot(ctx context.Context, trip *mode
 			AvailableSeats:      trip.Seats,
 			OccupiedSeats:       0,
 			PendingPaymentSeats: 0,
+			TotalAmountPaid:     0.0,
+			TotalAmountPending:  0.0,
 		},
 		Locations: locations,
 		Summary: models.SnapshotSummary{
@@ -93,9 +95,9 @@ func (s *tripSnapshotService) InitializeSnapshot(ctx context.Context, trip *mode
 }
 
 // OnBookingCreated handles snapshot update when booking is created (pending payment)
-func (s *tripSnapshotService) OnBookingCreated(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int, trip *models.Trip) error {
-	fmt.Printf("[TripSnapshotService] OnBookingCreated: tripId=%d pickup=%s dropoff=%s tickets=%d\n",
-		tripID, pickupLocationID, dropoffLocationID, numberOfTickets)
+func (s *tripSnapshotService) OnBookingCreated(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int, totalAmount float64, trip *models.Trip) error {
+	fmt.Printf("[TripSnapshotService] OnBookingCreated: tripId=%d pickup=%s dropoff=%s tickets=%d amount=%.2f\n",
+		tripID, pickupLocationID, dropoffLocationID, numberOfTickets, totalAmount)
 
 	// Start transaction
 	tx, err := s.repo.BeginTransaction(ctx)
@@ -131,15 +133,18 @@ func (s *tripSnapshotService) OnBookingCreated(ctx context.Context, tripID int, 
 	// Update capacity: pending payment seat hold
 	snapshot.Capacity.PendingPaymentSeats += numberOfTickets
 	snapshot.Capacity.AvailableSeats -= numberOfTickets
+	snapshot.Capacity.TotalAmountPending += totalAmount
 
 	// Update location seats
 	for i := range snapshot.Locations {
 		loc := &snapshot.Locations[i]
 		if loc.LocationID == pickupLocationID {
 			loc.Seats.PendingPayment += numberOfTickets
+			loc.Seats.TotalAmountPending += totalAmount
 		}
 		if loc.LocationID == dropoffLocationID {
 			loc.Seats.PendingPayment += numberOfTickets
+			loc.Seats.TotalAmountPending += totalAmount
 		}
 	}
 
@@ -174,9 +179,9 @@ func (s *tripSnapshotService) OnBookingCreated(ctx context.Context, tripID int, 
 }
 
 // OnPaymentConfirmed handles snapshot update when payment is confirmed
-func (s *tripSnapshotService) OnPaymentConfirmed(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int) error {
-	fmt.Printf("[TripSnapshotService] OnPaymentConfirmed: tripId=%d pickup=%s dropoff=%s tickets=%d\n",
-		tripID, pickupLocationID, dropoffLocationID, numberOfTickets)
+func (s *tripSnapshotService) OnPaymentConfirmed(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int, totalAmount float64) error {
+	fmt.Printf("[TripSnapshotService] OnPaymentConfirmed: tripId=%d pickup=%s dropoff=%s tickets=%d amount=%.2f\n",
+		tripID, pickupLocationID, dropoffLocationID, numberOfTickets, totalAmount)
 
 	// Start transaction
 	tx, err := s.repo.BeginTransaction(ctx)
@@ -201,6 +206,8 @@ func (s *tripSnapshotService) OnPaymentConfirmed(ctx context.Context, tripID int
 	// Update capacity: convert pending to occupied
 	snapshot.Capacity.PendingPaymentSeats -= numberOfTickets
 	snapshot.Capacity.OccupiedSeats += numberOfTickets
+	snapshot.Capacity.TotalAmountPending -= totalAmount
+	snapshot.Capacity.TotalAmountPaid += totalAmount
 
 	// Update location seats
 	for i := range snapshot.Locations {
@@ -208,10 +215,14 @@ func (s *tripSnapshotService) OnPaymentConfirmed(ctx context.Context, tripID int
 		if loc.LocationID == pickupLocationID {
 			loc.Seats.PendingPayment -= numberOfTickets
 			loc.Seats.Pickup += numberOfTickets
+			loc.Seats.TotalAmountPending -= totalAmount
+			loc.Seats.TotalAmountPaid += totalAmount
 		}
 		if loc.LocationID == dropoffLocationID {
 			loc.Seats.PendingPayment -= numberOfTickets
 			loc.Seats.Dropoff += numberOfTickets
+			loc.Seats.TotalAmountPending -= totalAmount
+			loc.Seats.TotalAmountPaid += totalAmount
 		}
 	}
 
@@ -243,9 +254,9 @@ func (s *tripSnapshotService) OnPaymentConfirmed(ctx context.Context, tripID int
 }
 
 // OnBookingExpired handles snapshot update when booking expires or is cancelled
-func (s *tripSnapshotService) OnBookingExpired(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int) error {
-	fmt.Printf("[TripSnapshotService] OnBookingExpired: tripId=%d pickup=%s dropoff=%s tickets=%d\n",
-		tripID, pickupLocationID, dropoffLocationID, numberOfTickets)
+func (s *tripSnapshotService) OnBookingExpired(ctx context.Context, tripID int, pickupLocationID, dropoffLocationID string, numberOfTickets int, totalAmount float64) error {
+	fmt.Printf("[TripSnapshotService] OnBookingExpired: tripId=%d pickup=%s dropoff=%s tickets=%d amount=%.2f\n",
+		tripID, pickupLocationID, dropoffLocationID, numberOfTickets, totalAmount)
 
 	// Start transaction
 	tx, err := s.repo.BeginTransaction(ctx)
@@ -270,15 +281,18 @@ func (s *tripSnapshotService) OnBookingExpired(ctx context.Context, tripID int, 
 	// Update capacity: release held seats
 	snapshot.Capacity.PendingPaymentSeats -= numberOfTickets
 	snapshot.Capacity.AvailableSeats += numberOfTickets
+	snapshot.Capacity.TotalAmountPending -= totalAmount
 
 	// Update location seats
 	for i := range snapshot.Locations {
 		loc := &snapshot.Locations[i]
 		if loc.LocationID == pickupLocationID {
 			loc.Seats.PendingPayment -= numberOfTickets
+			loc.Seats.TotalAmountPending -= totalAmount
 		}
 		if loc.LocationID == dropoffLocationID {
 			loc.Seats.PendingPayment -= numberOfTickets
+			loc.Seats.TotalAmountPending -= totalAmount
 		}
 	}
 
@@ -448,10 +462,12 @@ func (s *tripSnapshotService) buildLocationsFromTrip(trip *models.Trip) []models
 		Order:      0,
 		Status:     originStatus,
 		Seats: models.LocationSeats{
-			Pickup:            0,
-			Dropoff:           0,
-			PendingPayment:    0,
-			AvailableFromHere: trip.Seats,
+			Pickup:             0,
+			Dropoff:            0,
+			PendingPayment:     0,
+			AvailableFromHere:  trip.Seats,
+			TotalAmountPaid:    0.0,
+			TotalAmountPending: 0.0,
 		},
 	})
 
@@ -464,10 +480,12 @@ func (s *tripSnapshotService) buildLocationsFromTrip(trip *models.Trip) []models
 			Order:      waypoint.Order,
 			Status:     status,
 			Seats: models.LocationSeats{
-				Pickup:            0,
-				Dropoff:           0,
-				PendingPayment:    0,
-				AvailableFromHere: trip.Seats,
+				Pickup:             0,
+				Dropoff:            0,
+				PendingPayment:     0,
+				AvailableFromHere:  trip.Seats,
+				TotalAmountPaid:    0.0,
+				TotalAmountPending: 0.0,
 			},
 		})
 	}
@@ -480,10 +498,12 @@ func (s *tripSnapshotService) buildLocationsFromTrip(trip *models.Trip) []models
 		Order:      len(trip.Waypoints) + 1,
 		Status:     destStatus,
 		Seats: models.LocationSeats{
-			Pickup:            0,
-			Dropoff:           0,
-			PendingPayment:    0,
-			AvailableFromHere: 0, // Can't pick up from destination
+			Pickup:             0,
+			Dropoff:            0,
+			PendingPayment:     0,
+			AvailableFromHere:  0, // Can't pick up from destination
+			TotalAmountPaid:    0.0,
+			TotalAmountPending: 0.0,
 		},
 	})
 
@@ -630,15 +650,19 @@ func (s *tripSnapshotService) logSnapshotState(snapshot *models.TripSnapshot, st
 		snapshot.Capacity.AvailableSeats,
 		snapshot.Capacity.OccupiedSeats,
 		snapshot.Capacity.PendingPaymentSeats)
+	fmt.Printf("Financial: TotalPaid=%.2f TotalPending=%.2f\n",
+		snapshot.Capacity.TotalAmountPaid,
+		snapshot.Capacity.TotalAmountPending)
 	fmt.Printf("Summary: TotalTickets=%d PaidTickets=%d PendingPayments=%d\n",
 		snapshot.Summary.TotalTickets,
 		snapshot.Summary.PaidTickets,
 		snapshot.Summary.PendingPayments)
 	fmt.Printf("Locations: %d\n", len(snapshot.Locations))
 	for _, loc := range snapshot.Locations {
-		fmt.Printf("  [%s] %s: Pickup=%d Dropoff=%d Pending=%d AvailableFromHere=%d\n",
+		fmt.Printf("  [%s] %s: Pickup=%d Dropoff=%d Pending=%d AvailableFromHere=%d | Paid=%.2f Pending=%.2f\n",
 			loc.Type, loc.LocationID, loc.Seats.Pickup, loc.Seats.Dropoff,
-			loc.Seats.PendingPayment, loc.Seats.AvailableFromHere)
+			loc.Seats.PendingPayment, loc.Seats.AvailableFromHere,
+			loc.Seats.TotalAmountPaid, loc.Seats.TotalAmountPending)
 	}
 	fmt.Printf("===============================================\n\n")
 }

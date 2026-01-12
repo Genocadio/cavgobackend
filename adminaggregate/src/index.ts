@@ -69,6 +69,13 @@ export async function main(): Promise<void> {
 
   // 2. Setup RabbitMQ subscriptions
   try {
+    // Load persisted snapshots from DB into memory before handling live snapshot updates
+    try {
+      await db.snapshotRepository.loadAllSnapshots();
+      console.log("Loaded persisted trip snapshots into memory");
+    } catch (err) {
+      console.error("Failed to load persisted snapshots:", err);
+    }
     await rabbitmq.connectRabbitMQ();
     await rabbitmq.setupSubscriptions({
       onVehicleEvent: eventHandlers.handleVehicleEvent,

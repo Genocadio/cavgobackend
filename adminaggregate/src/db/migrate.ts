@@ -178,6 +178,7 @@ export async function migrate(): Promise<void> {
         id TEXT PRIMARY KEY,
         trip_id TEXT NOT NULL REFERENCES trips(id),
         location_id TEXT NOT NULL REFERENCES trip_locations(id),
+        "order" INTEGER,
         index INTEGER NOT NULL,
         fare NUMERIC(12, 2) NOT NULL,
         remaining_distance DOUBLE PRECISION,
@@ -269,6 +270,16 @@ export async function migrate(): Promise<void> {
       );
     `);
 
+    // Create trip_snapshots table to persist booking snapshots between restarts
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS trip_snapshots (
+        trip_id TEXT PRIMARY KEY,
+        snapshot JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    `);
+
     // Alter car_locations table to make bearing and accuracy nullable (for existing tables)
     // This handles cases where the table already exists with NOT NULL constraints
     await client.query(`
@@ -292,6 +303,15 @@ export async function migrate(): Promise<void> {
           AND is_nullable = 'NO'
         ) THEN
           ALTER TABLE car_locations ALTER COLUMN accuracy DROP NOT NULL;
+        END IF;
+        
+        -- Add order column to trip_destinations if it doesn't exist
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'trip_destinations' 
+          AND column_name = 'order'
+        ) THEN
+          ALTER TABLE trip_destinations ADD COLUMN "order" INTEGER;
         END IF;
       END $$;
     `);

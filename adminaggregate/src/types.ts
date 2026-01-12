@@ -67,10 +67,12 @@ export interface TripLocation extends LatLang {
 }
 
 export interface  Destination extends TripLocation {
+    order?: number | null; // Original order from incoming waypoint (for validation/debugging)
     index: number;
     fare: number;
     remainingDistance: number | null;
-    isPassede: boolean;
+  isPassede: boolean;
+  isPassed?: boolean; // Prefer isPassed; keep isPassede for backward compatibility
     passedTime: number | null;
 }
 
@@ -554,6 +556,9 @@ export interface TripServiceWaypoint {
   remaining_time: number;
   is_passed: boolean;
   passed_timestamp: number | null;
+  // Some Trip Service events include a nested `location` object with fuller details
+  // (latitude/longitude, custom_name, google_place_name, etc.). Make it optional.
+  location?: RemoteLocation | null;
 }
 
 export interface TripServiceTrip {
@@ -586,6 +591,8 @@ export interface SnapshotSeats {
   dropoff: number;
   pendingPayment: number;
   availableFromHere: number;
+  totalAmountPaid: number;
+  totalAmountPending: number;
 }
 
 export interface SnapshotLocation {
@@ -593,6 +600,7 @@ export interface SnapshotLocation {
   type: "ORIGIN" | "WAYPOINT" | "DESTINATION";
   order: number;
   status: "UPCOMING" | "CURRENT" | "PASSED";
+  addres: string;
   seats: SnapshotSeats;
 }
 
@@ -601,6 +609,8 @@ export interface SnapshotCapacity {
   availableSeats: number;
   occupiedSeats: number;
   pendingPaymentSeats: number;
+  totalAmountPaid: number;
+  totalAmountPending: number;
 }
 
 export interface SnapshotSummary {

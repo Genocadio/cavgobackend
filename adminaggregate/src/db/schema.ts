@@ -127,6 +127,7 @@ export const tripDestinations = pgTable("trip_destinations", {
   id: text("id").primaryKey(),
   tripId: text("trip_id").notNull().references(() => trips.id),
   locationId: text("location_id").notNull().references(() => tripLocations.id),
+  order: integer("order"), // Original order from incoming event (for waypoints only, null for origin/destination)
   index: integer("index").notNull(),
   fare: numeric("fare", { precision: 12, scale: 2 }).notNull(),
   remainingDistance: doublePrecision("remaining_distance"),

@@ -1,4 +1,63 @@
 import type { TripSnapshot, SnapshotCapacity, SnapshotLocation, SnapshotSummary, Trip } from "../types";
+import * as tripRepository from "./trips";
+import { pgPool } from "../db/client";
+
+// Ensure newly added financial totals always exist to avoid undefined values on older snapshots
+// Also ensure addresses are always populated to satisfy non-nullable GraphQL schema
+// Falls back to trip location data if address is missing from snapshot
+async function normalizeSnapshot(snapshot: TripSnapshot, trip?: Trip | null): Promise<TripSnapshot> {
+  const capacity: SnapshotCapacity = {
+    ...snapshot.capacity,
+    totalAmountPaid: snapshot.capacity.totalAmountPaid ?? 0,
+    totalAmountPending: snapshot.capacity.totalAmountPending ?? 0,
+  };
+
+  // If any location is missing address, fetch the trip to get addresses
+  const needsTripData =
+    !trip &&
+    (snapshot.locations || []).some((loc) => !loc.addres);
+
+  if (needsTripData) {
+    const fetchedTrip = await tripRepository.getTripById(snapshot.tripId);
+    if (fetchedTrip) {
+      trip = fetchedTrip;
+    }
+  }
+
+  const locations: SnapshotLocation[] = (snapshot.locations || []).map((location) => {
+    let address = location.addres || "";
+
+    // If address is still missing, try to find it from trip data
+    if (!address && trip) {
+      if (location.order === 0) {
+        // Origin
+        address = trip.origin?.addres || "";
+      } else {
+        // Destination or waypoint - find by locationId
+        const destination = trip.destinations?.find((d) => String(d.id) === String(location.locationId));
+        if (destination) {
+          address = destination.addres || "";
+        }
+      }
+    }
+
+    return {
+      ...location,
+      addres: address,
+      seats: {
+        ...location.seats,
+        totalAmountPaid: location.seats.totalAmountPaid ?? 0,
+        totalAmountPending: location.seats.totalAmountPending ?? 0,
+      },
+    };
+  });
+
+  return {
+    ...snapshot,
+    capacity,
+    locations,
+  };
+}
 
 /**
  * In-memory storage for trip snapshots
@@ -20,6 +79,8 @@ export async function createInitialSnapshot(trip: Trip, carCapacity: number): Pr
     availableSeats: carCapacity,
     occupiedSeats: 0,
     pendingPaymentSeats: 0,
+    totalAmountPaid: 0,
+    totalAmountPending: 0,
   };
 
   // Initialize locations from trip destinations and origin
@@ -28,6 +89,7 @@ export async function createInitialSnapshot(trip: Trip, carCapacity: number): Pr
   // Add origin as first location
   locations.push({
     locationId: trip.origin.id,
+    addres: trip.origin.addres || "",
     type: "ORIGIN",
     order: 0,
     status: "UPCOMING",
@@ -36,6 +98,8 @@ export async function createInitialSnapshot(trip: Trip, carCapacity: number): Pr
       dropoff: 0,
       pendingPayment: 0,
       availableFromHere: carCapacity,
+      totalAmountPaid: 0,
+      totalAmountPending: 0,
     },
   });
 
@@ -44,6 +108,7 @@ export async function createInitialSnapshot(trip: Trip, carCapacity: number): Pr
     const locationType = index === trip.destinations.length - 1 ? "DESTINATION" : "WAYPOINT";
     locations.push({
       locationId: dest.id,
+      addres: dest.addres || "",
       type: locationType,
       order: index + 1,
       status: "UPCOMING",
@@ -52,6 +117,8 @@ export async function createInitialSnapshot(trip: Trip, carCapacity: number): Pr
         dropoff: 0,
         pendingPayment: 0,
         availableFromHere: carCapacity,
+        totalAmountPaid: 0,
+        totalAmountPending: 0,
       },
     });
   });
@@ -85,7 +152,37 @@ export async function createInitialSnapshot(trip: Trip, carCapacity: number): Pr
  * @param snapshot The snapshot to store
  */
 export async function upsertSnapshot(snapshot: TripSnapshot): Promise<void> {
-  snapshotStore.set(snapshot.tripId, snapshot);
+  // Preserve existing addresses when incoming snapshot omits them.
+  const key = String(snapshot.tripId);
+  const existing = snapshotStore.get(key) || null;
+
+  const mergedLocations = (snapshot.locations || []).map((loc) => {
+    const existingLoc = existing?.locations?.find((l) => String(l.locationId) === String(loc.locationId));
+    return {
+      ...loc,
+      addres: loc.addres || existingLoc?.addres || "",
+    };
+  });
+
+  const mergedSnapshot: TripSnapshot = {
+    ...snapshot,
+    locations: mergedLocations,
+  };
+
+  const normalized = await normalizeSnapshot(mergedSnapshot);
+
+  // Persist to DB so snapshots survive restarts
+  try {
+    await pgPool.query(
+      `INSERT INTO trip_snapshots (trip_id, snapshot, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (trip_id) DO UPDATE SET snapshot = EXCLUDED.snapshot, updated_at = NOW()`,
+      [key, JSON.stringify(normalized)]
+    );
+  } catch (err) {
+    console.error("Failed to persist snapshot to DB:", err);
+  }
+
+  snapshotStore.set(key, normalized);
 }
 
 /**
@@ -94,7 +191,8 @@ export async function upsertSnapshot(snapshot: TripSnapshot): Promise<void> {
  * @returns The snapshot or null if not found
  */
 export async function getSnapshot(tripId: string): Promise<TripSnapshot | null> {
-  return snapshotStore.get(tripId) || null;
+  const snapshot = snapshotStore.get(String(tripId));
+  return snapshot ? await normalizeSnapshot(snapshot) : null;
 }
 
 /**
@@ -102,7 +200,7 @@ export async function getSnapshot(tripId: string): Promise<TripSnapshot | null> 
  * @returns Array of all snapshots
  */
 export async function getAllSnapshots(): Promise<TripSnapshot[]> {
-  return Array.from(snapshotStore.values());
+  return Promise.all(Array.from(snapshotStore.values()).map((snap) => normalizeSnapshot(snap)));
 }
 
 /**
@@ -110,7 +208,7 @@ export async function getAllSnapshots(): Promise<TripSnapshot[]> {
  * @param tripId The trip ID
  */
 export async function deleteSnapshot(tripId: string): Promise<void> {
-  snapshotStore.delete(tripId);
+  snapshotStore.delete(String(tripId));
 }
 
 /**
@@ -119,7 +217,29 @@ export async function deleteSnapshot(tripId: string): Promise<void> {
  * @returns true if snapshot exists
  */
 export async function snapshotExists(tripId: string): Promise<boolean> {
-  return snapshotStore.has(tripId);
+  return snapshotStore.has(String(tripId));
+}
+
+/**
+ * Load all snapshots from the database into the in-memory store.
+ * Call this once at startup after migrations.
+ */
+export async function loadAllSnapshots(): Promise<void> {
+  try {
+    const res = await pgPool.query(`SELECT trip_id, snapshot FROM trip_snapshots`);
+    for (const row of res.rows) {
+      try {
+        const snap: TripSnapshot = row.snapshot as TripSnapshot;
+        const key = String(row.trip_id);
+        const normalized = await normalizeSnapshot(snap);
+        snapshotStore.set(key, normalized);
+      } catch (err) {
+        console.error("Failed to load snapshot row:", err, row.trip_id);
+      }
+    }
+  } catch (err) {
+    console.error("Failed to load snapshots from DB:", err);
+  }
 }
 
 /**

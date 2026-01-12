@@ -29,8 +29,7 @@ public class CorsConfig implements WebMvcConfigurer {
                             "http://127.0.0.1:5174",
                             "http://127.0.0.1:8080",
                             "http://127.0.0.1:8081",
-                            "https://api.gocavgo.com",
-                            "http://api.gocavgo.com"
+                            "https://admin.gocavgo.com"
 
                     )
                     .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")

@@ -201,6 +201,40 @@ export async function handleTripEvent(message: Buffer): Promise<void> {
   
   // Map remote trip to local trip
   const localTrip = await mapRemoteTripToLocalTrip(remoteTrip, vehicleId, driverId);
+
+  // Guard: if mapping produced zero destinations (shouldn't happen for valid trips),
+  // log full context for debugging: remote payload, mapping result, and reasons.
+  if (!localTrip.destinations || localTrip.destinations.length === 0) {
+    console.warn(JSON.stringify({
+      level: "WARN",
+      event: "TRIP_WITH_NO_DESTINATIONS",
+      tripId: localTrip.id,
+      reason: "mapper_returned_no_destinations",
+      remoteSummary: {
+        id: remoteTrip.id,
+        status: remoteTrip.status,
+        routePresent: !!remoteTrip.route,
+        routeHasDestination: !!(remoteTrip.route && remoteTrip.route.destination),
+        waypointsCount: remoteTrip.waypoints?.length ?? 0,
+        waypoints: (remoteTrip.waypoints || []).map(wp => ({
+          id: wp.id,
+          locationId: wp.location_id,
+          hasLocation: !!wp.location,
+          order: wp.order,
+        })),
+      },
+      mapped: {
+        id: localTrip.id,
+        vehicleId,
+        driverId,
+        status: localTrip.status,
+        destinationsCount: localTrip.destinations.length,
+      },
+      note: "Mapper may have skipped waypoints or route destination due to missing location data. See mapper logs for WAYPOINT_MAPPING_FAILED / ROUTE_DESTINATION_MAPPING_FAILED entries.",
+      rawRemote: remoteTrip,
+      rawMapped: localTrip,
+    }));
+  }
   
   // LOG: What's processed (after mapping)
   console.log(JSON.stringify({
@@ -238,6 +272,29 @@ export async function handleTripEvent(message: Buffer): Promise<void> {
   const wasCompleted = existing?.status === "completed";
   const wasInProgress = existing?.status === "in_progress";
   
+  // Reconcile totalDistance: preserve existing if mapped is 0, but allow
+  // updating when the reported remaining distance to the final destination
+  // is greater than known totals.
+  const existingTotal = existing?.totalDistance ?? 0;
+  const mappedTotal = typeof localTrip.totalDistance === 'number' && isFinite(localTrip.totalDistance) ? localTrip.totalDistance : 0;
+  let reconciledTotal = mappedTotal;
+  const lastDest = localTrip.destinations && localTrip.destinations.length > 0 ? localTrip.destinations[localTrip.destinations.length - 1] : null;
+  const lastRemaining = lastDest && typeof lastDest.remainingDistance === 'number' && isFinite(lastDest.remainingDistance) ? lastDest.remainingDistance : null;
+
+  if (lastRemaining != null) {
+    if (lastRemaining > Math.max(existingTotal, mappedTotal)) {
+      reconciledTotal = lastRemaining;
+    } else if (mappedTotal === 0 && existingTotal > 0) {
+      reconciledTotal = existingTotal;
+    } else {
+      reconciledTotal = mappedTotal;
+    }
+  } else {
+    if (mappedTotal === 0 && existingTotal > 0) reconciledTotal = existingTotal;
+  }
+
+  localTrip.totalDistance = reconciledTotal;
+
   if (existing) {
     await tripRepository.updateTrip(localTrip);
   } else {
@@ -357,15 +414,11 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
     statusChanged = true;
   }
 
-  // Update waypoint progresses: match by waypointId to destination id
+  // Update waypoint progresses: match by waypointIndex to destination index
   if (event.trip.waypointProgresses && event.trip.waypointProgresses.length > 0) {
     for (const wp of event.trip.waypointProgresses) {
-      // Find destination by matching waypointId with destination.id
-      const destination = trip.destinations.find(d => {
-        // Remove trip prefix from destination id if present
-        const destId = d.id.replace(`${tripId}-`, '');
-        return destId === wp.waypointId || d.id === wp.waypointId;
-      });
+      // Match by index: waypointIndex is 1-based, destination.index is 0-based
+      const destination = trip.destinations.find(d => d.index === wp.waypointIndex - 1);
       
       if (destination) {
         // Update remaining distance and time
@@ -381,8 +434,10 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
           level: "DEBUG",
           event: "WAYPOINT_PROGRESS_UPDATED",
           tripId: tripId,
+          waypointIndex: wp.waypointIndex,
           waypointId: wp.waypointId,
           destinationId: destination.id,
+          destinationIndex: destination.index,
           remainingDistance: wp.remainingDistance,
           remainingTime: wp.remainingTime,
           state: wp.state,
@@ -397,7 +452,7 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
           waypointIndex: wp.waypointIndex,
           availableDestinations: trip.destinations.map(d => ({
             id: d.id,
-            strippedId: d.id.replace(`${tripId}-`, ''),
+            index: d.index,
           })),
         }));
       }
@@ -418,6 +473,13 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
     
     // Update car's current location
     await carRepository.updateCarLocation(event.trip.carId, currentLocation);
+  }
+
+  // Reconcile totalDistance using final destination remainingDistance
+  const lastNavDest = trip.destinations && trip.destinations.length > 0 ? trip.destinations[trip.destinations.length - 1] : null;
+  const lastNavRemaining = lastNavDest && typeof lastNavDest.remainingDistance === 'number' && isFinite(lastNavDest.remainingDistance) ? lastNavDest.remainingDistance : null;
+  if (lastNavRemaining != null && lastNavRemaining > (trip.totalDistance ?? 0)) {
+    trip.totalDistance = lastNavRemaining;
   }
 
   // Save the updated trip
@@ -540,9 +602,54 @@ export async function handleTripServiceEvent(message: Buffer): Promise<void> {
   try {
     // Map trip service data to local trip
     const localTrip = await mapTripServiceTripToLocalTrip(event.data);
+      // Guard: log if mapped trip has zero destinations
+      if (!localTrip.destinations || localTrip.destinations.length === 0) {
+        console.warn(JSON.stringify({
+          level: "WARN",
+          event: "TRIP_SERVICE_TRIP_WITH_NO_DESTINATIONS",
+          tripId: localTrip.id,
+          reason: "mapper_returned_no_destinations",
+          serviceEvent: {
+            eventType: event.event,
+            raw: event.data,
+            waypointsCount: event.data.waypoints?.length ?? 0,
+            waypoints: (event.data.waypoints || []).map(wp => ({
+              id: wp.id,
+              locationId: wp.location_id,
+              hasLocation: !!wp.location,
+              order: wp.order,
+            })),
+            routeHasDestination: !!(event.data.route && event.data.route.destination),
+          },
+          mapped: localTrip,
+          note: "Trip Service events are expected to include complete waypoint/location info; mapper logs may show why items were skipped.",
+        }));
+      }
     
     // Check if trip exists
     const existingTrip = await tripRepository.getTripById(localTrip.id);
+    // Reconcile totalDistance: preserve existing if mapped is 0, but allow
+    // updating when the reported remaining distance to the final destination
+    // is greater than known totals.
+    const existingTotalSvc = existingTrip?.totalDistance ?? 0;
+    const mappedTotalSvc = typeof localTrip.totalDistance === 'number' && isFinite(localTrip.totalDistance) ? localTrip.totalDistance : 0;
+    let reconciledSvcTotal = mappedTotalSvc;
+    const lastSvcDest = localTrip.destinations && localTrip.destinations.length > 0 ? localTrip.destinations[localTrip.destinations.length - 1] : null;
+    const lastSvcRemaining = lastSvcDest && typeof lastSvcDest.remainingDistance === 'number' && isFinite(lastSvcDest.remainingDistance) ? lastSvcDest.remainingDistance : null;
+
+    if (lastSvcRemaining != null) {
+      if (lastSvcRemaining > Math.max(existingTotalSvc, mappedTotalSvc)) {
+        reconciledSvcTotal = lastSvcRemaining;
+      } else if (mappedTotalSvc === 0 && existingTotalSvc > 0) {
+        reconciledSvcTotal = existingTotalSvc;
+      } else {
+        reconciledSvcTotal = mappedTotalSvc;
+      }
+    } else {
+      if (mappedTotalSvc === 0 && existingTotalSvc > 0) reconciledSvcTotal = existingTotalSvc;
+    }
+
+    localTrip.totalDistance = reconciledSvcTotal;
     
     // Handle different event types
     if (event.event === "created") {
@@ -664,19 +771,22 @@ export async function handleTripSnapshotUpdate(message: Buffer): Promise<void> {
     // Store or update the snapshot
     await snapshotRepository.upsertSnapshot(snapshot);
 
-    // Publish update to subscribers
+    // Retrieve normalized (saved) snapshot to ensure addresses and totals are populated
+    const savedSnapshot = await snapshotRepository.getSnapshot(tripId);
+
+    // Publish update to subscribers with the saved/normalized snapshot
     const trigger = TRIGGERS.TRIP_SNAPSHOT_UPDATED(tripId);
-    pubsub.publish(trigger, { tripSnapshot: snapshot });
+    pubsub.publish(trigger, { tripSnapshot: savedSnapshot ?? snapshot });
 
     console.log(JSON.stringify({
       level: "INFO",
       event: "TRIP_SNAPSHOT_UPDATED",
       tripId,
       isFirstSnapshot,
-      tripStatus: snapshot.tripStatus,
-      availableSeats: snapshot.capacity.availableSeats,
-      totalTickets: snapshot.summary.totalTickets,
-      lastUpdated: snapshot.lastUpdated,
+      tripStatus: (savedSnapshot ?? snapshot).tripStatus,
+      availableSeats: (savedSnapshot ?? snapshot).capacity.availableSeats,
+      totalTickets: (savedSnapshot ?? snapshot).summary.totalTickets,
+      lastUpdated: (savedSnapshot ?? snapshot).lastUpdated,
     }));
   } catch (error) {
     console.error(JSON.stringify({

@@ -1,6 +1,6 @@
 import { gql } from "graphql-tag";
 import * as db from "../db";
-import type { Car, Driver, Trip } from "../types";
+import type { Car, Driver, Trip, Destination } from "../types";
 import { pubsub, TRIGGERS } from "../services/pubsub";
 
 const typeDefs = gql`
@@ -59,7 +59,7 @@ const typeDefs = gql`
     email: String!
     status: DriverStatus!
     currentCar: Car
-    latestTrip: Trip
+    activeTrip: Trip
     companyId: ID!
   }
 
@@ -72,7 +72,7 @@ const typeDefs = gql`
     isOnline: Boolean!
     currentLocation: CurrentLocation
     currentDriver: Driver
-    latestTrip: Trip
+    activeTrip: Trip
     companyId: ID!
   }
 
@@ -103,7 +103,7 @@ const typeDefs = gql`
     index: Int!
     fare: Float!
     remainingDistance: Float
-    isPassede: Boolean!
+    isPassed: Boolean!
     passedTime: Float
   }
 
@@ -219,10 +219,13 @@ const typeDefs = gql`
     dropoff: Int!
     pendingPayment: Int!
     availableFromHere: Int!
+    totalAmountPaid: Float!
+    totalAmountPending: Float!
   }
 
   type SnapshotLocation {
     locationId: ID!
+    addres: String!
     type: String!
     order: Int!
     status: String!
@@ -234,6 +237,8 @@ const typeDefs = gql`
     availableSeats: Int!
     occupiedSeats: Int!
     pendingPaymentSeats: Int!
+    totalAmountPaid: Float!
+    totalAmountPending: Float!
   }
 
   type SnapshotSummary {
@@ -280,12 +285,12 @@ const typeDefs = gql`
 
 type DriverResolver = Driver & {
   currentCar: () => Promise<Car | null>;
-  latestTrip: () => Promise<Trip | null>;
+  activeTrip: () => Promise<Trip | null>;
 };
 
 type CarResolver = Car & {
   currentDriver: () => Promise<Driver | null>;
-  latestTrip: () => Promise<Trip | null>;
+  activeTrip: () => Promise<Trip | null>;
 };
 
 function wrapDriver(driver: Driver): DriverResolver {
@@ -295,8 +300,8 @@ function wrapDriver(driver: Driver): DriverResolver {
       const assignment = await db.assignmentRepository.getDriverCarAssignmentByDriverId(driver.id);
       return assignment ? wrapCar(assignment.car) : null;
     },
-    latestTrip: async () => {
-      const trip = await db.tripRepository.getLatestTripByDriverId(driver.id);
+    activeTrip: async () => {
+      const trip = await db.tripRepository.getActiveTripByDriverId(driver.id);
       return trip ? wrapTrip(trip) : null;
     },
   };
@@ -309,8 +314,8 @@ function wrapCar(car: Car): CarResolver {
       const assignment = await db.assignmentRepository.getDriverCarAssignmentByCarId(car.id);
       return assignment && assignment.driver ? wrapDriver(assignment.driver) : null;
     },
-    latestTrip: async () => {
-      const trip = await db.tripRepository.getLatestTripByCarId(car.id);
+    activeTrip: async () => {
+      const trip = await db.tripRepository.getActiveTripByCarId(car.id);
       return trip ? wrapTrip(trip) : null;
     },
   };
@@ -327,6 +332,10 @@ function wrapTrip(trip: Trip): Trip {
 }
 
 const resolvers = {
+  Destination: {
+    // Backwards compatibility: map legacy isPassede field to the new isPassed field
+    isPassed: (destination: Destination) => destination.isPassed ?? destination.isPassede ?? false,
+  },
   Driver: {
     name: (driver: Driver) => {
       const firstName = driver.firstName || "";

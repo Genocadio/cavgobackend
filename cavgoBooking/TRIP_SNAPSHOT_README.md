@@ -28,7 +28,9 @@ The snapshot tracks seat availability at three levels:
   "totalSeats": 30,
   "availableSeats": 8,
   "occupiedSeats": 18,
-  "pendingPaymentSeats": 4
+  "pendingPaymentSeats": 4,
+  "totalAmountPaid": 1800.00,
+  "totalAmountPending": 400.00
 }
 ```
 
@@ -43,7 +45,9 @@ The snapshot tracks seat availability at three levels:
     "pickup": 6,
     "dropoff": 4,
     "pendingPayment": 2,
-    "availableFromHere": 4
+    "availableFromHere": 4,
+    "totalAmountPaid": 600.00,
+    "totalAmountPending": 200.00
   }
 }
 ```
@@ -66,23 +70,29 @@ The snapshot updates automatically at three critical points:
 ```
 pendingPaymentSeats +N
 availableSeats -N
+totalAmountPending +amount (trip level)
 location.pendingPayment +N (for both pickup and dropoff)
+location.totalAmountPending +amount (for both pickup and dropoff)
 ```
 
 #### B. Payment Confirmed
 ```
 pendingPaymentSeats -N
 occupiedSeats +N
+totalAmountPending -amount, totalAmountPaid +amount (trip level)
 location.pendingPayment -N
 location.pickup +N (at pickup location)
 location.dropoff +N (at dropoff location)
+location.totalAmountPending -amount, totalAmountPaid +amount (at both locations)
 ```
 
 #### C. Booking Expired/Cancelled
 ```
 pendingPaymentSeats -N
 availableSeats +N
+totalAmountPending -amount (trip level)
 location.pendingPayment -N
+location.totalAmountPending -amount (at both pickup and dropoff)
 ```
 
 ### 4. RabbitMQ Integration
@@ -324,6 +334,115 @@ This ensures core booking functionality remains available even if snapshot track
 - Decrements pending payment counters
 - Maintains integrity of occupied seat counts
 
+## Booking Price Calculation
+
+The system uses intelligent price calculation based on pickup and dropoff locations, ensuring accurate pricing for all route segments.
+
+### Pricing Structure
+
+**Trip Route Example:** A → B (waypoint, $50) → C (waypoint, $80) → D (destination, $100)
+
+- **Origin (A):** Free pickup (price = $0)
+- **Waypoint B:** Cumulative price from origin = $50
+- **Waypoint C:** Cumulative price from origin = $80
+- **Destination (D):** Full trip price = $100
+
+### Calculation Rules
+
+The price per ticket is calculated based on the segment traveled:
+
+#### 1. Origin to Waypoint
+**Example:** A → B with 5 tickets
+```
+Price = waypoint_B.price × tickets
+      = $50 × 5
+      = $250
+```
+
+#### 2. Origin to Destination
+**Example:** A → D with 5 tickets
+```
+Price = trip.Route.RoutePrice × tickets
+      = $100 × 5
+      = $500
+```
+
+#### 3. Waypoint to Waypoint
+**Example:** B → C with 5 tickets
+```
+Price = (waypoint_C.price - waypoint_B.price) × tickets
+      = ($80 - $50) × 5
+      = $30 × 5
+      = $150
+```
+
+#### 4. Waypoint to Destination
+**Example:** C → D with 5 tickets
+```
+Price = (trip.Route.RoutePrice - waypoint_C.price) × tickets
+      = ($100 - $80) × 5
+      = $20 × 5
+      = $100
+```
+
+### Implementation
+
+The `BookingService.CreateBooking()` method implements this logic:
+
+```go
+// Determine if locations are origin/destination
+isPickupOrigin := (pickupLocationID == originID)
+isDropoffDestination := (dropoffLocationID == destinationID)
+
+// Calculate price based on segment type
+if isPickupOrigin && isDropoffDestination {
+    // A → D: Use full route price
+    pricePerTicket = trip.Route.RoutePrice
+} else if isPickupOrigin && !isDropoffDestination {
+    // A → B or A → C: Use waypoint price
+    pricePerTicket = dropoffWaypointPrice
+} else if !isPickupOrigin && isDropoffDestination {
+    // B → D or C → D: Destination price - pickup waypoint price
+    pricePerTicket = trip.Route.RoutePrice - pickupWaypointPrice
+} else {
+    // B → C: Dropoff waypoint price - pickup waypoint price
+    pricePerTicket = dropoffWaypointPrice - pickupWaypointPrice
+}
+
+totalAmount = pricePerTicket × numberOfTickets
+```
+
+### Financial Tracking in Snapshots
+
+The snapshot system tracks financial data at two levels:
+
+**Trip-Level Financial Tracking:**
+- `totalAmountPaid`: Sum of all confirmed payment amounts
+- `totalAmountPending`: Sum of all pending payment amounts
+
+**Location-Level Financial Tracking:**
+- Each location tracks amounts for bookings involving that location
+- Both pickup and dropoff locations accumulate amounts
+- Amounts move from pending to paid when payment is confirmed
+
+**Example:** A booking from B → C for $150:
+- Location B: `totalAmountPending += $150`
+- Location C: `totalAmountPending += $150`
+- Trip: `totalAmountPending += $150`
+
+When payment is confirmed:
+- Location B: `totalAmountPending -= $150`, `totalAmountPaid += $150`
+- Location C: `totalAmountPending -= $150`, `totalAmountPaid += $150`
+- Trip: `totalAmountPending -= $150`, `totalAmountPaid += $150`
+
+### Validation
+
+The system validates:
+1. **Location Order:** Pickup must be before dropoff in route sequence
+2. **Seat Availability:** Sufficient seats must be available
+3. **Location Bookability:** Based on trip status (SCHEDULED/IN_PROGRESS)
+4. **Price Calculation:** Always results in non-negative amount
+
 ## Future Enhancements
 
 1. **Historical Snapshots** - Version snapshots for audit trail
@@ -331,3 +450,4 @@ This ensures core booking functionality remains available even if snapshot track
 3. **Real-time Updates** - WebSocket push to frontend
 4. **Capacity Alerts** - Notify when trip nearing full
 5. **Analytics** - Track booking patterns per location
+6. **Revenue Analytics** - Real-time revenue tracking per location and trip

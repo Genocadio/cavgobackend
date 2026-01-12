@@ -34,7 +34,7 @@ func StartBookingMonitor(repo repository.BookingRepository, publisher *RabbitMQP
 
 					// Update snapshot after booking expired/cancelled
 					fmt.Printf("[BookingMonitor] Updating snapshot for expired booking: bookingId=%s\n", booking.ID)
-					if err := snapshotService.OnBookingExpired(ctx, booking.TripID, booking.PickupLocationID, booking.DropoffLocationID, booking.NumberOfTickets); err != nil {
+					if err := snapshotService.OnBookingExpired(ctx, booking.TripID, booking.PickupLocationID, booking.DropoffLocationID, booking.NumberOfTickets, booking.TotalAmount); err != nil {
 						fmt.Printf("[BookingMonitor] ERROR: Failed to update snapshot: %v\n", err)
 						// Don't fail, just log the error
 					} else {

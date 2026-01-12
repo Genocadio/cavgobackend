@@ -117,8 +117,28 @@ export async function setupSubscriptions(handlers: MessageHandlers): Promise<voi
   await ch.bindQueue(snapshotQueue.queue, snapshotExchange, "");
 
   // Consume messages
+  function logRawMessage(msg: amqp.ConsumeMessage) {
+    try {
+      const meta = {
+        exchange: msg.fields.exchange,
+        routingKey: msg.fields.routingKey,
+        deliveryTag: msg.fields.deliveryTag,
+        properties: msg.properties,
+      };
+      console.log(JSON.stringify({
+        level: "DEBUG",
+        event: "RABBITMQ_MESSAGE_RECEIVED",
+        meta,
+        content: msg.content.toString(),
+      }));
+    } catch (err) {
+      console.error("Failed to log raw RabbitMQ message:", err);
+    }
+  }
+
   await ch.consume(locationQueue.queue, async (msg) => {
     if (msg) {
+      logRawMessage(msg);
       try {
         await handlers.onLocationUpdate(msg.content);
         ch.ack(msg);
@@ -131,6 +151,7 @@ export async function setupSubscriptions(handlers: MessageHandlers): Promise<voi
 
   await ch.consume(vehicleEventsQueue.queue, async (msg) => {
     if (msg) {
+      logRawMessage(msg);
       try {
         await handlers.onVehicleEvent(msg.content);
         ch.ack(msg);
@@ -143,6 +164,7 @@ export async function setupSubscriptions(handlers: MessageHandlers): Promise<voi
 
   await ch.consume(driverEventsQueue.queue, async (msg) => {
     if (msg) {
+      logRawMessage(msg);
       try {
         await handlers.onDriverEvent(msg.content);
         ch.ack(msg);
@@ -155,6 +177,7 @@ export async function setupSubscriptions(handlers: MessageHandlers): Promise<voi
 
   await ch.consume(tripEventsQueue.queue, async (msg) => {
     if (msg) {
+      logRawMessage(msg);
       try {
         await handlers.onTripEvent(msg.content);
         ch.ack(msg);
@@ -168,6 +191,7 @@ export async function setupSubscriptions(handlers: MessageHandlers): Promise<voi
   // Consume Naviga trip updates
   await ch.consume(navigaTripUpdatesQueue.queue, async (msg) => {
     if (msg) {
+      logRawMessage(msg);
       try {
         await handlers.onNavigaTripUpdate(msg.content);
         ch.ack(msg);
@@ -181,6 +205,7 @@ export async function setupSubscriptions(handlers: MessageHandlers): Promise<voi
   // Consume Naviga location updates
   await ch.consume(navigaLocationUpdatesQueue.queue, async (msg) => {
     if (msg) {
+      logRawMessage(msg);
       try {
         await handlers.onNavigaLocationUpdate(msg.content);
         ch.ack(msg);
@@ -194,6 +219,7 @@ export async function setupSubscriptions(handlers: MessageHandlers): Promise<voi
   // Consume Trip Service events
   await ch.consume(tripServiceEventsQueue.queue, async (msg) => {
     if (msg) {
+      logRawMessage(msg);
       try {
         await handlers.onTripServiceEvent(msg.content);
         ch.ack(msg);
@@ -207,6 +233,7 @@ export async function setupSubscriptions(handlers: MessageHandlers): Promise<voi
   // Consume trip snapshot updates
   await ch.consume(snapshotQueue.queue, async (msg) => {
     if (msg) {
+      logRawMessage(msg);
       try {
         await handlers.onTripSnapshotUpdate(msg.content);
         ch.ack(msg);

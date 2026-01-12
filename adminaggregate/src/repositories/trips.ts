@@ -1,4 +1,4 @@
-import { and, eq, inArray, max, not, or } from "drizzle-orm";
+import { and, asc, eq, inArray, max, not, or, sql } from "drizzle-orm";
 import type { InferModel } from "drizzle-orm";
 import { db } from "../db/client";
 import {
@@ -35,16 +35,95 @@ async function fetchTripsForAssignments(assignmentIds: number[]) {
 }
 
 const destinationFromRow = (row: TripDestinationRow, location: TripLocation): Destination => ({
-  id: row.id,
+  // Stored trip destination id is stored as `${tripId}-${locationId}` in DB.
+  // For internal Trip model we strip the trip prefix so `destination.id` is the original location id.
+  id: row.id && row.id.startsWith(`${row.tripId}-`) ? row.id.replace(`${row.tripId}-`, '') : row.id,
   addres: location.addres,
   lat: location.lat,
   lng: location.lng,
+  order: row.order ?? null, // Preserve original order from event, or null if not set
   index: row.index,
   fare: Number(row.fare),
   remainingDistance: row.remainingDistance == null ? null : Number(row.remainingDistance),
   isPassede: row.isPassede,
   passedTime: row.passedTime == null ? null : Number(row.passedTime),
 });
+
+/**
+ * Detect if a trip has duplicate or non-sequential destination indices
+ * Returns true if indexing issues are found
+ */
+export async function hasDestinationIndexingIssues(tripId: string): Promise<boolean> {
+  try {
+    const destinations = await db
+      .select({ index: tripDestinations.index })
+      .from(tripDestinations)
+      .where(eq(tripDestinations.tripId, tripId))
+      .orderBy(asc(tripDestinations.index));
+    
+    if (destinations.length === 0) return false;
+    
+    const indices = destinations.map(d => d.index);
+    const uniqueIndices = new Set(indices);
+    
+    // Check for duplicates
+    if (uniqueIndices.size !== indices.length) return true;
+    
+    // Check for sequential order (0, 1, 2, ..., n)
+    for (let i = 0; i < indices.length; i++) {
+      if (indices[i] !== i) return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: "ERROR",
+      event: "DESTINATION_INDEXING_CHECK_FAILED",
+      tripId,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return false;
+  }
+}
+
+/**
+ * Fix destination indexing by reassigning sequential indices (0, 1, 2, ..., n)
+ * Preserves destination order by sorting by current index before reassigning
+ */
+export async function fixDestinationIndexing(tripId: string): Promise<void> {
+  try {
+    const destinations = await db
+      .select()
+      .from(tripDestinations)
+      .where(eq(tripDestinations.tripId, tripId))
+      .orderBy(asc(tripDestinations.index));
+    
+    // Update each destination with correct sequential index
+    for (let i = 0; i < destinations.length; i++) {
+      const dest = destinations[i];
+      if (dest) {
+        await db
+          .update(tripDestinations)
+          .set({ index: i })
+          .where(eq(tripDestinations.id, dest.id));
+      }
+    }
+    
+    console.log(JSON.stringify({
+      level: "INFO",
+      event: "DESTINATION_INDEXING_FIXED",
+      tripId,
+      destinationCount: destinations.length,
+    }));
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: "ERROR",
+      event: "DESTINATION_INDEXING_FIX_FAILED",
+      tripId,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
 
 export async function createTrip(trip: Trip): Promise<Trip> {
   console.log(JSON.stringify({
@@ -107,6 +186,39 @@ export async function createTrip(trip: Trip): Promise<Trip> {
     }),
   );
 
+  // Verify destination rows were persisted; reinsert any missing destination rows
+  try {
+    const dbRows = await db
+      .select({ id: tripDestinations.id })
+      .from(tripDestinations)
+      .where(eq(tripDestinations.tripId, trip.id));
+    const existingIds = dbRows.map(r => r.id);
+    const missing = savedDestinations.filter(id => !existingIds.includes(id));
+    if (missing.length > 0) {
+      console.warn(JSON.stringify({ level: "WARN", event: "MISSING_DESTINATIONS_AFTER_CREATE", tripId: trip.id, missing }));
+      for (const id of missing) {
+        // Recreate minimal destination row from in-memory trip.destinations
+        const parts = id.split("-");
+        const locationId = parts.slice(1).join("-");
+        const dest = trip.destinations.find(d => String(d.id) === locationId);
+        if (dest) {
+          await db.insert(tripDestinations).values({
+            id,
+            tripId: trip.id,
+            locationId: dest.id,
+            index: dest.index,
+            fare: dest.fare.toString(),
+            remainingDistance: dest.remainingDistance ?? null,
+            isPassede: dest.isPassede,
+            passedTime: dest.passedTime ?? null,
+          }).onConflictDoNothing();
+        }
+      }
+    }
+  } catch (err) {
+    console.error(JSON.stringify({ level: "ERROR", event: "DESTINATION_VERIFICATION_FAILED", tripId: trip.id, error: err instanceof Error ? err.message : String(err) }));
+  }
+
   console.log(JSON.stringify({
     level: "DEBUG",
     event: "TRIP_CREATED",
@@ -148,16 +260,26 @@ export async function updateTrip(trip: Trip): Promise<Trip> {
       driverCarAssignmentId: assignmentId,
     })
     .where(eq(trips.id, trip.id));
-
   if (trip.destinations.length > 0) {
-    await db
-      .delete(tripDestinations)
-      .where(
-        and(
-          eq(tripDestinations.tripId, trip.id),
-          not(inArray(tripDestinations.id, trip.destinations.map((d) => `${trip.id}-${d.id}`))),
-        ),
-      );
+    const keepIds = trip.destinations.map((d) => `${trip.id}-${d.id}`);
+    try {
+      const existing = await db.select({ id: tripDestinations.id }).from(tripDestinations).where(eq(tripDestinations.tripId, trip.id));
+      const existingIds = existing.map(r => r.id);
+      const toDelete = existingIds.filter(id => !keepIds.includes(id));
+      console.log(JSON.stringify({ level: "DEBUG", event: "DESTINATIONS_PRUNE", tripId: trip.id, keepIds, existingIds, toDelete }));
+      if (toDelete.length > 0) {
+        await db
+          .delete(tripDestinations)
+          .where(
+            and(
+              eq(tripDestinations.tripId, trip.id),
+              not(inArray(tripDestinations.id, keepIds)),
+            ),
+          );
+      }
+    } catch (err) {
+      console.error(JSON.stringify({ level: "ERROR", event: "DESTINATION_PRUNE_FAILED", tripId: trip.id, error: err instanceof Error ? err.message : String(err) }));
+    }
   } else {
     await db.delete(tripDestinations).where(eq(tripDestinations.tripId, trip.id));
   }
@@ -172,6 +294,7 @@ export async function updateTrip(trip: Trip): Promise<Trip> {
           id: destinationId,
           tripId: trip.id,
           locationId: destination.id,
+          order: destination.order ?? null, // Store original order from event
           index: destination.index,
           fare: destination.fare.toString(),
           remainingDistance: destination.remainingDistance ?? null,
@@ -181,6 +304,7 @@ export async function updateTrip(trip: Trip): Promise<Trip> {
         .onConflictDoUpdate({
           target: tripDestinations.id,
           set: {
+            order: destination.order ?? null,
             index: destination.index,
             fare: destination.fare.toString(),
             remainingDistance: destination.remainingDistance ?? null,
@@ -234,7 +358,10 @@ export async function getTripById(id: string): Promise<Trip | null> {
     .select()
     .from(tripDestinations)
     .where(eq(tripDestinations.tripId, id))
-    .orderBy(tripDestinations.index);
+    .orderBy(
+      // Order by index primarily (which is always set), treat NULL order as if it equals index
+      asc(tripDestinations.index)
+    );
 
   console.log(JSON.stringify({
     level: "DEBUG",
@@ -245,6 +372,7 @@ export async function getTripById(id: string): Promise<Trip | null> {
       id: row.id,
       tripId: row.tripId,
       locationId: row.locationId,
+      order: row.order,
       index: row.index,
     })),
   }));
@@ -417,6 +545,22 @@ export async function getLatestTripByCarId(carId: string): Promise<Trip | null> 
   return getTripById(latestRow.id);
 }
 
+export async function getActiveTripByCarId(carId: string): Promise<Trip | null> {
+  const assignmentIds = await getAssignmentIdsByCar(carId);
+  if (assignmentIds.length === 0) {
+    return null;
+  }
+
+  const rows = await fetchTripsForAssignments(assignmentIds);
+  // Find the first active trip (scheduled or in_progress)
+  const activeRow = rows.find(row => row.status === 'scheduled' || row.status === 'in_progress');
+  if (!activeRow) {
+    return null;
+  }
+
+  return getTripById(activeRow.id);
+}
+
 export async function getLatestTripByDriverId(driverId: string): Promise<Trip | null> {
   const assignmentIds = await getAssignmentIdsByDriver(driverId);
   if (assignmentIds.length === 0) {
@@ -430,6 +574,22 @@ export async function getLatestTripByDriverId(driverId: string): Promise<Trip | 
   }
 
   return getTripById(latestRow.id);
+}
+
+export async function getActiveTripByDriverId(driverId: string): Promise<Trip | null> {
+  const assignmentIds = await getAssignmentIdsByDriver(driverId);
+  if (assignmentIds.length === 0) {
+    return null;
+  }
+
+  const rows = await fetchTripsForAssignments(assignmentIds);
+  // Find the first active trip (scheduled or in_progress)
+  const activeRow = rows.find(row => row.status === 'scheduled' || row.status === 'in_progress');
+  if (!activeRow) {
+    return null;
+  }
+
+  return getTripById(activeRow.id);
 }
 
 export async function getTripsByCompanyId(companyId: string): Promise<Trip[]> {

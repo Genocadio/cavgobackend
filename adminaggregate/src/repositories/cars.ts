@@ -1,7 +1,7 @@
-import { count, eq } from "drizzle-orm";
+import { count, eq, sql, desc, asc } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 import { db } from "../db/client";
-import { cars } from "../db/schema";
+import { cars, driverCarAssignments, trips, tripMetrics } from "../db/schema";
 import type { Car, CurreLocation } from "../types";
 
 type CarRow = InferSelectModel<typeof cars>;
@@ -114,18 +114,100 @@ export async function getCarsByCompany(
   limit?: number,
   offset?: number
 ): Promise<{ items: Car[]; total: number; limit: number; offset: number }> {
-  const baseQuery = db.select().from(cars).where(eq(cars.companyId, companyId));
-  const limitedQuery = typeof limit === "number" ? baseQuery.limit(limit) : baseQuery;
-  const finalQuery = typeof offset === "number" ? limitedQuery.offset(offset) : limitedQuery;
+  // Get all cars for the company with their trip information
+  const carsWithTrips = await db
+    .select({
+      car: cars,
+      tripStatus: trips.status,
+      tripUpdatedAt: trips.updatedAt,
+      tripMetricsStartedAt: tripMetrics.startedAt,
+      tripMetricsCompletedAt: tripMetrics.completedAt,
+      tripMetricsUpdatedAt: tripMetrics.updatedAt,
+    })
+    .from(cars)
+    .leftJoin(driverCarAssignments, eq(cars.id, driverCarAssignments.carId))
+    .leftJoin(trips, eq(driverCarAssignments.id, trips.driverCarAssignmentId))
+    .leftJoin(tripMetrics, eq(trips.id, tripMetrics.tripId))
+    .where(eq(cars.companyId, companyId));
 
-  const [rows, totalResult] = await Promise.all([
-    finalQuery,
-    db.select({ count: count() }).from(cars).where(eq(cars.companyId, companyId)),
-  ]);
+  // Group by car ID and only keep active trips (scheduled or in_progress)
+  const carMap = new Map<string, (typeof carsWithTrips)[0]>();
+  
+  for (const row of carsWithTrips) {
+    const carId = row.car.id;
+    const existing = carMap.get(carId);
+    const isActiveTrip = row.tripStatus === "scheduled" || row.tripStatus === "in_progress";
+    
+    // If this is not an active trip, skip it unless the car has no entry yet
+    if (!isActiveTrip && existing) {
+      continue;
+    }
+    
+    // If no existing entry and no active trip, add the car with null trip data
+    if (!existing && !isActiveTrip) {
+      carMap.set(carId, {
+        car: row.car,
+        tripStatus: null,
+        tripUpdatedAt: null,
+        tripMetricsStartedAt: null,
+        tripMetricsCompletedAt: null,
+        tripMetricsUpdatedAt: null,
+      });
+      continue;
+    }
+    
+    // If this is an active trip
+    if (isActiveTrip) {
+      if (!existing || existing.tripStatus === null) {
+        // No existing or existing has no trip, use this active trip
+        carMap.set(carId, row);
+      } else if (row.tripUpdatedAt && existing.tripUpdatedAt) {
+        // Both have active trips, keep the most recently updated
+        if (row.tripUpdatedAt > existing.tripUpdatedAt) {
+          carMap.set(carId, row);
+        }
+      } else if (row.tripUpdatedAt) {
+        carMap.set(carId, row);
+      }
+    }
+  }
 
-  const total = totalResult[0]?.count ?? 0;
+  // Convert to array and sort
+  const carsArray = Array.from(carMap.values());
+  
+  const sortedCars = carsArray.sort((a, b) => {
+    const aStatus = a.tripStatus;
+    const bStatus = b.tripStatus;
+    
+    // Priority 1: Cars with scheduled/in_progress trips ordered by trip departure time (closest first)
+    const aIsActive = aStatus === "scheduled" || aStatus === "in_progress";
+    const bIsActive = bStatus === "scheduled" || bStatus === "in_progress";
+    
+    if (aIsActive && bIsActive) {
+      // Both have active trips - sort by departure time (earliest first = closest to current time)
+      const aStartTime = a.tripMetricsStartedAt?.getTime() ?? Number.MAX_VALUE;
+      const bStartTime = b.tripMetricsStartedAt?.getTime() ?? Number.MAX_VALUE;
+      return aStartTime - bStartTime;
+    }
+    
+    if (aIsActive) return -1;
+    if (bIsActive) return 1;
+    
+    // Priority 2: Cars without active trips ordered by GPS location update (newest first)
+    const aLocationTime = a.car.currentLocationTimestamp?.getTime() ?? 0;
+    const bLocationTime = b.car.currentLocationTimestamp?.getTime() ?? 0;
+    return bLocationTime - aLocationTime; // Descending (newest first)
+  });
+
+  // Apply pagination
+  const paginatedCars = sortedCars.slice(
+    offset ?? 0,
+    limit ? (offset ?? 0) + limit : undefined
+  );
+
+  const total = carMap.size;
   return {
-    items: rows.map(mapCar),
+    items: paginatedCars.map((row) => mapCar(row.car)),
     total,
     limit: typeof limit === "number" ? limit : total,
     offset: typeof offset === "number" ? offset : 0,
