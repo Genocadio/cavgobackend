@@ -111,7 +111,9 @@ func (r *tripRepository) GetTripsByCarPlate(carPlate string) ([]models.Trip, err
 
 func (r *tripRepository) GetTripsByFilters(origin, destination, company string) ([]models.Trip, error) {
 	var trips []models.Trip
-	db := r.db.Preload("Route.Origin").Preload("Route.Destination").Preload("Waypoints.Location").Order("created_at DESC")
+	db := r.db.Preload("Route.Origin").Preload("Route.Destination").Preload("Waypoints.Location").
+		Where("status NOT IN ?", []string{"CANCELLED", "COMPLETED"}).
+		Order("created_at DESC")
 
 	if company != "" {
 		db = db.Where("LOWER(trips.vehicle->>'company_name') LIKE ?", "%"+strings.ToLower(company)+"%")
@@ -209,7 +211,9 @@ func (r *tripRepository) GetTripsByFilters(origin, destination, company string) 
 
 func (r *tripRepository) GetTripsByFiltersPaginated(origin, destination, company string, limit, offset int) ([]models.Trip, int64, error) {
 	var trips []models.Trip
-	db := r.db.Preload("Route.Origin").Preload("Route.Destination").Preload("Waypoints.Location").Order("created_at DESC")
+	db := r.db.Preload("Route.Origin").Preload("Route.Destination").Preload("Waypoints.Location").
+		Where("status NOT IN ?", []string{"CANCELLED", "COMPLETED"}).
+		Order("created_at DESC")
 
 	if company != "" {
 		db = db.Where("LOWER(trips.vehicle->>'company_name') LIKE ?", "%"+strings.ToLower(company)+"%")
@@ -474,6 +478,7 @@ func (r *tripRepository) GetTripsByFiltersWithCityRoute(origin, destination, com
 	db := r.db.Preload("Route.Origin").Preload("Route.Destination").Preload("Waypoints.Location").
 		Joins("JOIN routes ON trips.route_id = routes.id").
 		Where("routes.city_route = ?", cityRoute).
+		Where("trips.status NOT IN ?", []string{"CANCELLED", "COMPLETED"}).
 		Order("trips.created_at DESC")
 
 	if company != "" {
@@ -498,26 +503,23 @@ func (r *tripRepository) GetTripsByFiltersWithCityRoute(origin, destination, com
 	// Remove passed waypoints and drop trips that only have the destination left
 	filteredTrips := make([]models.Trip, 0, len(trips))
 	for _, trip := range trips {
-		hadWaypoints := len(trip.Waypoints) > 0
 		filteredWaypoints := make([]models.TripWaypoint, 0, len(trip.Waypoints))
-		hasNonDestinationRemaining := false
 
 		for _, wp := range trip.Waypoints {
 			if wp.IsPassed {
 				continue
 			}
 			filteredWaypoints = append(filteredWaypoints, wp)
-			if wp.LocationID != trip.Route.DestinationID {
-				hasNonDestinationRemaining = true
-			}
 		}
 
-		// Skip trips where every remaining waypoint is the destination (e.g., A-B-C-D with A/B/C already passed)
-		if hadWaypoints && !hasNonDestinationRemaining {
-			continue
-		}
+		hasUnpassedWaypoints := len(filteredWaypoints) > 0
 
 		trip.Waypoints = filteredWaypoints
+
+		// Only surface in-progress trips that still have pending waypoints
+		if trip.Status == "IN_PROGRESS" && !hasUnpassedWaypoints {
+			continue
+		}
 
 		// Filter by origin/destination in Go (route or any non-passed waypoint)
 		matchOrigin := false
