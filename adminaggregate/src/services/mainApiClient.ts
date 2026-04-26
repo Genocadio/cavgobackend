@@ -1,5 +1,14 @@
 import { config } from "dotenv";
-import type { CompanyResponseDto, VehicleResponseDto, CompanyUserResponseDto, TripApiItem, TripApiResponse } from "../types";
+import type {
+  CompanyResponseDto,
+  VehicleResponseDto,
+  CompanyUserResponseDto,
+  TripApiItem,
+  TripApiResponse,
+  PaginatedResponse,
+  LocationSyncResponseDto,
+  LocationsHashResponse,
+} from "../types";
 
 console.log("[ENV] Loading environment variables...");
 config();
@@ -17,6 +26,14 @@ if (!TRIPS_BASE_URL) {
   throw new Error("TRIPS_BASE_URL must be set in the environment");
 }
 console.log(`[ENV] TRIPS_BASE_URL loaded: ${TRIPS_BASE_URL}`);
+
+function unwrapPaginatedResponse<T>(responseBody: T[] | PaginatedResponse<T>): T[] {
+  if (Array.isArray(responseBody)) {
+    return responseBody;
+  }
+
+  return responseBody.content ?? responseBody.items ?? responseBody.data ?? [];
+}
 
 export async function fetchCompanies(): Promise<CompanyResponseDto[]> {
   console.log(`[URL] Constructing URL for companies...`);
@@ -75,9 +92,10 @@ export async function fetchVehiclesByCompany(
       console.error(`[FETCH] Fetch failed: ${response.status} ${response.statusText}`);
       throw new Error(`Failed to fetch vehicles for company ${companyId}: ${response.status} ${response.statusText} - ${errorText}`);
     }
-    const data = await response.json() as VehicleResponseDto[];
-    console.log(`[FETCH] Fetch result: ${data.length} vehicles`);
-    return data;
+    const data = await response.json() as VehicleResponseDto[] | PaginatedResponse<VehicleResponseDto>;
+    const vehicles = unwrapPaginatedResponse(data);
+    console.log(`[FETCH] Fetch result: ${vehicles.length} vehicles`);
+    return vehicles;
   } catch (error) {
     const cause = (error as any).cause;
     if (cause && (cause.code === 'ECONNREFUSED' || cause.code === 'ENOTFOUND' || cause.code === 'ETIMEDOUT')) {
@@ -117,9 +135,10 @@ export async function fetchDriversByCompany(
       console.error(`[FETCH] Fetch failed: ${response.status} ${response.statusText}`);
       throw new Error(`Failed to fetch drivers for company ${companyId}: ${response.status} ${response.statusText} - ${errorText}`);
     }
-    const data = await response.json() as CompanyUserResponseDto[];
-    console.log(`[FETCH] Fetch result: ${data.length} drivers`);
-    return data;
+    const data = await response.json() as CompanyUserResponseDto[] | PaginatedResponse<CompanyUserResponseDto>;
+    const drivers = unwrapPaginatedResponse(data);
+    console.log(`[FETCH] Fetch result: ${drivers.length} drivers`);
+    return drivers;
   } catch (error) {
     const cause = (error as any).cause;
     if (cause && (cause.code === 'ECONNREFUSED' || cause.code === 'ENOTFOUND' || cause.code === 'ETIMEDOUT')) {
@@ -196,4 +215,67 @@ export async function fetchTrips(options?: {
   
   console.log(`[FETCH] Total trips fetched across all pages: ${allTrips.length}`);
   return allTrips;
+}
+
+export async function fetchLocations(): Promise<LocationSyncResponseDto[]> {
+  const limit = 100;
+  const allLocations: LocationSyncResponseDto[] = [];
+  let currentPage = 1;
+  let totalPages = 1;
+
+  while (currentPage <= totalPages) {
+    const offset = (currentPage - 1) * limit;
+    console.log(`[URL] Constructing URL for locations (page: ${currentPage}/${totalPages}, offset: ${offset}, limit: ${limit})...`);
+    console.log(`[URL] Base URL: ${TRIPS_BASE_URL}`);
+    const url = new URL(`${TRIPS_BASE_URL}/locations/hash`);
+    url.searchParams.set("page", String(currentPage));
+    url.searchParams.set("limit", String(limit));
+
+    const urlString = url.toString();
+    console.log(`[URL] Final URL: ${urlString}`);
+    console.log(`[FETCH] Starting fetch: ${urlString}`);
+
+    try {
+      const response = await fetch(urlString);
+      console.log(`[FETCH] Response status: ${response.status} ${response.statusText}`);
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        console.error(`[FETCH] Fetch failed: ${response.status} ${response.statusText}`);
+        throw new Error(`Failed to fetch locations: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      const data = await response.json() as LocationsHashResponse;
+      console.log(`[FETCH] Fetch result: ${data.locations.length} locations (total: ${data.total}, page: ${data.page}/${data.total_pages}, limit: ${data.limit})`);
+
+      // Handle undefined total_pages by calculating from total and limit
+      if (data.total_pages !== undefined) {
+        totalPages = data.total_pages;
+      } else if (data.total !== undefined && data.limit !== undefined) {
+        totalPages = Math.ceil(data.total / data.limit);
+        console.log(`[FETCH] Calculated total_pages: ${totalPages} from total: ${data.total}, limit: ${data.limit}`);
+      } else {
+        // Fallback: if we can't determine pages, continue until we get fewer results
+        if (data.locations.length < limit) {
+          totalPages = currentPage;
+        }
+      }
+      
+      allLocations.push(...data.locations);
+      currentPage++;
+    } catch (error) {
+      const cause = (error as any).cause;
+      if (cause && (cause.code === 'ECONNREFUSED' || cause.code === 'ENOTFOUND' || cause.code === 'ETIMEDOUT')) {
+        console.error(`[FETCH] Fetch failed: ${cause.code} - Cannot connect to ${TRIPS_BASE_URL}`);
+      } else if (error instanceof Error) {
+        console.error(`[FETCH] Fetch failed: ${error.message}`);
+      } else {
+        console.error(`[FETCH] Fetch failed: ${error}`);
+      }
+      throw error;
+    }
+  }
+
+  console.log(`[FETCH] Total locations fetched across all pages: ${allLocations.length}`);
+  return allLocations;
 }

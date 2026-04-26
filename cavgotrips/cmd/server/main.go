@@ -191,27 +191,10 @@ func main() {
 	// Setup router
 	r := router.Setup(locationHandler, routeHandler, tripHandler, sseHandler, syncHandler)
 
-	// Register with Eureka with retry mechanism
-	go func() {
-		maxRetries := 5
-		retryDelay := 5 * time.Second
-
-		for i := 0; i < maxRetries; i++ {
-			if err := eurekaService.Register(); err != nil {
-				log.Printf("Warning: Failed to register with Eureka (attempt %d/%d): %v", i+1, maxRetries, err)
-				if i < maxRetries-1 {
-					log.Printf("Retrying in %v...", retryDelay)
-					time.Sleep(retryDelay)
-				}
-			} else {
-				log.Printf("Successfully registered with Eureka")
-				// Start heartbeat
-				eurekaService.StartHeartbeat()
-				return
-			}
-		}
-		log.Printf("Failed to register with Eureka after %d attempts", maxRetries)
-	}()
+	// Strict Eureka lifecycle startup order.
+	eurekaService.EnsureRegistered()
+	eurekaService.StartHeartbeat()
+	eurekaService.StartRegistrationVerifier(90 * time.Second)
 
 	// Start server
 	port := os.Getenv("PORT")
@@ -238,6 +221,8 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down server...")
+	eurekaService.StopHeartbeat()
+	eurekaService.StopRegistrationVerifier()
 
 	// Deregister from Eureka
 	if err := eurekaService.Deregister(); err != nil {

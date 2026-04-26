@@ -15,6 +15,9 @@ import com.nexxserve.cavgomain.messaging.VehicleSettingsPublisher;
 import com.nexxserve.cavgomain.repository.*;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -118,12 +121,6 @@ public class VehicleService {
                 .orElseThrow(() -> new EntityNotFoundException("Vehicle not found"));
     }
 
-    public List<VehicleResponseDto> getVehicleUser(Long userId) {
-        CompanyUser user = companyUserRepository.findById(userId)
-                .orElseThrow(() -> new EntityNotFoundException("User not found"));
-        return getCompanyVehicles(user.getCompany().getId(), null);
-    }
-
     public VehicleResponseDto getVehicleResponse(Long id) {
         return VehicleResponseDto.fromEntity(getVehicle(id));
     }
@@ -141,17 +138,31 @@ public class VehicleService {
                 .toList();
     }
 
-    public List<VehicleResponseDto> getCompanyVehicles(Long id, LocalDateTime timeLimit) {
-        List<Vehicle> vehicles;
-        if (timeLimit != null) {
-            vehicles = vehicleRepository.findByCompanyIdWithActiveAssignmentsAfterTime(id, timeLimit);
-        } else {
-            // Use a very old date to get all records
-            vehicles = vehicleRepository.findByCompanyIdWithActiveAssignmentsAfterTime(id, LocalDateTime.of(1970, 1, 1, 0, 0));
+    public Page<VehicleResponseDto> getCompanyVehiclesPaged(
+            Long companyId,
+            LocalDateTime timeLimit,
+            String plate,
+            VehicleStatus status,
+            String driverName,
+            int page,
+            int size
+    ) {
+        Pageable pageable = PageRequest.of(page, size);
+        String normalizedPlate = normalizeQueryFilter(plate);
+        String normalizedDriverName = normalizeQueryFilter(driverName);
+        LocalDateTime normalizedTimeLimit = timeLimit == null ? LocalDateTime.of(1970, 1, 1, 0, 0) : timeLimit;
+
+        return vehicleRepository
+            .searchCompanyVehicles(companyId, normalizedTimeLimit, normalizedPlate, status, normalizedDriverName, pageable)
+                .map(VehicleResponseDto::fromEntity);
+    }
+
+    private String normalizeQueryFilter(String value) {
+        if (value == null) {
+            return "";
         }
-        return vehicles.stream()
-                .map(VehicleResponseDto::fromEntity)
-                .toList();
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? "" : trimmed;
     }
 
 

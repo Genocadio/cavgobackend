@@ -333,6 +333,53 @@ func (r *tripRepository) GetTripsByVehicleID(vehicleID int64) ([]models.Trip, er
 	return trips, nil
 }
 
+func (r *tripRepository) GetTripsByVehicleIDPaginated(vehicleID int64, statuses []string, limit, offset int) ([]models.Trip, int64, error) {
+	var trips []models.Trip
+	db := r.db.Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		Where("vehicle_id = ?", vehicleID).
+		Order("created_at DESC")
+
+	if len(statuses) > 0 {
+		db = db.Where("status IN ?", statuses)
+	}
+
+	var total int64
+	err := db.Session(&gorm.Session{}).Model(&models.Trip{}).Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if limit > 0 {
+		db = db.Limit(limit)
+	}
+	if offset > 0 {
+		db = db.Offset(offset)
+	}
+
+	err = db.Find(&trips).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return trips, total, nil
+}
+
+func (r *tripRepository) GetLatestTripByVehicleID(vehicleID int64) (*models.Trip, error) {
+	var trip models.Trip
+	err := r.db.Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location").
+		Where("vehicle_id = ?", vehicleID).
+		Order("created_at DESC").
+		First(&trip).Error
+	if err != nil {
+		return nil, err
+	}
+	return &trip, nil
+}
+
 func (r *tripRepository) GetTripsByDriverID(driverID int64) ([]models.Trip, error) {
 	var trips []models.Trip
 	err := driverIDCondition(r.db.Preload("Route.Origin").

@@ -6,13 +6,13 @@ import (
 )
 
 type RouteService struct {
-	repo                repository.RouteRepository
+	repo                  repository.RouteRepository
 	changeTrackingService *ChangeTrackingService
 }
 
 func NewRouteService(repo repository.RouteRepository, changeTrackingService *ChangeTrackingService) *RouteService {
 	return &RouteService{
-		repo:                repo,
+		repo:                  repo,
 		changeTrackingService: changeTrackingService,
 	}
 }
@@ -33,7 +33,7 @@ func (s *RouteService) CreateRoute(route *models.Route) error {
 
 	// Record change for tracking
 	if s.changeTrackingService != nil {
-		if err := s.changeTrackingService.RecordChange("route", route.ID, false); err != nil {
+		if err := s.changeTrackingService.RecordChange("route", route.ID, models.ChangeOperationCreated); err != nil {
 			// Don't fail the operation, just log the error
 		}
 	}
@@ -105,7 +105,7 @@ func (s *RouteService) UpdateRoute(route *models.Route) error {
 
 	// Record change for tracking
 	if s.changeTrackingService != nil {
-		if err := s.changeTrackingService.RecordChange("route", route.ID, false); err != nil {
+		if err := s.changeTrackingService.RecordChange("route", route.ID, models.ChangeOperationUpdated); err != nil {
 			// Don't fail the operation, just log the error
 		}
 	}
@@ -121,7 +121,7 @@ func (s *RouteService) DeleteRoute(id int64) error {
 
 	// Record change for tracking (deletion)
 	if s.changeTrackingService != nil {
-		if err := s.changeTrackingService.RecordChange("route", id, true); err != nil {
+		if err := s.changeTrackingService.RecordChange("route", id, models.ChangeOperationDeleted); err != nil {
 			// Don't fail the operation, just log the error
 		}
 	}

@@ -13,6 +13,9 @@ import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.UserRepository;
 import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -172,31 +175,33 @@ public class CompanyUserService {
     }
 
     @Transactional(readOnly = true)
-    public List<CompanyUserResponseDto> findDriversByCompany(Long companyId, LocalDateTime timeLimit) {
-        List<CompanyUser> drivers;
-        if (timeLimit != null) {
-            drivers = companyUserRepository.findByCompanyIdAndRoleAfterTime(companyId, CompanyUserRole.DRIVER, timeLimit);
-        } else {
-            // Use a very old date to get all records
-            drivers = companyUserRepository.findByCompanyIdAndRoleAfterTime(companyId, CompanyUserRole.DRIVER, LocalDateTime.of(1970, 1, 1, 0, 0));
-        }
-        return drivers.stream()
+    public Page<CompanyUserResponseDto> findDriversByCompanyPaged(
+            Long companyId,
+            LocalDateTime timeLimit,
+            String query,
+            int page,
+            int size
+    ) {
+        Pageable pageable = PageRequest.of(page, size);
+        String normalizedQuery = normalizeQueryFilter(query);
+        LocalDateTime normalizedTimeLimit = timeLimit == null
+            ? LocalDateTime.of(1970, 1, 1, 0, 0)
+            : timeLimit;
+
+        return companyUserRepository.searchDriversByCompany(companyId, normalizedTimeLimit, normalizedQuery, pageable)
                 .map(driver -> {
                     CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(driver);
-                    
-                    // Check if driver has an active vehicle assignment
+
                     List<VehicleAssignment> activeAssignments = assignmentRepository.findActiveAssignmentsByDriver(driver.getId());
                     if (!activeAssignments.isEmpty()) {
                         VehicleAssignment activeAssignment = activeAssignments.get(0);
-                        // Pass null as driver to prevent recursion
                         dto.setVehicle(VehicleResponseDto.fromEntity(activeAssignment.getVehicle(), null));
                     } else {
                         dto.setVehicle(null);
                     }
-                    
+
                     return dto;
-                })
-                .toList();
+                });
     }
 
     @Transactional(readOnly = true)
@@ -222,28 +227,15 @@ public class CompanyUserService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
-    public List<CompanyUserResponseDto> searchDriversByCompanyAndName(Long companyId, String searchQuery) {
-        return companyUserRepository.searchDriversByCompanyAndName(companyId, searchQuery).stream()
-                .map(driver -> {
-                    CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(driver);
-                    
-                    // Check if driver has an active vehicle assignment
-                    List<VehicleAssignment> activeAssignments = assignmentRepository.findActiveAssignmentsByDriver(driver.getId());
-                    if (!activeAssignments.isEmpty()) {
-                        VehicleAssignment activeAssignment = activeAssignments.get(0);
-                        // Pass null as driver to prevent recursion
-                        dto.setVehicle(VehicleResponseDto.fromEntity(activeAssignment.getVehicle(), null));
-                    } else {
-                        dto.setVehicle(null);
-                    }
-                    
-                    return dto;
-                })
-                .toList();
-    }
-
     public void deleteCompanyUser(Long id) {
         companyUserRepository.deleteById(id);
+    }
+
+    private String normalizeQueryFilter(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

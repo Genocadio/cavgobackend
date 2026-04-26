@@ -106,6 +106,7 @@ The Eureka client will:
 - `GET /locations/{id}` - Get a specific location by ID
 - `PUT /locations/{id}` - Update a location
 - `DELETE /locations/{id}` - Delete a location
+- `GET /locations/hash` - Hash-based sync (initial + incremental)
 
 ### Routes
 
@@ -118,9 +119,22 @@ The Eureka client will:
 - `GET /routes/{id}` - Get a specific route
 - `PUT /routes/{id}` - Update a route
 - `DELETE /routes/{id}` - Delete a route
+- `GET /routes/hash` - Hash-based sync (initial + incremental)
 - `GET /routes/price-range?min_price={price}&max_price={price}` - Get routes by price range
 - `GET /routes/distance-range?min_distance={meters}&max_distance={meters}` - Get routes by distance range
 - `GET /routes/statistics` - Get route statistics
+
+### Sync
+
+- `GET /main-hash` - Get the latest server hash checkpoint
+- `POST /merge` - Force a merge of pending change batches into a new main hash
+- `GET /locations/hash` and `GET /routes/hash` support:
+  - initial paginated fetch when `hash` is omitted
+  - incremental fetch when `hash` is provided
+  - operation-aware change stream via `changes[]` with `created`, `updated`, `deleted`
+  - backward compatibility via `deleted_ids`
+
+For full sync contract and examples, see [SYNC_API.md](SYNC_API.md).
 
 ### Trips
 

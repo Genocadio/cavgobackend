@@ -3,6 +3,7 @@ import { mapCompanyResponseDtoToCompany } from "../mappers/companyMapper";
 import { mapVehicleResponseDtoToCar } from "../mappers/vehicleMapper";
 import { mapCompanyUserResponseDtoToDriver } from "../mappers/driverMapper";
 import { mapTripApiItemToLocalTrip } from "../mappers/tripMapper";
+import type { Trip } from "../types";
 import * as companyRepository from "../repositories/companies";
 import * as carRepository from "../repositories/cars";
 import * as driverRepository from "../repositories/drivers";
@@ -11,6 +12,9 @@ import * as tripRepository from "../repositories/trips";
 import * as metricsRepository from "../repositories/metrics";
 import * as snapshotRepository from "../repositories/snapshots";
 import { updateTripMetrics } from "./tripMetricsService";
+import * as locationRepository from "../repositories/locations";
+
+let locationPollingTimer: NodeJS.Timeout | null = null;
 
 interface PendingAssignment {
   driverId: string | null;
@@ -19,6 +23,8 @@ interface PendingAssignment {
 
 export async function syncAllData(): Promise<void> {
   console.log("Starting data sync...");
+
+  await syncLocations();
   
   // Temporary storage for assignments to be applied after sync
   const pendingAssignments: PendingAssignment[] = [];
@@ -42,93 +48,113 @@ export async function syncAllData(): Promise<void> {
     const companyId = String(companyDto.id);
     console.log(`Syncing data for company ${companyId}...`);
 
-    // Get latest updatedAt timestamps from local DB for this specific company
-    const latestVehicleUpdatedAt = await companyRepository.getLatestVehicleUpdatedAt(companyId);
-    const latestDriverUpdatedAt = await companyRepository.getLatestDriverUpdatedAt(companyId);
+    try {
+      // Get latest updatedAt timestamps from local DB for this specific company
+      const latestVehicleUpdatedAt = await companyRepository.getLatestVehicleUpdatedAt(companyId);
+      const latestDriverUpdatedAt = await companyRepository.getLatestDriverUpdatedAt(companyId);
 
-    // Fetch vehicles with timeLimit if we have a latest timestamp for vehicles
-    if (latestVehicleUpdatedAt) {
-      console.log(`[SYNC] Found latest vehicle updatedAt for company ${companyId}: ${latestVehicleUpdatedAt}`);
-      console.log(`[SYNC] Using incremental sync for vehicles (only fetching vehicles updated after this time)`);
-    } else {
-      console.log(`[SYNC] No existing vehicles found for company ${companyId}, performing full sync`);
-    }
-    const timeLimitVehicle = latestVehicleUpdatedAt ? latestVehicleUpdatedAt : undefined;
-    console.log(`Fetching vehicles for company ${companyId}...`);
-    const vehiclesDto = await mainApiClient.fetchVehiclesByCompany(companyDto.id, timeLimitVehicle);
-    
-    for (const vehicleDto of vehiclesDto) {
-      const car = mapVehicleResponseDtoToCar(vehicleDto);
-      const existing = await carRepository.getCarById(car.id);
-      if (existing) {
-        await carRepository.updateCar(car);
+      // Fetch vehicles with timeLimit if we have a latest timestamp for vehicles
+      if (latestVehicleUpdatedAt) {
+        console.log(`[SYNC] Found latest vehicle updatedAt for company ${companyId}: ${latestVehicleUpdatedAt}`);
+        console.log(`[SYNC] Using incremental sync for vehicles (only fetching vehicles updated after this time)`);
       } else {
-        await carRepository.createCar(car);
+        console.log(`[SYNC] No existing vehicles found for company ${companyId}, performing full sync`);
       }
+      const timeLimitVehicle = latestVehicleUpdatedAt ? latestVehicleUpdatedAt : undefined;
+      console.log(`Fetching vehicles for company ${companyId}...`);
+      const vehiclesDto = await mainApiClient.fetchVehiclesByCompany(companyDto.id, timeLimitVehicle);
 
-      // Store driver assignment for later (after all vehicles and drivers are synced)
-      if (vehicleDto.driver) {
-        const driverId = String(vehicleDto.driver.id);
-        pendingAssignments.push({ driverId, carId: car.id });
-        console.log(`  [SYNC] Queued assignment: driver ${driverId} -> car ${car.id}`);
-      } else {
-        // Queue removal of driver assignment
-        pendingAssignments.push({ driverId: null, carId: car.id });
-        console.log(`  [SYNC] Queued removal of driver assignment from car ${car.id}`);
-      }
-    }
-    console.log(`Synced ${vehiclesDto.length} vehicles for company ${companyId}`);
-
-    // Fetch drivers with timeLimit if we have a latest timestamp for drivers
-    if (latestDriverUpdatedAt) {
-      console.log(`[SYNC] Found latest driver updatedAt for company ${companyId}: ${latestDriverUpdatedAt}`);
-      console.log(`[SYNC] Using incremental sync for drivers (only fetching drivers updated after this time)`);
-    } else {
-      console.log(`[SYNC] No existing drivers found for company ${companyId}, performing full sync`);
-    }
-    const timeLimitDriver = latestDriverUpdatedAt ? latestDriverUpdatedAt : undefined;
-    console.log(`Fetching drivers for company ${companyId}...`);
-    const driversDto = await mainApiClient.fetchDriversByCompany(companyDto.id, timeLimitDriver);
-    
-    for (const driverDto of driversDto) {
-      const driver = mapCompanyUserResponseDtoToDriver(driverDto);
-      const existing = await driverRepository.getDriverById(driver.id);
-      if (existing) {
-        await driverRepository.updateDriver(driver);
-      } else {
-        await driverRepository.createDriver(driver);
-      }
-
-      // Store vehicle assignment for later (after all vehicles and drivers are synced)
-      if (driverDto.vehicle) {
-        const vehicleId = String(driverDto.vehicle.id);
-        // Check if assignment already queued (from vehicle sync)
-        const existingIndex = pendingAssignments.findIndex(
-          a => a.carId === vehicleId && a.driverId === null
-        );
-        if (existingIndex >= 0 && pendingAssignments[existingIndex]) {
-          // Update existing queued assignment
-          pendingAssignments[existingIndex]!.driverId = driver.id;
-          console.log(`  [SYNC] Updated queued assignment: driver ${driver.id} -> car ${vehicleId}`);
-        } else {
-          // Add new assignment
-          pendingAssignments.push({ driverId: driver.id, carId: vehicleId });
-          console.log(`  [SYNC] Queued assignment: driver ${driver.id} -> car ${vehicleId}`);
-        }
-      } else {
-        // Queue removal of vehicle assignment for this driver
-        // Find and remove any assignments for this driver
-        const driverAssignments = pendingAssignments.filter(a => a.driverId === driver.id);
-        driverAssignments.forEach(assignment => {
-          const index = pendingAssignments.indexOf(assignment);
-          if (index >= 0 && assignment) {
-            pendingAssignments[index]!.driverId = null;
-            console.log(`  [SYNC] Queued removal of driver ${driver.id} from car ${assignment.carId}`);
+      let syncedVehicles = 0;
+      let skippedVehicles = 0;
+      for (const vehicleDto of vehiclesDto) {
+        try {
+          const car = mapVehicleResponseDtoToCar(vehicleDto);
+          const existing = await carRepository.getCarById(car.id);
+          if (existing) {
+            await carRepository.updateCar(car);
+          } else {
+            await carRepository.createCar(car);
           }
-        });
+
+          // Store driver assignment for later (after all vehicles and drivers are synced)
+          if (vehicleDto.driver) {
+            const driverId = String(vehicleDto.driver.id);
+            pendingAssignments.push({ driverId, carId: car.id });
+            console.log(`  [SYNC] Queued assignment: driver ${driverId} -> car ${car.id}`);
+          } else {
+            // Queue removal of driver assignment
+            pendingAssignments.push({ driverId: null, carId: car.id });
+            console.log(`  [SYNC] Queued removal of driver assignment from car ${car.id}`);
+          }
+          syncedVehicles++;
+        } catch (error) {
+          console.warn(`  [SYNC] Skipping vehicle ${vehicleDto?.id ?? "unknown"} for company ${companyId}:`, error);
+          skippedVehicles++;
+        }
       }
+      console.log(`Synced ${syncedVehicles} vehicles for company ${companyId} (${skippedVehicles} skipped)`);
+
+      // Fetch drivers with timeLimit if we have a latest timestamp for drivers
+      if (latestDriverUpdatedAt) {
+        console.log(`[SYNC] Found latest driver updatedAt for company ${companyId}: ${latestDriverUpdatedAt}`);
+        console.log(`[SYNC] Using incremental sync for drivers (only fetching drivers updated after this time)`);
+      } else {
+        console.log(`[SYNC] No existing drivers found for company ${companyId}, performing full sync`);
+      }
+      const timeLimitDriver = latestDriverUpdatedAt ? latestDriverUpdatedAt : undefined;
+      console.log(`Fetching drivers for company ${companyId}...`);
+      const driversDto = await mainApiClient.fetchDriversByCompany(companyDto.id, timeLimitDriver);
+
+      let syncedDrivers = 0;
+      let skippedDrivers = 0;
+      for (const driverDto of driversDto) {
+        try {
+          const driver = mapCompanyUserResponseDtoToDriver(driverDto);
+          const existing = await driverRepository.getDriverById(driver.id);
+          if (existing) {
+            await driverRepository.updateDriver(driver);
+          } else {
+            await driverRepository.createDriver(driver);
+          }
+
+          // Store vehicle assignment for later (after all vehicles and drivers are synced)
+          if (driverDto.vehicle) {
+            const vehicleId = String(driverDto.vehicle.id);
+            // Check if assignment already queued (from vehicle sync)
+            const existingIndex = pendingAssignments.findIndex(
+              a => a.carId === vehicleId && a.driverId === null
+            );
+            if (existingIndex >= 0 && pendingAssignments[existingIndex]) {
+              // Update existing queued assignment
+              pendingAssignments[existingIndex]!.driverId = driver.id;
+              console.log(`  [SYNC] Updated queued assignment: driver ${driver.id} -> car ${vehicleId}`);
+            } else {
+              // Add new assignment
+              pendingAssignments.push({ driverId: driver.id, carId: vehicleId });
+              console.log(`  [SYNC] Queued assignment: driver ${driver.id} -> car ${vehicleId}`);
+            }
+          } else {
+            // Queue removal of vehicle assignment for this driver
+            // Find and remove any assignments for this driver
+            const driverAssignments = pendingAssignments.filter(a => a.driverId === driver.id);
+            driverAssignments.forEach(assignment => {
+              const index = pendingAssignments.indexOf(assignment);
+              if (index >= 0 && assignment) {
+                pendingAssignments[index]!.driverId = null;
+                console.log(`  [SYNC] Queued removal of driver ${driver.id} from car ${assignment.carId}`);
+              }
+            });
+          }
+          syncedDrivers++;
+        } catch (error) {
+          console.warn(`  [SYNC] Skipping driver ${driverDto?.id ?? "unknown"} for company ${companyId}:`, error);
+          skippedDrivers++;
+        }
+      }
+      console.log(`Synced ${syncedDrivers} drivers for company ${companyId} (${skippedDrivers} skipped)`);
+    } catch (error) {
+      console.error(`[SYNC] Failed to sync company ${companyId}, continuing with next company:`, error);
     }
-    console.log(`Synced ${driversDto.length} drivers for company ${companyId}`);
   }
 
   // Apply all pending assignments now that vehicles and drivers are synced
@@ -171,6 +197,52 @@ export async function syncAllData(): Promise<void> {
 
   console.log(`[SYNC] Assignments applied: ${appliedCount} successful, ${skippedCount} skipped`);
   console.log("Data sync completed");
+}
+
+export async function syncLocations(): Promise<void> {
+  console.log("Starting location sync...");
+
+  const locations = await mainApiClient.fetchLocations();
+  let syncedCount = 0;
+  let skippedCount = 0;
+
+  for (const locationDto of locations) {
+    try {
+      const location = {
+        id: String(locationDto.id),
+        lat: locationDto.latitude,
+        lng: locationDto.longitude,
+        addres: locationDto.custom_name || locationDto.google_place_name || `Location ${locationDto.id}`,
+      };
+
+      await locationRepository.upsertTripLocation(location);
+      syncedCount++;
+    } catch (error) {
+      console.warn(`[LOCATION SYNC] Skipping location ${locationDto?.id ?? "unknown"}:`, error);
+      skippedCount++;
+    }
+  }
+
+  console.log(`[LOCATION SYNC] Location sync completed: ${syncedCount} synced, ${skippedCount} skipped`);
+}
+
+export function startLocationPolling(): () => void {
+  console.log("[LOCATION POLLING] Starting location polling service (every 5 hours)...");
+
+  locationPollingTimer = setInterval(() => {
+    console.log("[LOCATION POLLING] Polling for locations...");
+    void syncLocations().catch((error) => {
+      console.error("[LOCATION POLLING] Error during location sync:", error);
+    });
+  }, 5 * 60 * 60 * 1000);
+
+  return () => {
+    if (locationPollingTimer) {
+      console.log("[LOCATION POLLING] Stopping location polling service...");
+      clearInterval(locationPollingTimer);
+      locationPollingTimer = null;
+    }
+  };
 }
 
 export async function syncTrips(): Promise<void> {
@@ -243,8 +315,36 @@ export async function syncTrips(): Promise<void> {
           driverId = driverByPhone?.id || null;
         }
         
-        // Map trip API item to local trip
-        const localTrip = await mapTripApiItemToLocalTrip(tripApiItem, vehicleId, driverId);
+        // Map trip API item to local trip with validation
+        let localTrip: Trip;
+        try {
+          localTrip = await mapTripApiItemToLocalTrip(tripApiItem, vehicleId, driverId);
+        } catch (mappingError) {
+          const message = mappingError instanceof Error ? mappingError.message : String(mappingError);
+          if (message.includes("missing local locations") || message.includes("missing from local storage")) {
+            console.warn(`[TRIP SYNC] Trip ${tripApiItem.id} references missing local locations; refreshing locations and retrying once...`);
+            await syncLocations();
+            try {
+              localTrip = await mapTripApiItemToLocalTrip(tripApiItem, vehicleId, driverId);
+            } catch (retryError) {
+              console.error(`[TRIP SYNC] Trip ${tripApiItem.id} still failed after location refresh:`, retryError instanceof Error ? retryError.message : String(retryError));
+              skippedCount++;
+              continue;
+            }
+          } else {
+            console.error(`[TRIP SYNC] Trip ${tripApiItem.id} validation failed:`, message);
+            console.error(`[TRIP SYNC] Trip summary for failed validation:`, {
+              id: tripApiItem.id,
+              status: tripApiItem.status,
+              routePresent: !!tripApiItem.route,
+              routeHasOrigin: !!(tripApiItem.route && tripApiItem.route.origin),
+              routeHasDestination: !!(tripApiItem.route && tripApiItem.route.destination),
+              waypointsCount: tripApiItem.waypoints?.length ?? 0,
+            });
+            skippedCount++;
+            continue;
+          }
+        }
         
         // Check if trip exists
         const existing = await tripRepository.getTripById(localTrip.id);
@@ -279,6 +379,72 @@ export async function syncTrips(): Promise<void> {
     }
     
     console.log(`[TRIP SYNC] Trip sync completed: ${createdCount} created, ${updatedCount} updated, ${skippedCount} skipped`);
+    
+    // If any trips were skipped due to missing locations, retry them after location sync
+    if (skippedCount > 0) {
+      console.log("[TRIP SYNC] Retrying skipped trips after location sync...");
+      // Wait a moment for location sync to complete
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Retry processing skipped trips
+      for (const tripApiItem of trips) {
+        const wasSkipped = trips.some((item: any) => 
+          item.id === tripApiItem.id && 
+          item._skippedDueToMissingLocations
+        );
+        
+        if (wasSkipped) {
+          try {
+            // Extract vehicle_id and verify car exists for retry
+            if (!tripApiItem.vehicle_id) {
+              console.warn(`[TRIP SYNC] Skipping retry for trip ${tripApiItem.id}: no vehicle_id`);
+              continue;
+            }
+            
+            const retryVehicleId = String(tripApiItem.vehicle_id);
+            const retryCar = await carRepository.getCarById(retryVehicleId);
+            
+            if (!retryCar) {
+              console.warn(`[TRIP SYNC] Skipping retry for trip ${tripApiItem.id}: car ${retryVehicleId} does not exist`);
+              continue;
+            }
+            
+            // Extract driver_id for retry
+            let retryDriverId: string | null = null;
+            if (tripApiItem.vehicle?.driver?.id) {
+              retryDriverId = String(tripApiItem.vehicle.driver.id);
+              const retryDriver = await driverRepository.getDriverById(retryDriverId);
+              if (!retryDriver) {
+                if (tripApiItem.vehicle.driver.phone) {
+                  const retryDriverByPhone = await driverRepository.getDriverByPhone(tripApiItem.vehicle.driver.phone);
+                  retryDriverId = retryDriverByPhone?.id || null;
+                } else {
+                  retryDriverId = null;
+                }
+              }
+            } else if (tripApiItem.vehicle?.driver?.phone) {
+              const retryDriverByPhone = await driverRepository.getDriverByPhone(tripApiItem.vehicle.driver.phone);
+              retryDriverId = retryDriverByPhone?.id || null;
+            }
+            
+            const localTrip = await mapTripApiItemToLocalTrip(tripApiItem, retryVehicleId, retryDriverId);
+            if (localTrip) {
+              const existing = await tripRepository.getTripById(localTrip.id);
+              if (existing) {
+                await tripRepository.updateTrip(localTrip);
+                updatedCount++;
+              } else {
+                await tripRepository.createTrip(localTrip);
+                createdCount++;
+              }
+              console.log(`[TRIP SYNC] Successfully retried trip ${tripApiItem.id} after location sync`);
+            }
+          } catch (error) {
+            console.error(`[TRIP SYNC] Failed to retry trip ${tripApiItem.id}:`, error);
+          }
+        }
+      }
+    }
   } catch (error) {
     console.error("[TRIP SYNC] Failed to sync trips:", error);
     throw error;

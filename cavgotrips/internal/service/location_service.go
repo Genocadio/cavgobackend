@@ -8,13 +8,13 @@ import (
 )
 
 type LocationService struct {
-	repo                repository.LocationRepository
+	repo                  repository.LocationRepository
 	changeTrackingService *ChangeTrackingService
 }
 
 func NewLocationService(repo repository.LocationRepository, changeTrackingService *ChangeTrackingService) *LocationService {
 	return &LocationService{
-		repo:                repo,
+		repo:                  repo,
 		changeTrackingService: changeTrackingService,
 	}
 }
@@ -97,7 +97,7 @@ func (s *LocationService) CreateLocation(location *models.Location) error {
 	}
 
 	log.Printf("DEBUG: Service: All validation checks passed during location creation")
-	
+
 	err = s.repo.Create(location)
 	if err != nil {
 		log.Printf("ERROR: Service: Failed to create location in database, error: %v", err)
@@ -105,15 +105,15 @@ func (s *LocationService) CreateLocation(location *models.Location) error {
 	}
 
 	log.Printf("DEBUG: Service: Location created successfully in database with ID: %d", location.ID)
-	
+
 	// Record change for tracking
 	if s.changeTrackingService != nil {
-		if err := s.changeTrackingService.RecordChange("location", location.ID, false); err != nil {
+		if err := s.changeTrackingService.RecordChange("location", location.ID, models.ChangeOperationCreated); err != nil {
 			log.Printf("ERROR: Service: Failed to record location change for ID: %d, error: %v", location.ID, err)
 			// Don't fail the operation, just log the error
 		}
 	}
-	
+
 	return nil
 }
 
@@ -145,7 +145,7 @@ func (s *LocationService) GetLocationByID(id int64) (*models.Location, error) {
 
 func (s *LocationService) UpdateLocation(id int64, location *models.Location) error {
 	log.Printf("DEBUG: Service: Starting location update for ID: %d", id)
-	
+
 	// First check if location exists
 	if err := s.repo.ValidateExists(id); err != nil {
 		log.Printf("ERROR: Service: Location does not exist for ID: %d, error: %v", id, err)
@@ -159,7 +159,7 @@ func (s *LocationService) UpdateLocation(id int64, location *models.Location) er
 		return err
 	}
 
-	log.Printf("DEBUG: Service: Found existing location - ID: %d, Code: %v, CustomName: %v, PlaceID: %v", 
+	log.Printf("DEBUG: Service: Found existing location - ID: %d, Code: %v, CustomName: %v, PlaceID: %v",
 		existingLocation.ID, existingLocation.Code, existingLocation.CustomName, existingLocation.PlaceID)
 
 	// Set the ID to ensure we're updating the correct location
@@ -199,7 +199,7 @@ func (s *LocationService) UpdateLocation(id int64, location *models.Location) er
 
 	// Generate location code only if district changed or existing code is null
 	shouldGenerateCode := districtChanged || existingLocation.Code == nil
-	
+
 	if shouldGenerateCode {
 		log.Printf("DEBUG: Service: Generating location code - District changed: %v, Existing code null: %v", districtChanged, existingLocation.Code == nil)
 		log.Printf("DEBUG: Service: Generating new location code for province: %s, district: %s", *location.Province, *location.District)
@@ -279,7 +279,7 @@ func (s *LocationService) UpdateLocation(id int64, location *models.Location) er
 	}
 
 	log.Printf("DEBUG: Service: All validation checks passed for location ID: %d", id)
-	
+
 	err = s.repo.Update(location)
 	if err != nil {
 		log.Printf("ERROR: Service: Failed to update location in database for ID: %d, error: %v", id, err)
@@ -287,15 +287,15 @@ func (s *LocationService) UpdateLocation(id int64, location *models.Location) er
 	}
 
 	log.Printf("DEBUG: Service: Location updated successfully in database for ID: %d", id)
-	
+
 	// Record change for tracking
 	if s.changeTrackingService != nil {
-		if err := s.changeTrackingService.RecordChange("location", id, false); err != nil {
+		if err := s.changeTrackingService.RecordChange("location", id, models.ChangeOperationUpdated); err != nil {
 			log.Printf("ERROR: Service: Failed to record location change for ID: %d, error: %v", id, err)
 			// Don't fail the operation, just log the error
 		}
 	}
-	
+
 	return nil
 }
 
@@ -312,7 +312,7 @@ func (s *LocationService) DeleteLocation(id int64) error {
 
 	// Record change for tracking (deletion)
 	if s.changeTrackingService != nil {
-		if err := s.changeTrackingService.RecordChange("location", id, true); err != nil {
+		if err := s.changeTrackingService.RecordChange("location", id, models.ChangeOperationDeleted); err != nil {
 			log.Printf("ERROR: Service: Failed to record location deletion for ID: %d, error: %v", id, err)
 			// Don't fail the operation, just log the error
 		}

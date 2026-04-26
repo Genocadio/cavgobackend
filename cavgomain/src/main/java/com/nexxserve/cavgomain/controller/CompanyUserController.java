@@ -4,6 +4,7 @@ import com.nexxserve.cavgomain.dto.request.CompanyUserRequestDto;
 import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
 import com.nexxserve.cavgomain.service.CompanyUserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
@@ -42,15 +43,13 @@ public class CompanyUserController {
     }
 
     @GetMapping("/company/{companyId}/drivers")
-    public List<CompanyUserResponseDto> getDriversByCompany(
+    public Page<CompanyUserResponseDto> getDriversByCompany(
             @PathVariable Long companyId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit) {
-        return companyUserService.findDriversByCompany(companyId, timeLimit);
-    }
-
-    @GetMapping("/company/{companyId}/drivers/search")
-    public List<CompanyUserResponseDto> searchDriversByCompany(@PathVariable Long companyId, @RequestParam String query) {
-        return companyUserService.searchDriversByCompanyAndName(companyId, query);
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit,
+            @RequestParam(required = false) String query,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return companyUserService.findDriversByCompanyPaged(companyId, timeLimit, query, page, size);
     }
 
     @GetMapping("/expired-licenses")

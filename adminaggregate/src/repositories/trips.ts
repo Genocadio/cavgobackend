@@ -10,10 +10,36 @@ import {
   trips,
 } from "../db/schema";
 import { getDriverCarAssignmentById, ensureDriverCarAssignment } from "./assignments";
-import { upsertTripLocation } from "./locations";
+import { getTripLocationByIds } from "./locations";
 import type { Destination, Trip, TripLocation } from "../types";
 
 type TripDestinationRow = InferModel<typeof tripDestinations>;
+
+const buildDestinationRowId = (tripId: string, locationId: string): string => `${tripId}:${locationId}`;
+
+async function getExistingTripDestinationIds(tripId: string): Promise<Map<string, string>> {
+  const rows = await db
+    .select({ id: tripDestinations.id, locationId: tripDestinations.locationId })
+    .from(tripDestinations)
+    .where(eq(tripDestinations.tripId, tripId));
+
+  return new Map(rows.map((row) => [row.locationId, row.id]));
+}
+
+async function ensureTripLocationsExist(trip: Trip): Promise<void> {
+  const requiredLocationIds = new Set<string>([trip.origin.id]);
+  for (const destination of trip.destinations) {
+    requiredLocationIds.add(destination.locationId || destination.id);
+  }
+
+  const locations = await getTripLocationByIds([...requiredLocationIds]);
+  const existingLocationIds = new Set(locations.map((location) => location.id));
+  const missingLocationIds = [...requiredLocationIds].filter((locationId) => !existingLocationIds.has(locationId));
+
+  if (missingLocationIds.length > 0) {
+    throw new Error(`Trip ${trip.id} references missing local locations: ${missingLocationIds.join(", ")}`);
+  }
+}
 
 async function fetchTripsForAssignments(assignmentIds: number[]) {
   const rowsByAssignment = await Promise.all(
@@ -35,9 +61,8 @@ async function fetchTripsForAssignments(assignmentIds: number[]) {
 }
 
 const destinationFromRow = (row: TripDestinationRow, location: TripLocation): Destination => ({
-  // Stored trip destination id is stored as `${tripId}-${locationId}` in DB.
-  // For internal Trip model we strip the trip prefix so `destination.id` is the original location id.
-  id: row.id && row.id.startsWith(`${row.tripId}-`) ? row.id.replace(`${row.tripId}-`, '') : row.id,
+  // Keep the public destination identity anchored on the location id.
+  id: row.locationId,
   addres: location.addres,
   lat: location.lat,
   lng: location.lng,
@@ -125,7 +150,7 @@ export async function fixDestinationIndexing(tripId: string): Promise<void> {
   }
 }
 
-export async function createTrip(trip: Trip): Promise<Trip> {
+export async function createTrip(trip: Trip): Promise<Trip | null> {
   console.log(JSON.stringify({
     level: "DEBUG",
     event: "CREATING_TRIP",
@@ -138,8 +163,61 @@ export async function createTrip(trip: Trip): Promise<Trip> {
       lng: d.lng,
     })),
   }));
+
+  // STRICT VALIDATION: Block trip creation without destinations
+  if (!trip.destinations || trip.destinations.length === 0) {
+    const error = `Trip creation BLOCKED: Trip ${trip.id} has no destinations. This indicates invalid data from source API/RabbitMQ. Trip will NOT be created.`;
+    console.error(JSON.stringify({
+      level: "ERROR",
+      event: "TRIP_CREATION_BLOCKED_NO_DESTINATIONS",
+      tripId: trip.id,
+      error,
+      tripData: {
+        id: trip.id,
+        status: trip.status,
+        origin: trip.origin ? { id: trip.origin.id, addres: trip.origin.addres } : null,
+        destinationsCount: trip.destinations?.length || 0,
+        totalDistance: trip.totalDistance,
+      },
+    }));
+    throw new Error(error);
+  }
+
+  // Additional validation: ensure all destinations have valid data
+  for (let i = 0; i < trip.destinations.length; i++) {
+    const dest = trip.destinations[i];
+    if (!dest || !dest.id || !Number.isFinite(dest.lat) || !Number.isFinite(dest.lng) || !dest.addres?.trim()) {
+      const error = `Trip creation BLOCKED: Trip ${trip.id} has invalid destination at index ${i}. Destination data incomplete.`;
+      console.error(JSON.stringify({
+        level: "ERROR",
+        event: "TRIP_CREATION_BLOCKED_INVALID_DESTINATION",
+        tripId: trip.id,
+        destinationIndex: i,
+        destinationData: dest,
+        error,
+      }));
+      throw new Error(error);
+    }
+  }
   
-  await upsertTripLocation(trip.origin);
+  // Check if all required locations exist, skip trip if missing
+  try {
+    await ensureTripLocationsExist(trip);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes("missing local locations")) {
+      console.warn(JSON.stringify({
+        level: "WARN",
+        event: "TRIP_SKIPPED_MISSING_LOCATIONS",
+        tripId: trip.id,
+        message: "Trip skipped due to missing locations - location sync should handle this",
+        error: errorMessage,
+      }));
+      return null; // Skip this trip, let location sync handle it
+    }
+    throw error; // Re-throw other errors
+  }
+
   const assignmentId = await ensureDriverCarAssignment(
     trip.carDriver.driver?.id ?? null,
     trip.carDriver.car.id,
@@ -155,16 +233,31 @@ export async function createTrip(trip: Trip): Promise<Trip> {
     updatedAt: new Date(trip.updatedAt),
   });
 
-  const savedDestinations = await Promise.all(
-    trip.destinations.map(async (destination) => {
-      await upsertTripLocation(destination);
-      const destinationId = `${trip.id}-${destination.id}`;
-      // Use locationId if available (for waypoints), otherwise use id (for origin/final destination)
-      const locationRef = destination.locationId || destination.id;
+  const savedDestinations: string[] = [];
+  const existingDestinationIds = await getExistingTripDestinationIds(trip.id);
+  for (const destination of trip.destinations) {
+    // Use locationId or fallback to destination.id for consistency
+    const locationRef = destination.locationId || destination.id;
+    const destinationRowId = existingDestinationIds.get(locationRef) ?? buildDestinationRowId(trip.id, locationRef);
+    
+    try {
+      // DEBUG: Log destination saving for debugging
+      console.log(JSON.stringify({
+        level: "DEBUG",
+        event: "SAVING_DESTINATION_RAW",
+        tripId: trip.id,
+        destinationId: destination.id,
+        locationId: destination.locationId,
+        locationRef,
+        index: destination.index,
+        addres: destination.addres,
+      }));
+      
+      // Insert destination with proper conflict resolution
       await db
         .insert(tripDestinations)
         .values({
-          id: destinationId,
+          id: destinationRowId,
           tripId: trip.id,
           locationId: locationRef,
           index: destination.index,
@@ -184,41 +277,130 @@ export async function createTrip(trip: Trip): Promise<Trip> {
             locationId: locationRef,
           },
         });
-      return destinationId;
-    }),
-  );
+      
+      existingDestinationIds.set(locationRef, destinationRowId);
+      savedDestinations.push(destinationRowId);
+    } catch (error) {
+      console.error(JSON.stringify({
+        level: "ERROR",
+        event: "DESTINATION_SAVE_FAILED",
+        tripId: trip.id,
+        destinationId: destination.id,
+        locationId: destination.locationId,
+        locationRef,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      throw error;
+    }
+  }
 
-  // Verify destination rows were persisted; reinsert any missing destination rows
+  // Verify destination rows were persisted with enhanced logging
   try {
+    console.log(JSON.stringify({
+      level: "DEBUG",
+      event: "DESTINATION_VERIFICATION_START",
+      tripId: trip.id,
+      expectedCount: savedDestinations.length,
+      savedDestinations,
+    }));
+    
     const dbRows = await db
-      .select({ id: tripDestinations.id })
+      .select({ id: tripDestinations.id, index: tripDestinations.index })
       .from(tripDestinations)
       .where(eq(tripDestinations.tripId, trip.id));
     const existingIds = dbRows.map(r => r.id);
     const missing = savedDestinations.filter(id => !existingIds.includes(id));
+    
+    console.log(JSON.stringify({
+      level: "DEBUG",
+      event: "DESTINATION_VERIFICATION_CHECK",
+      tripId: trip.id,
+      expectedCount: savedDestinations.length,
+      actualCount: existingIds.length,
+      existingIds,
+      missing,
+    }));
+    
     if (missing.length > 0) {
       console.warn(JSON.stringify({ level: "WARN", event: "MISSING_DESTINATIONS_AFTER_CREATE", tripId: trip.id, missing }));
-      for (const id of missing) {
+      for (const destinationRowId of missing) {
         // Recreate minimal destination row from in-memory trip.destinations
-        const parts = id.split("-");
-        const locationId = parts.slice(1).join("-");
-        const dest = trip.destinations.find(d => String(d.id) === locationId);
+        const dest = trip.destinations.find((d) => {
+          const locationRef = d.locationId || d.id;
+          const expectedRowId = existingDestinationIds.get(locationRef) ?? buildDestinationRowId(trip.id, locationRef);
+          return expectedRowId === destinationRowId;
+        });
         if (dest) {
-          await db.insert(tripDestinations).values({
-            id,
+          const locationRef = dest.locationId || dest.id;
+          console.log(JSON.stringify({
+            level: "DEBUG",
+            event: "RECOVERING_MISSING_DESTINATION",
             tripId: trip.id,
-            locationId: dest.id,
+            destinationRowId,
+            destinationIndex: dest.index,
+          }));
+          
+          await db.insert(tripDestinations).values({
+            id: destinationRowId,
+            tripId: trip.id,
+            locationId: locationRef,
             index: dest.index,
             fare: dest.fare.toString(),
             remainingDistance: dest.remainingDistance ?? null,
             isPassede: dest.isPassede,
             passedTime: dest.passedTime ?? null,
-          }).onConflictDoNothing();
+          }).onConflictDoUpdate({
+            target: tripDestinations.id,
+            set: {
+              tripId: trip.id,
+              locationId: locationRef,
+              index: dest.index,
+              fare: dest.fare.toString(),
+              remainingDistance: dest.remainingDistance ?? null,
+              isPassede: dest.isPassede,
+              passedTime: dest.passedTime ?? null,
+            },
+          });
+        } else {
+          console.error(JSON.stringify({
+            level: "ERROR",
+            event: "CANNOT_RECOVER_MISSING_DESTINATION",
+            tripId: trip.id,
+            destinationRowId,
+            reason: "Destination not found in trip.destinations",
+          }));
         }
+      }
+      
+      // Final verification after recovery
+      const finalDbRows = await db
+        .select({ id: tripDestinations.id })
+        .from(tripDestinations)
+        .where(eq(tripDestinations.tripId, trip.id));
+      const finalExistingIds = finalDbRows.map(r => r.id);
+      const stillMissing = savedDestinations.filter(id => !finalExistingIds.includes(id));
+      
+      if (stillMissing.length > 0) {
+        console.error(JSON.stringify({
+          level: "ERROR",
+          event: "DESTINATION_RECOVERY_FAILED",
+          tripId: trip.id,
+          stillMissing,
+        }));
+        throw new Error(`Failed to save ${stillMissing.length} destinations for trip ${trip.id}`);
+      } else {
+        console.log(JSON.stringify({
+          level: "INFO",
+          event: "DESTINATION_RECOVERY_SUCCESS",
+          tripId: trip.id,
+          recoveredCount: missing.length,
+          finalCount: finalExistingIds.length,
+        }));
       }
     }
   } catch (err) {
     console.error(JSON.stringify({ level: "ERROR", event: "DESTINATION_VERIFICATION_FAILED", tripId: trip.id, error: err instanceof Error ? err.message : String(err) }));
+    throw err;
   }
 
   console.log(JSON.stringify({
@@ -232,7 +414,24 @@ export async function createTrip(trip: Trip): Promise<Trip> {
   return trip;
 }
 
-export async function updateTrip(trip: Trip): Promise<Trip> {
+export async function updateTrip(trip: Trip): Promise<Trip | null> {
+  // Special diagnostic logging for Trip 521
+  if (trip.id === "521") {
+    console.log(JSON.stringify({
+      level: "DIAG",
+      event: "TRIP_521_UPDATE_ATTEMPT",
+      tripId: trip.id,
+      destinationsCount: trip.destinations.length,
+      destinations: trip.destinations.map(d => ({
+        id: d.id,
+        locationId: d.locationId,
+        index: d.index,
+        address: d.addres,
+      })),
+      caller: new Error().stack?.split('\n')[2]?.trim(), // Track who called this
+    }));
+  }
+  
   console.log(JSON.stringify({
     level: "DEBUG",
     event: "UPDATING_TRIP",
@@ -245,8 +444,61 @@ export async function updateTrip(trip: Trip): Promise<Trip> {
       lng: d.lng,
     })),
   }));
+
+  // STRICT VALIDATION: Block trip updates without destinations
+  if (!trip.destinations || trip.destinations.length === 0) {
+    const error = `Trip update BLOCKED: Trip ${trip.id} has no destinations. This indicates invalid data from source API/RabbitMQ. Trip will NOT be updated.`;
+    console.error(JSON.stringify({
+      level: "ERROR",
+      event: "TRIP_UPDATE_BLOCKED_NO_DESTINATIONS",
+      tripId: trip.id,
+      error,
+      tripData: {
+        id: trip.id,
+        status: trip.status,
+        origin: trip.origin ? { id: trip.origin.id, addres: trip.origin.addres } : null,
+        destinationsCount: trip.destinations?.length || 0,
+        totalDistance: trip.totalDistance,
+      },
+    }));
+    throw new Error(error);
+  }
+
+  // Additional validation: ensure all destinations have valid data
+  for (let i = 0; i < trip.destinations.length; i++) {
+    const dest = trip.destinations[i];
+    if (!dest || !dest.id || !Number.isFinite(dest.lat) || !Number.isFinite(dest.lng) || !dest.addres?.trim()) {
+      const error = `Trip update BLOCKED: Trip ${trip.id} has invalid destination at index ${i}. Destination data incomplete.`;
+      console.error(JSON.stringify({
+        level: "ERROR",
+        event: "TRIP_UPDATE_BLOCKED_INVALID_DESTINATION",
+        tripId: trip.id,
+        destinationIndex: i,
+        destinationData: dest,
+        error,
+      }));
+      throw new Error(error);
+    }
+  }
   
-  await upsertTripLocation(trip.origin);
+  // Check if all required locations exist, skip trip if missing
+  try {
+    await ensureTripLocationsExist(trip);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes("missing local locations")) {
+      console.warn(JSON.stringify({
+        level: "WARN",
+        event: "TRIP_SKIPPED_MISSING_LOCATIONS",
+        tripId: trip.id,
+        message: "Trip skipped due to missing locations - location sync should handle this",
+        error: errorMessage,
+      }));
+      return null; // Skip this trip, let location sync handle it
+    }
+    throw error; // Re-throw other errors
+  }
+
   const assignmentId = await ensureDriverCarAssignment(
     trip.carDriver.driver?.id ?? null,
     trip.carDriver.car.id,
@@ -262,40 +514,120 @@ export async function updateTrip(trip: Trip): Promise<Trip> {
       driverCarAssignmentId: assignmentId,
     })
     .where(eq(trips.id, trip.id));
+  const existingDestinationIds = await getExistingTripDestinationIds(trip.id);
   if (trip.destinations.length > 0) {
-    const keepIds = trip.destinations.map((d) => `${trip.id}-${d.id}`);
+    // Calculate keepIds using the same logic as destination saving (locationId || id)
+    const keepIds = trip.destinations.map((d) => {
+      // Use the same identifier logic as in destination saving
+      const savedRef = d.locationId || d.id;
+      const destinationRowId = existingDestinationIds.get(savedRef) ?? buildDestinationRowId(trip.id, savedRef);
+      console.log(JSON.stringify({
+        level: "DEBUG",
+        event: "DESTINATION_KEEP_ID_CALCULATION",
+        tripId: trip.id,
+        destinationId: d.id,
+        locationId: d.locationId,
+        savedRef,
+        destinationRowId,
+      }));
+      return destinationRowId;
+    });
+    
+    // Get existing destinations and determine what to delete
     try {
       const existing = await db.select({ id: tripDestinations.id }).from(tripDestinations).where(eq(tripDestinations.tripId, trip.id));
       const existingIds = existing.map(r => r.id);
       const toDelete = existingIds.filter(id => !keepIds.includes(id));
-      console.log(JSON.stringify({ level: "DEBUG", event: "DESTINATIONS_PRUNE", tripId: trip.id, keepIds, existingIds, toDelete }));
+      
+      // Special diagnostic logging for Trip 521
+      if (trip.id === "521") {
+        console.log(JSON.stringify({ 
+          level: "DIAG", 
+          event: "TRIP_521_DESTINATION_PRUNE", 
+          tripId: trip.id, 
+          destinationsInMemory: trip.destinations.length,
+          keepIds, 
+          existingIds, 
+          toDelete,
+          destinationsToSave: trip.destinations.map(d => ({
+            id: d.id,
+            locationId: d.locationId,
+            index: d.index,
+            address: d.addres,
+          }))
+        }));
+      }
+      
+      console.log(JSON.stringify({ 
+        level: "DEBUG", 
+        event: "DESTINATIONS_PRUNE", 
+        tripId: trip.id, 
+        keepIds, 
+        existingIds, 
+        toDelete,
+        destinationsToSave: trip.destinations.map(d => ({
+          id: d.id,
+          locationId: d.locationId,
+          index: d.index,
+          address: d.addres,
+        }))
+      }));
+      
       if (toDelete.length > 0) {
-        await db
-          .delete(tripDestinations)
-          .where(
-            and(
-              eq(tripDestinations.tripId, trip.id),
-              not(inArray(tripDestinations.id, keepIds)),
-            ),
-          );
+        // Special diagnostic logging for Trip 521 deletion
+        if (trip.id === "521") {
+          console.log(JSON.stringify({
+            level: "DIAG",
+            event: "TRIP_521_DELETING_DESTINATIONS",
+            tripId: trip.id,
+            toDelete,
+          }));
+        }
+        
+        await db.delete(tripDestinations).where(and(eq(tripDestinations.tripId, trip.id), not(inArray(tripDestinations.id, keepIds))));
       }
     } catch (err) {
       console.error(JSON.stringify({ level: "ERROR", event: "DESTINATION_PRUNE_FAILED", tripId: trip.id, error: err instanceof Error ? err.message : String(err) }));
     }
   } else {
+    // Special diagnostic logging for Trip 521 with no destinations
+    if (trip.id === "521") {
+      console.log(JSON.stringify({
+        level: "DIAG",
+        event: "TRIP_521_NO_DESTINATIONS",
+        tripId: trip.id,
+        action: "DELETING_ALL_DESTINATIONS",
+        reason: "Trip has 0 destinations in memory, deleting all from database",
+      }));
+    }
     await db.delete(tripDestinations).where(eq(tripDestinations.tripId, trip.id));
   }
 
   const savedDestinations = await Promise.all(
-    trip.destinations.map(async (destination) => {
-      await upsertTripLocation(destination);
-      const destinationId = `${trip.id}-${destination.id}`;
+    trip.destinations.map(async (destination, destIndex) => {
+      // Use locationId if available (for waypoints), otherwise use id (for route destinations)
+      const locationRef = destination.locationId || destination.id;
+      const destinationRowId = existingDestinationIds.get(locationRef) ?? buildDestinationRowId(trip.id, locationRef);
+      
+      console.log(JSON.stringify({
+        level: "DEBUG",
+        event: "SAVING_DESTINATION",
+        tripId: trip.id,
+        destinationIndex: destIndex,
+        destinationId: destination.id,
+        locationId: destination.locationId,
+        locationRef,
+        destinationRowId,
+        destinationAddress: destination.addres,
+        destinationDbIndex: destination.index,
+      }));
+      
       await db
         .insert(tripDestinations)
         .values({
-          id: destinationId,
+          id: destinationRowId,
           tripId: trip.id,
-          locationId: destination.id,
+          locationId: locationRef,
           order: destination.order ?? null, // Store original order from event
           index: destination.index,
           fare: destination.fare.toString(),
@@ -312,10 +644,10 @@ export async function updateTrip(trip: Trip): Promise<Trip> {
             remainingDistance: destination.remainingDistance ?? null,
             isPassede: destination.isPassede,
             passedTime: destination.passedTime ?? null,
-            locationId: destination.id,
+            locationId: locationRef,
           },
         });
-      return destinationId;
+      return destinationRowId;
     }),
   );
 
@@ -337,6 +669,41 @@ export async function deleteTrip(id: string): Promise<void> {
 }
 
 export async function getTripById(id: string): Promise<Trip | null> {
+  // Special diagnostic logging and fix for Trip 521
+  if (id === "521") {
+    console.log(JSON.stringify({
+      level: "DIAG",
+      event: "TRIP_521_INVESTIGATION_START",
+      tripId: id,
+      timestamp: Date.now(),
+    }));
+    
+    // Check if trip exists
+    const [tripRowCheck] = await db.select().from(trips).where(eq(trips.id, id));
+    if (!tripRowCheck) {
+      console.log(JSON.stringify({
+        level: "DIAG",
+        event: "TRIP_521_NOT_FOUND",
+        tripId: id,
+      }));
+      return null;
+    }
+    
+    // Check destinations directly
+    const destinationRowsCheck = await db.select().from(tripDestinations).where(eq(tripDestinations.tripId, id));
+    console.log(JSON.stringify({
+      level: "DIAG",
+      event: "TRIP_521_DESTINATIONS_CHECK",
+      tripId: id,
+      destinationRowsCount: destinationRowsCheck.length,
+      destinationRows: destinationRowsCheck,
+    }));
+    
+    // NOTE: Auto-repair mechanism removed - we now BLOCK trips without destinations entirely
+    // If Trip 521 has no destinations, this indicates a fundamental data integrity issue
+    // that should be prevented at the source, not repaired after the fact.
+  }
+
   const [tripRow] = await db.select().from(trips).where(eq(trips.id, id));
   if (!tripRow) {
     return null;
@@ -365,6 +732,38 @@ export async function getTripById(id: string): Promise<Trip | null> {
       asc(tripDestinations.index)
     );
 
+  // DEBUG: Log all destination rows for debugging
+  console.log(JSON.stringify({
+    level: "DEBUG",
+    event: "GETTING_TRIP_DESTINATIONS",
+    tripId: id,
+    destinationRowsCount: destinationRows.length,
+    destinationRows: destinationRows.map(row => ({
+      id: row.id,
+      tripId: row.tripId,
+      locationId: row.locationId,
+      order: row.order,
+      index: row.index,
+    })),
+  }));
+
+  // Special diagnostic logging for Trip 521
+  if (id === "521") {
+    console.log(JSON.stringify({
+      level: "DIAG",
+      event: "TRIP_521_DESTINATION_ROWS",
+      tripId: id,
+      destinationRowsCount: destinationRows.length,
+      destinationRows: destinationRows.map(row => ({
+        id: row.id,
+        tripId: row.tripId,
+        locationId: row.locationId,
+        order: row.order,
+        index: row.index,
+      })),
+    }));
+  }
+
   console.log(JSON.stringify({
     level: "DEBUG",
     event: "GETTING_TRIP_DESTINATIONS",
@@ -380,79 +779,182 @@ export async function getTripById(id: string): Promise<Trip | null> {
   }));
 
   const locationIds = destinationRows.map((row) => row.locationId);
+  const locations = locationIds.length > 0 ? await getTripLocationByIds(locationIds) : [];
+  const locationMap = new Map(locations.map((loc: TripLocation) => [loc.id, loc]));
 
-  const locationRows =
-    locationIds.length > 0
-      ? await db
-          .select()
-          .from(tripLocations)
-          .where(inArray(tripLocations.id, locationIds))
-      : [];
-
-  console.log(JSON.stringify({
-    level: "DEBUG",
-    event: "FETCHED_LOCATIONS_FOR_DESTINATIONS",
-    tripId: id,
-    locationIds,
-    locationRowsCount: locationRows.length,
-    locationRows: locationRows.map(row => ({
-      id: row.id,
-      address: row.address,
-    })),
-  }));
-
-  const locationMap = new Map(locationRows.map((row) => [row.id, row]));
-
-  const destinations: Destination[] = [];
+  let destinations: Destination[] = [];
   for (const row of destinationRows) {
-    try {
-      const location = locationMap.get(row.locationId);
-      if (!location) {
-        console.error(JSON.stringify({
-          level: "ERROR",
-          event: "MISSING_LOCATION_FOR_DESTINATION",
-          tripId: id,
-          destinationId: row.id,
-          locationId: row.locationId,
-          locationIdType: typeof row.locationId,
-          availableLocationIds: Array.from(locationMap.keys()),
-          locationIdsQueried: locationIds,
-        }));
-        // Try to fetch the location directly to see if it exists
-        const directLocation = await db
-          .select()
-          .from(tripLocations)
-          .where(eq(tripLocations.id, row.locationId));
-        console.log(JSON.stringify({
-          level: "DEBUG",
-          event: "DIRECT_LOCATION_LOOKUP",
-          tripId: id,
-          locationId: row.locationId,
-          found: directLocation.length > 0,
-          location: directLocation[0] ? {
-            id: directLocation[0].id,
-            address: directLocation[0].address,
-          } : null,
-        }));
-        // Skip this destination instead of throwing to see all destinations
-        continue;
-      }
-
-      destinations.push(destinationFromRow(row, {
-        id: location.id,
-        addres: location.address,
-        lat: location.latitude,
-        lng: location.longitude,
-      }));
-    } catch (error) {
+    const location = locationMap.get(row.locationId);
+    if (!location) {
       console.error(JSON.stringify({
         level: "ERROR",
-        event: "DESTINATION_MAPPING_ERROR",
+        event: "DESTINATION_LOCATION_NOT_FOUND",
         tripId: id,
         destinationId: row.id,
-        error: error instanceof Error ? error.message : String(error),
+        locationId: row.locationId,
       }));
-      // Continue processing other destinations
+      continue;
+    }
+    destinations.push({
+      id: row.locationId,
+      locationId: row.locationId,
+      lat: location.lat,
+      lng: location.lng,
+      addres: location.addres,
+      order: row.order,
+      index: row.index,
+      fare: parseFloat(row.fare),
+      remainingDistance: row.remainingDistance ? Number(row.remainingDistance) : null,
+      isPassede: row.isPassede,
+      passedTime: row.passedTime ? Number(row.passedTime) : null,
+    });
+  }
+
+  // DATA INTEGRITY CHECK: Validate destinations after retrieval
+  if (destinations.length > 0) {
+    const waypointCount = destinations.filter(d => d.order !== null).length;
+    const routeDestinationCount = destinations.filter(d => d.order === null).length;
+    const expectedTotal = waypointCount + 1;
+    
+    // Check for missing destinations
+    if (destinations.length !== expectedTotal) {
+      console.error(JSON.stringify({
+        level: "ERROR",
+        event: "TRIP_RETRIEVAL_DESTINATION_COUNT_MISMATCH",
+        tripId: id,
+        waypointCount,
+        routeDestinationCount,
+        actualTotal: destinations.length,
+        expectedTotal,
+        destinations: destinations.map(d => ({
+          id: d.id,
+          locationId: d.locationId,
+          index: d.index,
+          order: d.order,
+          addres: d.addres,
+        }))
+      }));
+      
+      // RECOVERY: Try to fetch missing destinations directly from database
+      console.log(JSON.stringify({
+        level: "INFO",
+        event: "ATTEMPTING_DESTINATION_RECOVERY",
+        tripId: id,
+        message: "Attempting to recover missing destinations from database"
+      }));
+      
+      // Re-fetch all destination rows without ordering to see if we missed any
+      const allDestinationRows = await db
+        .select()
+        .from(tripDestinations)
+        .where(eq(tripDestinations.tripId, id));
+      
+      console.log(JSON.stringify({
+        level: "DEBUG",
+        event: "RECOVERY_ALL_DESTINATION_ROWS",
+        tripId: id,
+        allRowsCount: allDestinationRows.length,
+        allRows: allDestinationRows.map(row => ({
+          id: row.id,
+          tripId: row.tripId,
+          locationId: row.locationId,
+          order: row.order,
+          index: row.index,
+        }))
+      }));
+      
+      // If we found more rows, rebuild destinations
+      if (allDestinationRows.length > destinationRows.length) {
+        console.log(JSON.stringify({
+          level: "INFO",
+          event: "DESTINATION_RECOVERY_SUCCESS",
+          tripId: id,
+          originalCount: destinationRows.length,
+          recoveredCount: allDestinationRows.length,
+          message: "Recovered missing destinations, rebuilding destination list"
+        }));
+        
+        // Rebuild destinations with all rows
+        const recoveredLocationIds = allDestinationRows.map(row => row.locationId);
+        const recoveredLocations = recoveredLocationIds.length > 0 ? await getTripLocationByIds(recoveredLocationIds) : [];
+        const recoveredLocationMap = new Map(recoveredLocations.map((loc: TripLocation) => [loc.id, loc]));
+        
+        const recoveredDestinations: Destination[] = [];
+        for (const row of allDestinationRows) {
+          const location = recoveredLocationMap.get(row.locationId);
+          if (!location) {
+            console.error(JSON.stringify({
+              level: "ERROR",
+              event: "RECOVERED_DESTINATION_LOCATION_NOT_FOUND",
+              tripId: id,
+              destinationId: row.id,
+              locationId: row.locationId,
+            }));
+            continue;
+          }
+          recoveredDestinations.push({
+            id: row.locationId,
+            locationId: row.locationId,
+            lat: location.lat,
+            lng: location.lng,
+            addres: location.addres,
+            order: row.order,
+            index: row.index,
+            fare: parseFloat(row.fare),
+            remainingDistance: row.remainingDistance ? Number(row.remainingDistance) : null,
+            isPassede: row.isPassede,
+            passedTime: row.passedTime ? Number(row.passedTime) : null,
+          });
+        }
+        
+        // Replace destinations with recovered ones
+        destinations = recoveredDestinations;
+      }
+    }
+    
+    // Check for index gaps
+    const indices = destinations.map(d => d.index).sort((a, b) => a - b);
+    const hasGap = indices.some((expectedIndex, actualIndex) => expectedIndex !== actualIndex);
+    if (hasGap) {
+      // Use the first destination's locationId for the row ID
+      const firstDestination = destinations[0];
+      if (!firstDestination) {
+        console.error(JSON.stringify({
+          level: "ERROR",
+          event: "TRIP_RETRIEVAL_INDEX_GAP",
+          tripId: id,
+          error: "No destinations available to build destinationRowId",
+          expectedIndices: indices.map((_, i) => i),
+          actualIndices: indices,
+        }));
+        return null;
+      }
+      if (!firstDestination.locationId) {
+        console.error(JSON.stringify({
+          level: "ERROR",
+          event: "TRIP_RETRIEVAL_INDEX_GAP",
+          tripId: id,
+          error: "First destination has no locationId",
+          expectedIndices: indices.map((_, i) => i),
+          actualIndices: indices,
+        }));
+        return null;
+      }
+      const destinationRowId = buildDestinationRowId(id, firstDestination.locationId);
+      console.error(JSON.stringify({
+        level: "ERROR",
+        event: "TRIP_RETRIEVAL_INDEX_GAP",
+        tripId: id,
+        expectedIndices: indices.map((_, i) => i),
+        destinationRowId,
+        actualIndices: indices,
+        destinations: destinations.map(d => ({
+          id: d.id,
+          locationId: d.locationId,
+          order: d.order,
+          addres: d.addres,
+        })),
+      }));
     }
   }
 

@@ -1,4 +1,4 @@
-import type { VehicleEvent, DriverEvent, LocationUpdate, VehicleResponseDto, CompanyUserResponseDto, CurreLocation, TripEventMessage, RemoteTrip, NavigaTripUpdateEvent, NavigaLocationUpdateEvent, TripServiceEvent, TripSnapshot } from "../types";
+import type { VehicleEvent, DriverEvent, LocationUpdate, VehicleResponseDto, CompanyUserResponseDto, CurreLocation, TripEventMessage, RemoteTrip, NavigaTripUpdateEvent, NavigaLocationUpdateEvent, TripServiceEvent, TripSnapshot, Trip } from "../types";
 import { mapVehicleResponseDtoToCar } from "../mappers/vehicleMapper";
 import { mapCompanyUserResponseDtoToDriver } from "../mappers/driverMapper";
 import { mapRemoteTripToLocalTrip, mapTripServiceTripToLocalTrip } from "../mappers/tripMapper";
@@ -10,6 +10,7 @@ import * as tripRepository from "../repositories/trips";
 import * as metricsRepository from "../repositories/metrics";
 import * as snapshotRepository from "../repositories/snapshots";
 import { updateTripMetrics } from "./tripMetricsService";
+import * as syncService from "./syncService";
 import { pubsub, TRIGGERS } from "./pubsub";
 
 export async function handleVehicleEvent(message: Buffer): Promise<void> {
@@ -199,21 +200,63 @@ export async function handleTripEvent(message: Buffer): Promise<void> {
     driverId = driver?.id || null;
   }
   
-  // Map remote trip to local trip
-  const localTrip = await mapRemoteTripToLocalTrip(remoteTrip, vehicleId, driverId);
+  // Map remote trip to local trip with validation
+  let localTrip: Trip;
+  try {
+    localTrip = await mapRemoteTripToLocalTrip(remoteTrip, vehicleId, driverId);
+  } catch (mappingError) {
+    const mappingMessage = mappingError instanceof Error ? mappingError.message : String(mappingError);
+    if (mappingMessage.includes("missing local locations") || mappingMessage.includes("missing from local storage")) {
+      console.warn(JSON.stringify({
+        level: "WARN",
+        event: "TRIP_MAPPING_LOCATION_REFRESH",
+        tripId: remoteTrip.id,
+        message: "Refreshing locations before retrying trip mapping",
+      }));
+      await syncService.syncLocations();
+      try {
+        localTrip = await mapRemoteTripToLocalTrip(remoteTrip, vehicleId, driverId);
+      } catch (retryError) {
+        console.error(JSON.stringify({
+          level: "ERROR",
+          event: "TRIP_MAPPING_FAILED",
+          tripId: remoteTrip.id,
+          vehicleId,
+          driverId,
+          error: retryError instanceof Error ? retryError.message : String(retryError),
+          reason: "Trip validation failed - missing or invalid locations",
+          remoteSummary: {
+            id: remoteTrip.id,
+            status: remoteTrip.status,
+            routePresent: !!remoteTrip.route,
+            routeHasOrigin: !!(remoteTrip.route && remoteTrip.route.origin),
+            routeHasDestination: !!(remoteTrip.route && remoteTrip.route.destination),
+            waypointsCount: remoteTrip.waypoints?.length ?? 0,
+            waypoints: (remoteTrip.waypoints || []).map(wp => ({
+              id: wp.id,
+              locationId: wp.location_id,
+              hasLocation: !!wp.location,
+              order: wp.order,
+            })),
+          },
+        }));
+        return;
+      }
+    }
 
-  // Guard: if mapping produced zero destinations (shouldn't happen for valid trips),
-  // log full context for debugging: remote payload, mapping result, and reasons.
-  if (!localTrip.destinations || localTrip.destinations.length === 0) {
-    console.warn(JSON.stringify({
-      level: "WARN",
-      event: "TRIP_WITH_NO_DESTINATIONS",
-      tripId: localTrip.id,
-      reason: "mapper_returned_no_destinations",
+    console.error(JSON.stringify({
+      level: "ERROR",
+      event: "TRIP_MAPPING_FAILED",
+      tripId: remoteTrip.id,
+      vehicleId,
+      driverId,
+      error: mappingError instanceof Error ? mappingError.message : String(mappingError),
+      reason: "Trip validation failed - missing or invalid locations",
       remoteSummary: {
         id: remoteTrip.id,
         status: remoteTrip.status,
         routePresent: !!remoteTrip.route,
+        routeHasOrigin: !!(remoteTrip.route && remoteTrip.route.origin),
         routeHasDestination: !!(remoteTrip.route && remoteTrip.route.destination),
         waypointsCount: remoteTrip.waypoints?.length ?? 0,
         waypoints: (remoteTrip.waypoints || []).map(wp => ({
@@ -223,17 +266,9 @@ export async function handleTripEvent(message: Buffer): Promise<void> {
           order: wp.order,
         })),
       },
-      mapped: {
-        id: localTrip.id,
-        vehicleId,
-        driverId,
-        status: localTrip.status,
-        destinationsCount: localTrip.destinations.length,
-      },
-      note: "Mapper may have skipped waypoints or route destination due to missing location data. See mapper logs for WAYPOINT_MAPPING_FAILED / ROUTE_DESTINATION_MAPPING_FAILED entries.",
-      rawRemote: remoteTrip,
-      rawMapped: localTrip,
     }));
+    // Skip trip creation/update when validation fails
+    return;
   }
   
   // LOG: What's processed (after mapping)
@@ -389,7 +424,7 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
 
   // Get the trip by Naviga trip ID (converted to string)
   const tripId = String(event.trip.id);
-  const trip = await tripRepository.getTripById(tripId);
+  let trip = await tripRepository.getTripById(tripId);
   
   if (!trip) {
     console.warn(JSON.stringify({
@@ -416,6 +451,26 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
 
   // Update waypoint progresses: match by waypointIndex to destination index
   if (event.trip.waypointProgresses && event.trip.waypointProgresses.length > 0) {
+    console.log(JSON.stringify({
+      level: "DEBUG",
+      event: "PROCESSING_WAYPOINT_PROGRESSES",
+      tripId: tripId,
+      waypointProgressesCount: event.trip.waypointProgresses.length,
+      destinationsCount: trip.destinations.length,
+      waypointProgresses: event.trip.waypointProgresses.map(wp => ({
+        waypointIndex: wp.waypointIndex,
+        waypointId: wp.waypointId,
+        waypointName: wp.waypointName,
+        state: wp.state,
+        remainingDistance: wp.remainingDistance,
+      })),
+      destinations: trip.destinations.map(d => ({
+        id: d.id,
+        index: d.index,
+        addres: d.addres,
+      })),
+    }));
+    
     for (const wp of event.trip.waypointProgresses) {
       // Match by index: waypointIndex is 1-based, destination.index is 0-based
       const destination = trip.destinations.find(d => d.index === wp.waypointIndex - 1);
@@ -438,25 +493,55 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
           waypointId: wp.waypointId,
           destinationId: destination.id,
           destinationIndex: destination.index,
+          destinationAddress: destination.addres,
           remainingDistance: wp.remainingDistance,
           remainingTime: wp.remainingTime,
           state: wp.state,
           isPassede: destination.isPassede,
         }));
       } else {
+        // Check if this is the final route destination that might be missing
+        const isFinalDestination = wp.waypointIndex === trip.destinations.length + 1;
+        
         console.warn(JSON.stringify({
           level: "WARN",
           event: "WAYPOINT_DESTINATION_NOT_FOUND",
           tripId: tripId,
           waypointId: wp.waypointId,
           waypointIndex: wp.waypointIndex,
+          waypointName: wp.waypointName,
+          isFinalDestination,
+          expectedDestinationIndex: wp.waypointIndex - 1,
           availableDestinations: trip.destinations.map(d => ({
             id: d.id,
             index: d.index,
+            addres: d.addres,
           })),
+          maxDestinationIndex: Math.max(...trip.destinations.map(d => d.index)),
         }));
+        
+        // If this appears to be the final destination and it's missing, 
+        // we should consider this a data integrity issue
+        if (isFinalDestination) {
+          console.error(JSON.stringify({
+            level: "ERROR",
+            event: "MISSING_FINAL_ROUTE_DESTINATION",
+            tripId: tripId,
+            waypointIndex: wp.waypointIndex,
+            waypointId: wp.waypointId,
+            waypointName: wp.waypointName,
+            message: "Route destination appears to be missing from trip destinations. Trip may need to be recreated.",
+          }));
+        }
       }
     }
+  }
+
+  // Re-check the local trip after any location refresh requirement may have occurred.
+  try {
+    trip = (await tripRepository.getTripById(tripId)) ?? trip;
+  } catch {
+    // keep the mapped trip we already have
   }
 
   // Update current location if available
@@ -600,31 +685,74 @@ export async function handleTripServiceEvent(message: Buffer): Promise<void> {
   }));
 
   try {
-    // Map trip service data to local trip
-    const localTrip = await mapTripServiceTripToLocalTrip(event.data);
-      // Guard: log if mapped trip has zero destinations
-      if (!localTrip.destinations || localTrip.destinations.length === 0) {
+    // Map trip service data to local trip with validation
+    let localTrip: Trip;
+    try {
+      localTrip = await mapTripServiceTripToLocalTrip(event.data);
+    } catch (mappingError) {
+      const mappingMessage = mappingError instanceof Error ? mappingError.message : String(mappingError);
+      if (mappingMessage.includes("missing local locations") || mappingMessage.includes("missing from local storage")) {
         console.warn(JSON.stringify({
           level: "WARN",
-          event: "TRIP_SERVICE_TRIP_WITH_NO_DESTINATIONS",
-          tripId: localTrip.id,
-          reason: "mapper_returned_no_destinations",
-          serviceEvent: {
-            eventType: event.event,
-            raw: event.data,
-            waypointsCount: event.data.waypoints?.length ?? 0,
-            waypoints: (event.data.waypoints || []).map(wp => ({
-              id: wp.id,
-              locationId: wp.location_id,
-              hasLocation: !!wp.location,
-              order: wp.order,
-            })),
-            routeHasDestination: !!(event.data.route && event.data.route.destination),
-          },
-          mapped: localTrip,
-          note: "Trip Service events are expected to include complete waypoint/location info; mapper logs may show why items were skipped.",
+          event: "TRIP_SERVICE_MAPPING_LOCATION_REFRESH",
+          tripId: event.data.id,
+          message: "Refreshing locations before retrying trip service mapping",
         }));
+        await syncService.syncLocations();
+        try {
+          localTrip = await mapTripServiceTripToLocalTrip(event.data);
+        } catch (retryError) {
+          console.error(JSON.stringify({
+            level: "ERROR",
+            event: "TRIP_SERVICE_MAPPING_FAILED",
+            eventType: event.event,
+            tripId: event.data.id,
+            error: retryError instanceof Error ? retryError.message : String(retryError),
+            reason: "Trip validation failed - missing or invalid locations",
+            serviceSummary: {
+              eventType: event.event,
+              id: event.data.id,
+              status: event.data.status,
+              routeHasOrigin: !!(event.data.route && (event.data.route as any).origin),
+              routeHasDestination: !!(event.data.route && event.data.route.destination),
+              waypointsCount: event.data.waypoints?.length ?? 0,
+              waypoints: (event.data.waypoints || []).map((wp: any) => ({
+                id: wp.id,
+                locationId: wp.location_id,
+                hasLocation: !!wp.location,
+                order: wp.order,
+              })),
+            },
+          }));
+          return;
+        }
       }
+
+      console.error(JSON.stringify({
+        level: "ERROR",
+        event: "TRIP_SERVICE_MAPPING_FAILED",
+        eventType: event.event,
+        tripId: event.data.id,
+        error: mappingError instanceof Error ? mappingError.message : String(mappingError),
+        reason: "Trip validation failed - missing or invalid locations",
+        serviceSummary: {
+          eventType: event.event,
+          id: event.data.id,
+          status: event.data.status,
+          routeHasOrigin: !!(event.data.route && (event.data.route as any).origin),
+          routeHasDestination: !!(event.data.route && event.data.route.destination),
+          waypointsCount: event.data.waypoints?.length ?? 0,
+          waypoints: (event.data.waypoints || []).map((wp: any) => ({
+            id: wp.id,
+            locationId: wp.location_id,
+            hasLocation: !!wp.location,
+            order: wp.order,
+          })),
+        },
+      }));
+      // Skip trip creation/update when validation fails
+      return;
+    }
     
     // Check if trip exists
     const existingTrip = await tripRepository.getTripById(localTrip.id);

@@ -1,134 +1,119 @@
-# Trip Creation Guide
+# Trip API Guide (Create + Vehicle Trips)
 
 ## Overview
-This guide explains how to create trips using the `/trips` POST endpoint. The system supports both route-based trips (using existing routes) and custom trips (with custom waypoints).
+This document reflects the current trip API behavior for:
+- Creating trips via `POST /trips`
+- Getting trips for a vehicle via `GET /trips/vehicle/{vehicle_id}`
 
-## API Endpoint
-```
+The API supports route-based trips, custom waypoints, reversed trips, and `no_waypoints` mode.
+
+## Create Trip
+
+### Endpoint
+```http
 POST /trips
 Content-Type: application/json
 ```
 
-## Complete JSON Body Structure
-
-### Basic Trip Creation (Route-based)
+### Request Body
 ```json
 {
   "route_id": 123,
   "vehicle_id": 456,
-  "departure_time": 1640995200,
+  "departure_time": 1767225600,
   "connection_mode": "ONLINE",
+  "auto_return": false,
+  "price": 2500,
   "notes": "Optional trip notes",
-  "is_reversed": false,
-  "custom_waypoints": []
-}
-```
-
-### Advanced Trip Creation (Custom Waypoints)
-```json
-{
-  "route_id": 123,
-  "vehicle_id": 456,
-  "departure_time": 1640995200,
-  "connection_mode": "HYBRID",
-  "notes": "Custom route with additional stops",
   "is_reversed": false,
   "custom_waypoints": [
     {
       "location_id": 789,
       "order": 1,
-      "price": 25.50,
+      "price": 1000,
       "remaining_time": 1800,
-      "remaining_distance": 5000.0
-    },
-    {
-      "location_id": 790,
-      "order": 2,
-      "price": 30.00,
-      "remaining_time": 3600,
-      "remaining_distance": 10000.0
+      "remaining_distance": 5000
     }
-  ]
+  ],
+  "no_waypoints": false
 }
 ```
 
-## Field Details
+### Fields
 
-### Required Fields
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `route_id` | `int64` | Yes | Must be `> 0` and route must exist |
+| `vehicle_id` | `int64` | Yes | Must be `> 0`; vehicle must exist and be `AVAILABLE` |
+| `departure_time` | `int64` | Yes | Unix timestamp, must be `> 0` |
+| `connection_mode` | `string` | Yes | One of `ONLINE`, `OFFLINE`, `HYBRID` |
+| `auto_return` | `bool` | No | Optional flag. When `true`, this trip can auto-create a reversed next trip on completion |
+| `price` | `*float64` | No | If omitted, route `route_price` is used; if provided must be `> 0` |
+| `notes` | `*string` | No | Optional free text |
+| `is_reversed` | `bool` | No | Reverses route direction in trip response |
+| `custom_waypoints` | `[]CreateCustomWaypoint` | No | Optional custom waypoint list |
+| `no_waypoints` | `bool` | No | Keep only passthrough route waypoints |
 
-| Field | Type | Description | Validation Rules |
-|-------|------|-------------|------------------|
-| `route_id` | `int64` | ID of the existing route to use | Must be > 0, route must exist |
-| `vehicle_id` | `int64` | ID of the vehicle for this trip | Must be > 0, vehicle must exist and be available |
-| `departure_time` | `int64` | Unix timestamp for departure | Must be > 0 (future timestamp) |
-| `connection_mode` | `string` | How the trip will be tracked | Must be one of: "ONLINE", "OFFLINE", "HYBRID" |
+### `custom_waypoints` item fields
 
-### Optional Fields
+| Field | Type | Required | Validation |
+|---|---|---|---|
+| `location_id` | `int64` | Yes | Must be `> 0` and location must exist |
+| `order` | `int` | Yes | Must be `>= 0` |
+| `price` | `*float64` | No | If provided, must be `> 0` |
+| `remaining_time` | `*int64` | No | If provided, must be `>= 0` |
+| `remaining_distance` | `*float64` | No | If provided, must be `>= 0` |
 
-| Field | Type | Description | Default Value | Validation Rules |
-|-------|------|-------------|---------------|------------------|
-| `notes` | `*string` | Additional trip information | `null` | No validation |
-| `is_reversed` | `bool` | Whether to reverse route waypoints | `false` | No validation |
-| `custom_waypoints` | `[]CreateCustomWaypoint` | Custom waypoints for the trip | `[]` | See waypoint validation below |
-| `no_waypoints` | `bool` | If true, no waypoints are copied (only origin/destination) | `false` | No validation |
+Passthrough price recommendation:
+- For passthrough waypoints, send `price: null` (or omit `price`).
+- Do not send `price: 0`.
+- In API responses, passthrough waypoint price is expected to be `null`.
 
-## Custom Waypoint Fields
+## Creation Logic
 
-### Required Fields
-| Field | Type | Description | Validation Rules |
-|-------|------|-------------|------------------|
-| `location_id` | `int64` | ID of the location | Must be > 0, location must exist |
-| `order` | `int` | Sequence order in the trip | Must be >= 0 |
+### Common behavior
+1. Request is validated first.
+2. Route is loaded from DB.
+3. Vehicle snapshot is fetched from vehicle service.
+4. Vehicle existence is required, but vehicle `status` is not used to block creation.
+5. Multiple trips per vehicle are allowed, including incomplete history.
+6. If new trip request sets `auto_return = true`, creation is blocked only when the vehicle already has another active auto-return trip (`SCHEDULED` or `IN_PROGRESS`).
+7. Trip is created with:
+   - `status = SCHEDULED`
+   - `seats = vehicle.capacity`
+   - `remaining_seats = vehicle.capacity`
+   - `price = request.price` or route price fallback
 
-### Optional Fields
-| Field | Type | Description | Validation Rules |
-|-------|------|-------------|------------------|
-| `price` | `*float64` | Price for this waypoint | If provided, must be > 0 |
-| `remaining_time` | `*int64` | Initial remaining time in seconds | If provided, must be >= 0 |
-| `remaining_distance` | `*float64` | Initial remaining distance in meters | If provided, must be >= 0 |
+### Waypoint behavior
+1. If `no_waypoints = true`:
+   - Only route waypoints marked `is_pass_through = true` are copied.
+  - Their waypoint `price` is set to `null` (recommended behavior vs `0`).
+2. Else if `custom_waypoints` provided:
+   - Custom waypoints are added with `is_custom = true`.
+   - Route passthrough waypoints are automatically included if missing from custom list.
+   - Final trip waypoints are sorted by `order` and renumbered sequentially starting at `1`.
+3. Else (default route copy):
+   - Route waypoints are copied.
+   - For reversed trips, waypoints are inserted in reverse order.
+   - Reversed non-passthrough prices are recalculated from total trip price.
 
-## Connection Mode Options
+### Reversed trip response behavior
+When `is_reversed = true`, response route origin/destination are swapped for client-facing consistency.
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| `ONLINE` | Real-time GPS tracking | Live passenger tracking, real-time updates |
-| `OFFLINE` | No GPS tracking | Scheduled trips, offline operations |
-| `HYBRID` | Mixed online/offline | Partial tracking, intermittent connectivity |
+### Auto-return behavior
+If `auto_return = true` on a trip and that trip reaches `COMPLETED`, the service automatically creates a new trip:
+- Same `route_id`, `vehicle_id`, vehicle snapshot, connection mode, notes, and trip price.
+- `is_reversed` is toggled (`true -> false` or `false -> true`).
+- Waypoints are copied in exact reverse order from the completed trip.
+- Reversed waypoint prices are recalculated from total trip price:
+  - passthrough waypoint price stays `null`
+  - non-passthrough waypoint price is recalculated as `trip_price - previous_waypoint_price`
+  - minimum fallback is `0.01` when the computed value is non-positive
+- Route-level origin/destination in DB are unchanged; reversal is represented by trip `is_reversed` and reversed trip waypoints.
 
-## Trip Creation Logic
+## Create Trip Response
 
-### Route-based Trips (No Custom Waypoints)
-1. **Uses existing route waypoints** with their predefined prices
-2. **Seats are automatically set** from vehicle capacity
-3. **Status is set to "SCHEDULED"** automatically
-4. **Vehicle availability is checked** before creation
-5. **Route waypoints are copied** to trip waypoints
-
-### Custom Waypoint Trips
-1. **Overrides route waypoints** with custom waypoints
-2. **Custom waypoints are marked** with `is_custom: true`
-3. **Order validation** ensures logical sequence
-4. **Location existence** is verified for each waypoint
-5. **Price validation** ensures positive values
-
-### Reversed Routes
-When `is_reversed: true`:
-1. **Route waypoints are reversed** in order
-2. **Order numbers are recalculated** (e.g., 0,1,2 becomes 2,1,0)
-3. **Prices remain the same** as original route
-4. **Custom waypoints** maintain their specified order
-
-### No Waypoints Trips (NEW)
-When `no_waypoints: true`:
-1. **No waypoints are created** - trip only has origin and destination from route
-2. **Simple point-to-point** trips without intermediate stops
-3. **No pricing information** for intermediate locations
-4. **Faster trip creation** - no waypoint processing
-5. **Use case**: Direct routes, express services, or when intermediate stops are not needed
-
-## Response Format
-
-### Success Response (201 Created)
+### Success (`201 Created`)
 ```json
 {
   "id": 789,
@@ -141,21 +126,27 @@ When `no_waypoints: true`:
     "capacity": 25,
     "license_plate": "RAD123A",
     "driver": {
+      "id": 90,
       "name": "John Doe",
       "phone": "+250123456789"
     }
   },
   "status": "SCHEDULED",
-  "departure_time": 1640995200,
+  "departure_time": 1767225600,
   "connection_mode": "ONLINE",
+  "price": 2500,
   "notes": "Optional trip notes",
   "seats": 25,
+  "remaining_seats": 25,
   "is_reversed": false,
   "has_custom_waypoints": true,
-  "created_at": "2022-01-01T00:00:00Z",
-  "updated_at": "2022-01-01T00:00:00Z",
+  "auto_return": false,
+  "created_at": "2026-04-15T10:00:00Z",
+  "updated_at": "2026-04-15T10:00:00Z",
   "route": {
     "id": 123,
+    "origin_id": 1,
+    "destination_id": 2,
     "origin": {
       "id": 1,
       "code": "110001",
@@ -165,7 +156,7 @@ When `no_waypoints: true`:
     "destination": {
       "id": 2,
       "code": "230001",
-      "custom_name": "Musanze Center",
+      "custom_name": "drift",
       "google_place_name": "Musanze, Rwanda"
     }
   },
@@ -175,137 +166,183 @@ When `no_waypoints: true`:
       "trip_id": 789,
       "location_id": 789,
       "order": 1,
-      "price": 25.50,
+      "price": 1000,
+      "is_pass_through": false,
       "is_passed": false,
       "is_next": false,
-      "is_custom": true,
+      "passed_timestamp": null,
       "remaining_time": 1800,
-      "remaining_distance": 5000.0
+      "remaining_distance": 5000,
+      "is_custom": true
     }
   ]
 }
 ```
 
-### Error Response (400 Bad Request)
+### Error shape
+All errors use this shape:
 ```json
 {
-  "error": "validation error",
-  "message": "vehicle_id is required and must be greater than 0"
+  "error": "error message"
 }
 ```
 
-### Error Response (409 Conflict)
+Common status codes:
+- `400 Bad Request`: validation/invalid input/active auto-return trip exists
+- `500 Internal Server Error`: unexpected server error
+
+## Toggle Auto-Return On Latest Vehicle Trip
+
+### Endpoint
+```http
+PUT /trips/vehicle/{vehicle_id}/auto-return
+Content-Type: application/json
+```
+
+### Request body
 ```json
 {
-  "error": "conflict error",
-  "message": "vehicle already has an active trip"
+  "auto_return": true
 }
 ```
 
-## Validation Rules Summary
+Behavior:
+- Finds the latest trip for the vehicle (`created_at DESC`).
+- Updates that trip's `auto_return` value.
+- Returns the updated trip object.
 
-### Route ID
-- ✅ Must be provided
-- ✅ Must be > 0
-- ✅ Route must exist in database
+## Get Trips By Vehicle
 
-### Vehicle ID
-- ✅ Must be provided
-- ✅ Must be > 0
-- ✅ Vehicle must exist in vehicle service
-- ✅ Vehicle must have status "AVAILABLE"
-- ✅ Vehicle must not have active trips
+### Endpoint
+```http
+GET /trips/vehicle/{vehicle_id}
+```
 
-### Departure Time
-- ✅ Must be provided
-- ✅ Must be > 0 (Unix timestamp)
-- ✅ Should be in the future
+### Path parameter
+- `vehicle_id` (required, int64)
 
-### Connection Mode
-- ✅ Must be provided
-- ✅ Must be one of: "ONLINE", "OFFLINE", "HYBRID"
+### Query parameters
+- `status` (optional): filter vehicle trips by exact status
+- `limit` (optional, default `20`): pagination size, must be `>= 0`
+- `offset` (optional, default `0`): pagination offset, must be `>= 0`
+- `session_uuid` (optional): existing SSE session UUID to update
 
-### Custom Waypoints (if provided)
-- ✅ Each waypoint must have valid `location_id` (> 0)
-- ✅ Each waypoint must have valid `order` (>= 0)
-- ✅ If `price` is provided, must be > 0
-- ✅ If `remaining_time` is provided, must be >= 0
-- ✅ If `remaining_distance` is provided, must be >= 0
+### Response (`200 OK`)
+```json
+{
+  "trips": [
+    {
+      "id": 789,
+      "vehicle_id": 456,
+      "status": "SCHEDULED",
+      "auto_return": false,
+      "route": {
+        "id": 123,
+        "origin": { "id": 1, "custom_name": "Kigali Airport" },
+        "destination": { "id": 2, "custom_name": "drift" }
+      },
+      "waypoints": []
+    }
+  ],
+  "total": 1,
+  "limit": 20,
+  "offset": 0,
+  "page": 1,
+  "total_pages": 1,
+  "sse_uuid": "7f5d8ef0-7cc6-4f98-9d9f-0a9e0f88f233"
+}
+```
 
-## Example Use Cases
+Notes:
+- `total` is the count before pagination.
+- `sse_uuid` is included only when a new session is created.
+- If `session_uuid` is passed and valid, response usually omits `sse_uuid`.
+- Trips are ordered newest first (`created_at DESC`).
 
-### 1. Simple Route Trip
+## Examples
+
+### 1) Basic route trip
 ```bash
-curl -X POST http://localhost:8080/api/v1/trips \
+curl -X POST http://localhost:8080/trips \
   -H "Content-Type: application/json" \
   -d '{
     "route_id": 123,
     "vehicle_id": 456,
-    "departure_time": 1640995200,
+    "departure_time": 1767225600,
     "connection_mode": "ONLINE"
   }'
 ```
 
-### 2. Custom Waypoint Trip
+### 2) Custom waypoint trip
 ```bash
-curl -X POST http://localhost:8080/api/v1/trips \
+curl -X POST http://localhost:8080/trips \
   -H "Content-Type: application/json" \
   -d '{
     "route_id": 123,
     "vehicle_id": 456,
-    "departure_time": 1640995200,
+    "departure_time": 1767225600,
     "connection_mode": "HYBRID",
-    "notes": "Additional stops for package delivery",
+    "price": 3200,
     "custom_waypoints": [
       {
         "location_id": 789,
         "order": 1,
-        "price": 15.00
+        "price": 1000
       },
       {
         "location_id": 790,
         "order": 2,
-        "price": 20.00
+        "price": 2000
       }
     ]
   }'
 ```
 
-### 3. Reversed Route Trip
+### 3) Reversed route trip
 ```bash
-curl -X POST http://localhost:8080/api/v1/trips \
+curl -X POST http://localhost:8080/trips \
   -H "Content-Type: application/json" \
   -d '{
     "route_id": 123,
     "vehicle_id": 456,
-    "departure_time": 1640995200,
+    "departure_time": 1767225600,
     "connection_mode": "OFFLINE",
     "is_reversed": true,
-    "notes": "Return trip from destination to origin"
+    "notes": "Return trip"
   }'
 ```
 
-### 4. No Waypoints Trip (NEW)
+### 4) `no_waypoints` trip (passthrough-only waypoints)
 ```bash
-curl -X POST http://localhost:8080/api/v1/trips \
+curl -X POST http://localhost:8080/trips \
   -H "Content-Type: application/json" \
   -d '{
     "route_id": 123,
     "vehicle_id": 456,
-    "departure_time": 1640995200,
+    "departure_time": 1767225600,
     "connection_mode": "ONLINE",
-    "notes": "Direct point-to-point trip",
     "no_waypoints": true
   }'
 ```
 
-## Notes
+### 5) Get trips for a vehicle
+```bash
+curl "http://localhost:8080/trips/vehicle/456?status=SCHEDULED&limit=20&offset=0"
+```
 
-- **Seats are automatically set** from vehicle capacity
-- **Status is automatically set** to "SCHEDULED"
-- **Timestamps are in Unix format** (seconds since epoch)
-- **Prices are in the system's currency** (typically local currency)
-- **Distances are in meters**
-- **Times are in seconds**
-- **Vehicle availability is checked** before trip creation
-- **Route waypoints are automatically copied** unless custom waypoints are provided or `no_waypoints: true`
+### 6) Turn auto-return on for vehicle latest trip
+```bash
+curl -X PUT http://localhost:8080/trips/vehicle/456/auto-return \
+  -H "Content-Type: application/json" \
+  -d '{
+    "auto_return": true
+  }'
+```
+
+## Quick Reference
+- Timestamps are Unix seconds.
+- `distance` values are meters.
+- `remaining_time` values are seconds.
+- Seats are taken from vehicle capacity at creation time.
+- Route waypoints are not returned inside `trip.route.waypoints` (trip uses `trip.waypoints` in responses).
+- For passthrough waypoints, prefer `price = null` (not `0`).

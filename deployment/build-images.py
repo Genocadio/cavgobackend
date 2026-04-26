@@ -8,6 +8,7 @@ image names from docker-compose-hub.yml.
 
 import argparse
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -196,6 +197,24 @@ class DockerImageBuilder:
         Returns:
             True if logged in, False otherwise
         """
+        hub_registries = [
+            "https://index.docker.io/v1/",
+            "index.docker.io",
+            "registry-1.docker.io",
+            "docker.io",
+        ]
+
+        def _normalize_username(value: str) -> str:
+            return value.strip().lower()
+
+        def _username_matches(found: Optional[str]) -> bool:
+            if not found:
+                return expected_username is None
+            if expected_username is None:
+                return True
+            return _normalize_username(found) == _normalize_username(expected_username)
+
+        # First check Docker CLI reported username.
         try:
             result = subprocess.run(
                 ["docker", "info"],
@@ -206,18 +225,72 @@ class DockerImageBuilder:
                 timeout=5
             )
             if result.returncode == 0:
-                output = result.stdout
-                # Check for username in docker info output
-                if expected_username:
-                    if f"Username: {expected_username}" in output:
+                for line in result.stdout.splitlines():
+                    if line.strip().startswith("Username:"):
+                        username = line.split(":", 1)[1].strip()
+                        if _username_matches(username):
+                            return True
+                        # A valid login exists even if usernames differ; continue to config checks
+                        break
+        except Exception:
+            pass
+
+        # Fallback: inspect Docker config and credential helper for Docker Hub auth.
+        try:
+            config_path = Path.home() / ".docker" / "config.json"
+            if not config_path.exists():
+                return False
+
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+
+            auths = config.get("auths", {}) or {}
+            for registry in hub_registries:
+                entry = auths.get(registry)
+                if not isinstance(entry, dict):
+                    continue
+
+                if entry.get("identitytoken"):
+                    return True
+
+                encoded = entry.get("auth")
+                if isinstance(encoded, str) and encoded.strip():
+                    return True
+
+            # If Docker uses a credential helper, ask it directly.
+            helper_name = None
+            cred_helpers = config.get("credHelpers", {}) or {}
+            for registry in hub_registries:
+                if registry in cred_helpers:
+                    helper_name = cred_helpers[registry]
+                    break
+            if not helper_name:
+                helper_name = config.get("credsStore")
+
+            if helper_name:
+                helper_cmd = f"docker-credential-{helper_name}"
+                for registry in hub_registries:
+                    helper_result = subprocess.run(
+                        [helper_cmd, "get"],
+                        input=f"{registry}\n",
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                        env=os.environ.copy(),
+                    )
+                    if helper_result.returncode != 0:
+                        continue
+
+                    data = json.loads(helper_result.stdout or "{}")
+                    username = data.get("Username")
+                    if _username_matches(username) or data.get("Secret"):
                         return True
-                else:
-                    # Just check if any username is present
-                    if "Username:" in output:
-                        return True
-            return False
         except Exception:
             return False
+
+        return False
     
     def _prompt_docker_login(self) -> bool:
         """Prompt user to login to Docker Hub.
@@ -253,14 +326,16 @@ class DockerImageBuilder:
         Returns:
             True if logged in (or successfully logged in), False otherwise
         """
-        # Extract username from image name (format: username/repo:tag)
-        username = None
-        if "/" in image_name:
-            username = image_name.split("/")[0]
-        
-        # Check if already logged in
-        if self._check_docker_hub_login(username):
+        # Extract username for diagnostics only (do not enforce match).
+        username = image_name.split("/")[0] if "/" in image_name else None
+
+        # Check if already logged in. Username matching is intentionally relaxed
+        # because valid credentials can be stored via helper without matching this namespace.
+        if self._check_docker_hub_login(expected_username=None):
             return True
+
+        if username:
+            self.console.print(f"[dim]Target namespace: {username}[/dim]")
         
         # Prompt for login
         return self._prompt_docker_login()

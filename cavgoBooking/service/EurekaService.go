@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +20,27 @@ type EurekaService struct {
 	config     *EurekaConfig
 	httpClient *http.Client
 	instanceID string
+	registerMu sync.Mutex
+
+	heartbeatMu      sync.Mutex
+	heartbeatTicker  *time.Ticker
+	heartbeatStopCh  chan struct{}
+	heartbeatRunning bool
+
+	verifyMu      sync.Mutex
+	verifyTicker  *time.Ticker
+	verifyStopCh  chan struct{}
+	verifyRunning bool
+}
+
+type EurekaStatusError struct {
+	Operation  string
+	StatusCode int
+	URL        string
+}
+
+func (e *EurekaStatusError) Error() string {
+	return fmt.Sprintf("Eureka %s failed with status: %d, URL: %s", e.Operation, e.StatusCode, e.URL)
 }
 
 type EurekaConfig struct {
@@ -82,12 +105,13 @@ func NewEurekaService() *EurekaService {
 
 func (e *EurekaService) Register() error {
 	if !e.config.Register {
-		fmt.Printf("Eureka registration disabled\n")
 		return nil
 	}
 
-	fmt.Printf("Starting Eureka registration...\n")
-	fmt.Printf("Eureka config - ServerURL: %s, AppName: %s, Port: %s\n",
+	e.registerMu.Lock()
+	defer e.registerMu.Unlock()
+
+	log.Printf("[Eureka] starting registration: server=%s app=%s port=%s",
 		e.config.ServerURL, e.config.AppName, e.config.Port)
 
 	instance := e.buildInstance()
@@ -96,50 +120,54 @@ func (e *EurekaService) Register() error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal registration data: %w", err)
 	}
-	baseURL := e.config.ServerURL
-	if strings.HasSuffix(baseURL, "/eureka") {
-		baseURL = strings.TrimSuffix(baseURL, "/eureka")
-	}
-	url := fmt.Sprintf("%s/eureka/apps/%s", baseURL, e.config.AppName)
-	fmt.Printf("Attempting to register with Eureka at URL: %s\n", url)
-	fmt.Printf("Instance details: App=%s, InstanceID=%s, IP=%s, Port=%s\n",
-		instance.App, instance.InstanceID, instance.IPAddr, e.config.Port)
+	url := fmt.Sprintf("%s/eureka/apps/%s", e.normalizedBaseURL(), e.config.AppName)
+	log.Printf("[Eureka] register URL=%s instanceID=%s ip=%s", url, instance.InstanceID, instance.IPAddr)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create registration request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	fmt.Printf("Sending HTTP request to: %s\n", url)
-	fmt.Printf("Request headers: %v\n", req.Header)
-
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		fmt.Printf("HTTP request failed: %v\n", err)
 		return fmt.Errorf("failed to register with Eureka: %w", err)
 	}
 	defer resp.Body.Close()
-	fmt.Printf("Eureka response status: %d\n", resp.StatusCode)
+
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		if resp.Body != nil {
 			respBody, _ := io.ReadAll(resp.Body)
-			fmt.Printf("Eureka response body: %s\n", string(respBody))
+			log.Printf("[Eureka] register response status=%d body=%s", resp.StatusCode, string(respBody))
 		}
-		return fmt.Errorf("Eureka registration failed with status: %d, URL: %s", resp.StatusCode, url)
+		return &EurekaStatusError{Operation: "registration", StatusCode: resp.StatusCode, URL: url}
 	}
-	fmt.Printf("Successfully registered with Eureka. Instance ID: %s\n", e.instanceID)
+
+	log.Printf("[Eureka] registered successfully: instanceID=%s", e.instanceID)
 	return nil
+}
+
+func (e *EurekaService) EnsureRegistered() {
+	if !e.config.Register {
+		return
+	}
+
+	for {
+		err := e.Register()
+		if err == nil {
+			log.Printf("[Eureka] registration ensured for instance %s", e.instanceID)
+			return
+		}
+
+		log.Printf("[Eureka] registration failed, retrying in 5s: %v", err)
+		time.Sleep(5 * time.Second)
+	}
 }
 
 func (e *EurekaService) Deregister() error {
 	if !e.config.Register {
 		return nil
 	}
-	baseURL := e.config.ServerURL
-	if strings.HasSuffix(baseURL, "/eureka") {
-		baseURL = strings.TrimSuffix(baseURL, "/eureka")
-	}
-	url := fmt.Sprintf("%s/eureka/apps/%s/%s", baseURL, e.config.AppName, e.instanceID)
+	url := e.instanceEndpointURL()
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create deregistration request: %w", err)
@@ -152,11 +180,11 @@ func (e *EurekaService) Deregister() error {
 	if resp.StatusCode != http.StatusOK {
 		if resp.Body != nil {
 			respBody, _ := io.ReadAll(resp.Body)
-			fmt.Printf("Eureka deregistration response body: %s\n", string(respBody))
+			log.Printf("[Eureka] deregister response status=%d body=%s", resp.StatusCode, string(respBody))
 		}
-		return fmt.Errorf("Eureka deregistration failed with status: %d, URL: %s", resp.StatusCode, url)
+		return &EurekaStatusError{Operation: "deregistration", StatusCode: resp.StatusCode, URL: url}
 	}
-	fmt.Printf("Successfully deregistered from Eureka. Instance ID: %s\n", e.instanceID)
+	log.Printf("[Eureka] deregistered successfully: instanceID=%s", e.instanceID)
 	return nil
 }
 
@@ -164,11 +192,7 @@ func (e *EurekaService) SendHeartbeat() error {
 	if !e.config.Register {
 		return nil
 	}
-	baseURL := e.config.ServerURL
-	if strings.HasSuffix(baseURL, "/eureka") {
-		baseURL = strings.TrimSuffix(baseURL, "/eureka")
-	}
-	url := fmt.Sprintf("%s/eureka/apps/%s/%s", baseURL, e.config.AppName, e.instanceID)
+	url := e.instanceEndpointURL()
 	req, err := http.NewRequest("PUT", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create heartbeat request: %w", err)
@@ -181,9 +205,9 @@ func (e *EurekaService) SendHeartbeat() error {
 	if resp.StatusCode != http.StatusOK {
 		if resp.Body != nil {
 			respBody, _ := io.ReadAll(resp.Body)
-			fmt.Printf("Eureka heartbeat response body: %s\n", string(respBody))
+			log.Printf("[Eureka] heartbeat response status=%d body=%s", resp.StatusCode, string(respBody))
 		}
-		return fmt.Errorf("Eureka heartbeat failed with status: %d, URL: %s", resp.StatusCode, url)
+		return &EurekaStatusError{Operation: "heartbeat", StatusCode: resp.StatusCode, URL: url}
 	}
 	return nil
 }
@@ -192,14 +216,145 @@ func (e *EurekaService) StartHeartbeat() {
 	if !e.config.Register {
 		return
 	}
+
+	e.heartbeatMu.Lock()
+	if e.heartbeatRunning {
+		e.heartbeatMu.Unlock()
+		return
+	}
+
 	ticker := time.NewTicker(30 * time.Second)
+	stopCh := make(chan struct{})
+	e.heartbeatTicker = ticker
+	e.heartbeatStopCh = stopCh
+	e.heartbeatRunning = true
+	e.heartbeatMu.Unlock()
+
 	go func() {
-		for range ticker.C {
-			if err := e.SendHeartbeat(); err != nil {
-				fmt.Printf("Failed to send heartbeat: %v\n", err)
+		for {
+			select {
+			case <-ticker.C:
+				err := e.SendHeartbeat()
+				if err == nil {
+					continue
+				}
+
+				log.Printf("[Eureka] heartbeat failed, attempting re-register: %v", err)
+				if regErr := e.Register(); regErr != nil {
+					log.Printf("[Eureka] re-registration attempt failed: %v", regErr)
+					continue
+				}
+
+				log.Printf("[Eureka] instance re-registered successfully after heartbeat failure")
+			case <-stopCh:
+				return
 			}
 		}
 	}()
+}
+
+func (e *EurekaService) VerifyRegistration() {
+	if !e.config.Register {
+		return
+	}
+
+	url := e.instanceEndpointURL()
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		log.Printf("[Eureka] failed to create verify request: %v", err)
+		return
+	}
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		log.Printf("[Eureka] verification request failed, attempting re-register: %v", err)
+		if regErr := e.Register(); regErr != nil {
+			log.Printf("[Eureka] re-registration after verify failure failed: %v", regErr)
+		}
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return
+	}
+
+	if resp.Body != nil {
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[Eureka] verify response status=%d body=%s", resp.StatusCode, string(respBody))
+	} else {
+		log.Printf("[Eureka] verify response status=%d", resp.StatusCode)
+	}
+
+	if regErr := e.Register(); regErr != nil {
+		log.Printf("[Eureka] re-registration after verification mismatch failed: %v", regErr)
+		return
+	}
+
+	log.Printf("[Eureka] instance re-registered successfully after verification mismatch")
+}
+
+func (e *EurekaService) StartRegistrationVerifier(interval time.Duration) {
+	if !e.config.Register {
+		return
+	}
+	if interval <= 0 {
+		interval = 90 * time.Second
+	}
+
+	e.verifyMu.Lock()
+	if e.verifyRunning {
+		e.verifyMu.Unlock()
+		return
+	}
+
+	ticker := time.NewTicker(interval)
+	stopCh := make(chan struct{})
+	e.verifyTicker = ticker
+	e.verifyStopCh = stopCh
+	e.verifyRunning = true
+	e.verifyMu.Unlock()
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				e.VerifyRegistration()
+			case <-stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (e *EurekaService) StopRegistrationVerifier() {
+	e.verifyMu.Lock()
+	defer e.verifyMu.Unlock()
+
+	if !e.verifyRunning {
+		return
+	}
+
+	e.verifyTicker.Stop()
+	close(e.verifyStopCh)
+	e.verifyTicker = nil
+	e.verifyStopCh = nil
+	e.verifyRunning = false
+}
+
+func (e *EurekaService) StopHeartbeat() {
+	e.heartbeatMu.Lock()
+	defer e.heartbeatMu.Unlock()
+
+	if !e.heartbeatRunning {
+		return
+	}
+
+	e.heartbeatTicker.Stop()
+	close(e.heartbeatStopCh)
+	e.heartbeatTicker = nil
+	e.heartbeatStopCh = nil
+	e.heartbeatRunning = false
 }
 
 func (e *EurekaService) buildInstance() EurekaInstance {
@@ -297,6 +452,18 @@ func getPortFromString(portStr string) int {
 		port = 8080
 	}
 	return port
+}
+
+func (e *EurekaService) normalizedBaseURL() string {
+	baseURL := e.config.ServerURL
+	if strings.HasSuffix(baseURL, "/eureka") {
+		baseURL = strings.TrimSuffix(baseURL, "/eureka")
+	}
+	return baseURL
+}
+
+func (e *EurekaService) instanceEndpointURL() string {
+	return fmt.Sprintf("%s/eureka/apps/%s/%s", e.normalizedBaseURL(), e.config.AppName, e.instanceID)
 }
 
 func loadEurekaConfig() *EurekaConfig {

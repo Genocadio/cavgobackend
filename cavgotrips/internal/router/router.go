@@ -58,6 +58,7 @@ func Setup(
 	r.HandleFunc("/trips", tripHandler.CreateTrip).Methods("POST")
 	r.HandleFunc("/trips", tripHandler.GetTrips).Methods("GET")
 	r.HandleFunc("/trips/vehicle/{vehicle_id}", tripHandler.GetTripsByVehicleID).Methods("GET")
+	r.HandleFunc("/trips/vehicle/{vehicle_id}/auto-return", tripHandler.UpdateLatestVehicleTripAutoReturn).Methods("PUT")
 	r.HandleFunc("/trips/driver/{driver_id}", tripHandler.GetTripsByDriverID).Methods("GET")
 	r.HandleFunc("/trips/{id}", tripHandler.GetTrip).Methods("GET")
 	r.HandleFunc("/trips/{id}", tripHandler.DeleteTrip).Methods("DELETE")

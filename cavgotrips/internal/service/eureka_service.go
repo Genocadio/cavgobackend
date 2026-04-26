@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"cavgotrips/internal/config"
@@ -20,6 +22,27 @@ type EurekaService struct {
 	config     *config.Config
 	httpClient *http.Client
 	instanceID string
+	registerMu sync.Mutex
+
+	heartbeatMu      sync.Mutex
+	heartbeatTicker  *time.Ticker
+	heartbeatStopCh  chan struct{}
+	heartbeatRunning bool
+
+	verifyMu      sync.Mutex
+	verifyTicker  *time.Ticker
+	verifyStopCh  chan struct{}
+	verifyRunning bool
+}
+
+type EurekaStatusError struct {
+	Operation  string
+	StatusCode int
+	URL        string
+}
+
+func (e *EurekaStatusError) Error() string {
+	return fmt.Sprintf("Eureka %s failed with status: %d, URL: %s", e.Operation, e.StatusCode, e.URL)
 }
 
 type EurekaInstance struct {
@@ -85,6 +108,9 @@ func (e *EurekaService) Register() error {
 		return nil
 	}
 
+	e.registerMu.Lock()
+	defer e.registerMu.Unlock()
+
 	instance := e.buildInstance()
 	registration := EurekaRegistration{Instance: instance}
 
@@ -129,6 +155,23 @@ func (e *EurekaService) Register() error {
 
 	fmt.Printf("Successfully registered with Eureka. Instance ID: %s\n", e.instanceID)
 	return nil
+}
+
+func (e *EurekaService) EnsureRegistered() {
+	if !e.config.Eureka.RegisterWithEureka {
+		return
+	}
+
+	for {
+		err := e.Register()
+		if err == nil {
+			log.Printf("[Eureka] registration ensured for instance %s", e.instanceID)
+			return
+		}
+
+		log.Printf("[Eureka] registration failed, retrying in 5s: %v", err)
+		time.Sleep(5 * time.Second)
+	}
 }
 
 func (e *EurekaService) Deregister() error {
@@ -194,7 +237,7 @@ func (e *EurekaService) SendHeartbeat() error {
 			respBody, _ := io.ReadAll(resp.Body)
 			fmt.Printf("Eureka heartbeat response body: %s\n", string(respBody))
 		}
-		return fmt.Errorf("Eureka heartbeat failed with status: %d, URL: %s", resp.StatusCode, url)
+		return &EurekaStatusError{Operation: "heartbeat", StatusCode: resp.StatusCode, URL: url}
 	}
 
 	return nil
@@ -205,14 +248,144 @@ func (e *EurekaService) StartHeartbeat() {
 		return
 	}
 
+	e.heartbeatMu.Lock()
+	if e.heartbeatRunning {
+		e.heartbeatMu.Unlock()
+		return
+	}
+
 	ticker := time.NewTicker(30 * time.Second) // Send heartbeat every 30 seconds
+	stopCh := make(chan struct{})
+	e.heartbeatTicker = ticker
+	e.heartbeatStopCh = stopCh
+	e.heartbeatRunning = true
+	e.heartbeatMu.Unlock()
+
 	go func() {
-		for range ticker.C {
-			if err := e.SendHeartbeat(); err != nil {
-				fmt.Printf("Failed to send heartbeat: %v\n", err)
+		for {
+			select {
+			case <-ticker.C:
+				err := e.SendHeartbeat()
+				if err == nil {
+					continue
+				}
+
+				log.Printf("[Eureka] heartbeat failed, attempting re-register: %v", err)
+				if regErr := e.Register(); regErr != nil {
+					log.Printf("[Eureka] re-registration attempt failed: %v", regErr)
+					continue
+				}
+
+				log.Printf("[Eureka] instance re-registered successfully after heartbeat failure")
+			case <-stopCh:
+				return
 			}
 		}
 	}()
+}
+
+func (e *EurekaService) VerifyRegistration() {
+	if !e.config.Eureka.RegisterWithEureka {
+		return
+	}
+
+	url := e.instanceEndpointURL()
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		log.Printf("[Eureka] failed to create verify request: %v", err)
+		return
+	}
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		log.Printf("[Eureka] verification request failed, attempting re-register: %v", err)
+		if regErr := e.Register(); regErr != nil {
+			log.Printf("[Eureka] re-registration after verify failure failed: %v", regErr)
+		}
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return
+	}
+
+	if resp.Body != nil {
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[Eureka] verify response status=%d body=%s", resp.StatusCode, string(respBody))
+	} else {
+		log.Printf("[Eureka] verify response status=%d", resp.StatusCode)
+	}
+
+	if regErr := e.Register(); regErr != nil {
+		log.Printf("[Eureka] re-registration after verification mismatch failed: %v", regErr)
+		return
+	}
+
+	log.Printf("[Eureka] instance re-registered successfully after verification mismatch")
+}
+
+func (e *EurekaService) StartRegistrationVerifier(interval time.Duration) {
+	if !e.config.Eureka.RegisterWithEureka {
+		return
+	}
+	if interval <= 0 {
+		interval = 90 * time.Second
+	}
+
+	e.verifyMu.Lock()
+	if e.verifyRunning {
+		e.verifyMu.Unlock()
+		return
+	}
+
+	ticker := time.NewTicker(interval)
+	stopCh := make(chan struct{})
+	e.verifyTicker = ticker
+	e.verifyStopCh = stopCh
+	e.verifyRunning = true
+	e.verifyMu.Unlock()
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				e.VerifyRegistration()
+			case <-stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (e *EurekaService) StopRegistrationVerifier() {
+	e.verifyMu.Lock()
+	defer e.verifyMu.Unlock()
+
+	if !e.verifyRunning {
+		return
+	}
+
+	e.verifyTicker.Stop()
+	close(e.verifyStopCh)
+	e.verifyTicker = nil
+	e.verifyStopCh = nil
+	e.verifyRunning = false
+}
+
+func (e *EurekaService) StopHeartbeat() {
+	e.heartbeatMu.Lock()
+	defer e.heartbeatMu.Unlock()
+
+	if !e.heartbeatRunning {
+		return
+	}
+
+	e.heartbeatTicker.Stop()
+	close(e.heartbeatStopCh)
+	e.heartbeatTicker = nil
+	e.heartbeatStopCh = nil
+	e.heartbeatRunning = false
 }
 
 func (e *EurekaService) buildInstance() EurekaInstance {
@@ -285,21 +458,6 @@ func (e *EurekaService) getIPAddress() string {
 		for _, addr := range addrs {
 			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 				if ipnet.IP.To4() != nil {
-					// Prefer non-docker bridge networks
-					if !strings.Contains(ipnet.IP.String(), "172.17.") &&
-						!strings.Contains(ipnet.IP.String(), "172.18.") &&
-						!strings.Contains(ipnet.IP.String(), "172.19.") &&
-						!strings.Contains(ipnet.IP.String(), "172.20.") {
-						return ipnet.IP.String()
-					}
-				}
-			}
-		}
-
-		// If no suitable IP found, try to get any non-loopback IP
-		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-				if ipnet.IP.To4() != nil {
 					return ipnet.IP.String()
 				}
 			}
@@ -317,4 +475,16 @@ func getPortFromString(portStr string) int {
 		port = 8080
 	}
 	return port
+}
+
+func (e *EurekaService) normalizedBaseURL() string {
+	baseURL := e.config.Eureka.ServerURL
+	if strings.HasSuffix(baseURL, "/eureka") {
+		baseURL = strings.TrimSuffix(baseURL, "/eureka")
+	}
+	return baseURL
+}
+
+func (e *EurekaService) instanceEndpointURL() string {
+	return fmt.Sprintf("%s/eureka/apps/%s/%s", e.normalizedBaseURL(), e.config.Eureka.AppName, e.instanceID)
 }

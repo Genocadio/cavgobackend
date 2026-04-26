@@ -58,9 +58,11 @@ export async function main(): Promise<void> {
   }
 
   // 1.5. Sync trips from main API
+  let stopLocationPolling: (() => void) | null = null;
   let stopTripPolling: (() => void) | null = null;
   try {
     await syncService.syncTrips();
+    stopLocationPolling = syncService.startLocationPolling();
     // Start trip polling service
     stopTripPolling = tripPolling.startTripPolling();
   } catch (error) {
@@ -71,6 +73,7 @@ export async function main(): Promise<void> {
       console.error("   Unknown error:", error);
     }
     console.error("   Continuing with application startup...\n");
+    stopLocationPolling = syncService.startLocationPolling();
     // Start polling anyway - it will retry
     stopTripPolling = tripPolling.startTripPolling();
   }
@@ -121,6 +124,7 @@ export async function main(): Promise<void> {
         "http://localhost:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3000",
+        "https://cavgo-company.vercel.app",
         "http://127.0.0.1:3001",
       ];
       if (!allowedOrigins.includes(origin) && !origin.startsWith("http://localhost:") && !origin.startsWith("http://127.0.0.1:")) {
@@ -181,8 +185,12 @@ export async function main(): Promise<void> {
         if (!origin) {
           return callback(null, true);
         }
-        // Allow https://admin.gocavgo.com
-        if (origin === "https://admin.gocavgo.com") {
+        // Allow known production and preview origins
+        const allowedOrigins = [
+          "https://admin.gocavgo.com",
+          "https://cavgo-company.vercel.app",
+        ];
+        if (allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
         // Allow localhost for development
@@ -203,7 +211,7 @@ export async function main(): Promise<void> {
     try {
       // Convert Express request to Apollo Server format
       const url = new URL(req.url || "/graphql", `http://${req.headers.host}`);
-      
+
       // Create HeaderMap from Express headers
       const headerMap = new HeaderMap();
       Object.entries(req.headers).forEach(([key, value]) => {
@@ -230,8 +238,8 @@ export async function main(): Promise<void> {
       // Handle response body
       if (result.body.kind === "complete") {
         // Check if it's HTML (for landing page) or JSON
-        const contentType = result.body.string.trim().startsWith("<") 
-          ? "text/html" 
+        const contentType = result.body.string.trim().startsWith("<")
+          ? "text/html"
           : "application/json";
         res.setHeader("Content-Type", contentType);
         res.send(result.body.string);
@@ -261,6 +269,9 @@ export async function main(): Promise<void> {
   process.on("SIGINT", async () => {
     console.log("Shutting down...");
     try {
+      if (stopLocationPolling) {
+        stopLocationPolling();
+      }
       if (stopTripPolling) {
         stopTripPolling();
       }
@@ -274,6 +285,9 @@ export async function main(): Promise<void> {
   process.on("SIGTERM", async () => {
     console.log("Shutting down...");
     try {
+      if (stopLocationPolling) {
+        stopLocationPolling();
+      }
       if (stopTripPolling) {
         stopTripPolling();
       }

@@ -45,6 +45,7 @@ type Trip struct {
 	CurrentLatitude                *float64  `json:"current_latitude"`
 	CurrentLongitude               *float64  `json:"current_longitude"`
 	HasCustomWaypoints             bool      `json:"has_custom_waypoints" gorm:"default:false"`
+	AutoReturn                     bool      `json:"auto_return" gorm:"default:false"`
 	CreatedAt                      time.Time `json:"created_at"`
 	UpdatedAt                      time.Time `json:"updated_at"`
 
@@ -103,8 +104,14 @@ type CreateTripRequest struct {
 	Price           *float64               `json:"price"` // Optional: if not provided, route price will be used
 	Notes           *string                `json:"notes"`
 	IsReversed      bool                   `json:"is_reversed"`
+	AutoReturn      bool                   `json:"auto_return"`
 	CustomWaypoints []CreateCustomWaypoint `json:"custom_waypoints"` // Optional custom waypoints
 	NoWaypoints     bool                   `json:"no_waypoints"`     // If true, no waypoints are copied (only origin/destination)
+}
+
+// UpdateAutoReturnRequest toggles auto-return on the latest trip for a vehicle.
+type UpdateAutoReturnRequest struct {
+	AutoReturn bool `json:"auto_return"`
 }
 
 // Validate checks for required fields and valid values in CreateTripRequest

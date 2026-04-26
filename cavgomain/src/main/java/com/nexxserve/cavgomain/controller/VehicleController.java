@@ -8,9 +8,11 @@ import com.nexxserve.cavgomain.dto.response.VehicleAssignmentResponseDto;
 import com.nexxserve.cavgomain.dto.response.VehicleLocationResponseDto;
 import com.nexxserve.cavgomain.dto.response.VehicleResponseDto;
 import com.nexxserve.cavgomain.dto.response.VehicleSettingsResponseDto;
+import com.nexxserve.cavgomain.enums.VehicleStatus;
 import com.nexxserve.cavgomain.service.VehicleService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -55,10 +57,15 @@ public class VehicleController {
     }
 
     @GetMapping("/company/{companyId}")
-    public List<VehicleResponseDto> getcompanyVehicles(
+    public Page<VehicleResponseDto> getcompanyVehicles(
             @PathVariable Long companyId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit) {
-        return vehicleService.getCompanyVehicles(companyId, timeLimit);
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit,
+            @RequestParam(required = false) String plate,
+            @RequestParam(required = false) VehicleStatus status,
+            @RequestParam(required = false) String driverName,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return vehicleService.getCompanyVehiclesPaged(companyId, timeLimit, plate, status, driverName, page, size);
     }
 
     @DeleteMapping("/{id}")

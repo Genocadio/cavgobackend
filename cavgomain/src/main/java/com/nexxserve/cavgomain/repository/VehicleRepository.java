@@ -3,6 +3,8 @@ package com.nexxserve.cavgomain.repository;
 import com.nexxserve.cavgomain.entity.Vehicle;
 import com.nexxserve.cavgomain.enums.VehicleStatus;
 import com.nexxserve.cavgomain.enums.VehicleType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -30,20 +32,52 @@ public interface VehicleRepository extends JpaRepository<Vehicle, Long> {
     @Query("SELECT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.id = :id")
     Optional<Vehicle> findByIdWithActiveAssignment(@Param("id") Long id);
 
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.company.id = :companyId")
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.company.id = :companyId " +
+           "ORDER BY CASE WHEN v.status = com.nexxserve.cavgomain.enums.VehicleStatus.OCCUPIED THEN 0 ELSE 1 END, v.id DESC")
     List<Vehicle> findByCompanyIdWithActiveAssignments(@Param("companyId") Long companyId);
 
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va")
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va " +
+           "ORDER BY CASE WHEN v.status = com.nexxserve.cavgomain.enums.VehicleStatus.OCCUPIED THEN 0 ELSE 1 END, v.id DESC")
     List<Vehicle> findAllWithActiveAssignments();
 
     @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va " +
-           "WHERE (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit)")
+           "WHERE (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit) " +
+           "ORDER BY CASE WHEN v.status = com.nexxserve.cavgomain.enums.VehicleStatus.OCCUPIED THEN 0 ELSE 1 END, v.id DESC")
     List<Vehicle> findAllWithActiveAssignmentsAfterTime(@Param("timeLimit") LocalDateTime timeLimit);
-
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va " +
-           "WHERE v.company.id = :companyId AND (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit)")
-    List<Vehicle> findByCompanyIdWithActiveAssignmentsAfterTime(@Param("companyId") Long companyId, @Param("timeLimit") LocalDateTime timeLimit);
 
     @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.licensePlate = :licensePlate")
     Optional<Vehicle> findByLicensePlateWithActiveAssignment(@Param("licensePlate") String licensePlate);
+
+    @Query(
+           value = "SELECT v FROM Vehicle v " +
+                  "LEFT JOIN v.assignments va " +
+                  "LEFT JOIN va.driver d " +
+                  "WHERE v.company.id = :companyId " +
+                  "AND (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit) " +
+                  "AND LOWER(v.licensePlate) LIKE CONCAT('%', LOWER(CAST(:plate AS string)), '%') " +
+                 "AND (:status IS NULL OR v.status = :status) " +
+                  "AND (CAST(:driverName AS string) = '' OR (d IS NOT NULL AND (LOWER(COALESCE(d.firstName, '')) LIKE CONCAT('%', LOWER(CAST(:driverName AS string)), '%') " +
+                  "OR LOWER(COALESCE(d.lastName, '')) LIKE CONCAT('%', LOWER(CAST(:driverName AS string)), '%') " +
+                 "OR LOWER(CONCAT(COALESCE(d.firstName, ''), ' ', COALESCE(d.lastName, ''))) LIKE CONCAT('%', LOWER(CAST(:driverName AS string)), '%')))) " +
+                 "ORDER BY CASE WHEN v.status = com.nexxserve.cavgomain.enums.VehicleStatus.OCCUPIED THEN 0 ELSE 1 END, v.id DESC"
+           ,
+           countQuery = "SELECT COUNT(v.id) FROM Vehicle v " +
+                  "LEFT JOIN v.assignments va " +
+                  "LEFT JOIN va.driver d " +
+                  "WHERE v.company.id = :companyId " +
+                  "AND (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit) " +
+                  "AND LOWER(v.licensePlate) LIKE CONCAT('%', LOWER(CAST(:plate AS string)), '%') " +
+                 "AND (:status IS NULL OR v.status = :status) " +
+                  "AND (CAST(:driverName AS string) = '' OR (d IS NOT NULL AND (LOWER(COALESCE(d.firstName, '')) LIKE CONCAT('%', LOWER(CAST(:driverName AS string)), '%') " +
+                  "OR LOWER(COALESCE(d.lastName, '')) LIKE CONCAT('%', LOWER(CAST(:driverName AS string)), '%') " +
+                  "OR LOWER(CONCAT(COALESCE(d.firstName, ''), ' ', COALESCE(d.lastName, ''))) LIKE CONCAT('%', LOWER(CAST(:driverName AS string)), '%'))))"
+    )
+    Page<Vehicle> searchCompanyVehicles(
+           @Param("companyId") Long companyId,
+           @Param("timeLimit") LocalDateTime timeLimit,
+           @Param("plate") String plate,
+          @Param("status") VehicleStatus status,
+           @Param("driverName") String driverName,
+           Pageable pageable
+    );
 }

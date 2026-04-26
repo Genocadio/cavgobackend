@@ -201,21 +201,9 @@ func main() {
 
 	// Register with Eureka after server is running
 	log.Printf("Attempting to register with Eureka...")
-	maxRetries := 5
-	for i := 0; i < maxRetries; i++ {
-		if err := eurekaService.Register(); err != nil {
-			log.Printf("Warning: Failed to register with Eureka (attempt %d/%d): %v", i+1, maxRetries, err)
-			if i < maxRetries-1 {
-				log.Printf("Retrying in 5 seconds...")
-				time.Sleep(5 * time.Second)
-			}
-		} else {
-			log.Printf("Successfully registered with Eureka")
-			// Start heartbeat
-			eurekaService.StartHeartbeat()
-			break
-		}
-	}
+	eurekaService.EnsureRegistered()
+	eurekaService.StartHeartbeat()
+	eurekaService.StartRegistrationVerifier(90 * time.Second)
 
 	// Wait for interrupt signal to gracefully shutdown
 	quit := make(chan os.Signal, 1)
@@ -223,6 +211,8 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down server...")
+	eurekaService.StopRegistrationVerifier()
+	eurekaService.StopHeartbeat()
 
 	// Deregister from Eureka
 	if err := eurekaService.Deregister(); err != nil {

@@ -588,64 +588,73 @@ func (s *bookingService) validateBookingRequest(ctx context.Context, req *models
 		return fmt.Errorf("trip is not available: status is %s", trip.Status)
 	}
 
+	// When the trip is reversed the vehicle travels destination→origin,
+	// so we swap the effective origin and destination for all validations.
+	originID := fmt.Sprintf("%d", trip.Route.OriginID)
+	destinationID := fmt.Sprintf("%d", trip.Route.DestinationID)
+	if trip.IsReversed {
+		originID, destinationID = destinationID, originID
+	}
+
 	// Additional pickup/dropoff validation
-	if req.PickupLocationID == fmt.Sprintf("%d", trip.Route.DestinationID) {
+	if req.PickupLocationID == destinationID {
 		return fmt.Errorf("pickup location cannot be the route destination")
 	}
-	if req.DropoffLocationID == fmt.Sprintf("%d", trip.Route.OriginID) {
+	if req.DropoffLocationID == originID {
 		return fmt.Errorf("dropoff location cannot be the route origin")
 	}
 
-	pickupIsWaypoint := false
-	var pickupWaypoint, dropoffWaypoint *models.TripWaypoint
-	if req.PickupLocationID != fmt.Sprintf("%d", trip.Route.OriginID) {
-		for i, wp := range trip.Waypoints {
-			if fmt.Sprintf("%d", wp.LocationID) == req.PickupLocationID {
-				pickupIsWaypoint = true
-				pickupWaypoint = &trip.Waypoints[i]
-				break
-			}
-		}
+	waypointByLocationID := make(map[string]*models.TripWaypoint, len(trip.Waypoints))
+	for i := range trip.Waypoints {
+		wp := &trip.Waypoints[i]
+		waypointByLocationID[fmt.Sprintf("%d", wp.LocationID)] = wp
 	}
-	dropoffIsWaypoint := false
-	if req.DropoffLocationID != fmt.Sprintf("%d", trip.Route.DestinationID) {
-		for i, wp := range trip.Waypoints {
-			if fmt.Sprintf("%d", wp.LocationID) == req.DropoffLocationID {
-				dropoffIsWaypoint = true
-				dropoffWaypoint = &trip.Waypoints[i]
-				break
-			}
-		}
+
+	pickupIsOrigin := req.PickupLocationID == originID
+	pickupWaypoint, pickupIsWaypoint := waypointByLocationID[req.PickupLocationID]
+	if !pickupIsOrigin && !pickupIsWaypoint {
+		return fmt.Errorf("incorrect location: pickup location not found in trip")
 	}
-	if pickupIsWaypoint && dropoffIsWaypoint {
-		if pickupWaypoint.Order >= dropoffWaypoint.Order {
-			return fmt.Errorf("incorrect location: pickup must be before dropoff")
-		}
-		if pickupWaypoint.IsPassed || dropoffWaypoint.IsPassed {
-			return fmt.Errorf("incorrect location: pickup or dropoff waypoint already passed")
-		}
+
+	dropoffIsDestination := req.DropoffLocationID == destinationID
+	dropoffWaypoint, dropoffIsWaypoint := waypointByLocationID[req.DropoffLocationID]
+	if !dropoffIsDestination && !dropoffIsWaypoint {
+		return fmt.Errorf("incorrect location: dropoff location not found in trip")
+	}
+
+	if pickupIsWaypoint && pickupWaypoint.IsPassed {
+		return fmt.Errorf("incorrect location: pickup waypoint already passed")
+	}
+	if dropoffIsWaypoint && dropoffWaypoint.IsPassed {
+		return fmt.Errorf("incorrect location: dropoff waypoint already passed")
+	}
+
+	pickupOrder := 0
+	if pickupIsWaypoint {
+		pickupOrder = pickupWaypoint.Order
+	}
+	dropoffOrder := len(trip.Waypoints) + 1
+	if dropoffIsWaypoint {
+		dropoffOrder = dropoffWaypoint.Order
+	}
+
+	if pickupOrder >= dropoffOrder {
+		return fmt.Errorf("incorrect location: pickup must be before dropoff")
 	}
 
 	// CityRoute-specific pickup validation
 	if !trip.Route.CityRoute {
 		if trip.Status == "SCHEDULED" {
 			// Only origin can be pickup
-			if req.PickupLocationID != fmt.Sprintf("%d", trip.Route.OriginID) {
+			if !pickupIsOrigin {
 				return fmt.Errorf("for non-city routes in SCHEDULED status, only the origin can be the pickup location")
 			}
 		} else if trip.Status == "IN_PROGRESS" {
 			// Origin cannot be pickup, only the next waypoint
-			if req.PickupLocationID == fmt.Sprintf("%d", trip.Route.OriginID) {
+			if pickupIsOrigin {
 				return fmt.Errorf("for non-city routes in IN_PROGRESS status, origin cannot be the pickup location")
 			}
-			isNextWaypoint := false
-			for _, wp := range trip.Waypoints {
-				if fmt.Sprintf("%d", wp.LocationID) == req.PickupLocationID && wp.IsNext {
-					isNextWaypoint = true
-					break
-				}
-			}
-			if !isNextWaypoint {
+			if !pickupIsWaypoint || !pickupWaypoint.IsNext {
 				return fmt.Errorf("for non-city routes in IN_PROGRESS status, only the next waypoint can be the pickup location")
 			}
 		}
@@ -675,11 +684,21 @@ func (s *bookingService) generateTickets(bookingID string, count int, trip *mode
 		return ""
 	}
 
+	// Determine effective origin/destination for name resolution (respect is_reversed)
+	effOriginID := fmt.Sprintf("%d", trip.Route.OriginID)
+	effDestinationID := fmt.Sprintf("%d", trip.Route.DestinationID)
+	effOriginLoc := &trip.Route.Origin
+	effDestinationLoc := &trip.Route.Destination
+	if trip.IsReversed {
+		effOriginID, effDestinationID = effDestinationID, effOriginID
+		effOriginLoc, effDestinationLoc = effDestinationLoc, effOriginLoc
+	}
+
 	// Find pickup location name
 	var pickupName string
 	var pickupWaypoint *models.TripWaypoint
-	if fmt.Sprintf("%d", trip.Route.OriginID) == pickupLocationID {
-		pickupName = getLocationName(&trip.Route.Origin)
+	if effOriginID == pickupLocationID {
+		pickupName = getLocationName(effOriginLoc)
 	} else {
 		for _, wp := range trip.Waypoints {
 			if fmt.Sprintf("%d", wp.LocationID) == pickupLocationID {
@@ -692,8 +711,8 @@ func (s *bookingService) generateTickets(bookingID string, count int, trip *mode
 
 	// Find dropoff location name
 	var dropoffName string
-	if fmt.Sprintf("%d", trip.Route.DestinationID) == dropoffLocationID {
-		dropoffName = getLocationName(&trip.Route.Destination)
+	if effDestinationID == dropoffLocationID {
+		dropoffName = getLocationName(effDestinationLoc)
 	} else {
 		for _, wp := range trip.Waypoints {
 			if fmt.Sprintf("%d", wp.LocationID) == dropoffLocationID {
@@ -801,13 +820,20 @@ func (s *HTTPTripService) ValidateTripBooking(ctx context.Context, tripID int, p
 		return fmt.Errorf("trip is not available: status is %s", trip.Status)
 	}
 
+	// Respect is_reversed: swap effective origin/destination IDs
+	effOriginID := fmt.Sprintf("%d", trip.Route.OriginID)
+	effDestinationID := fmt.Sprintf("%d", trip.Route.DestinationID)
+	if trip.IsReversed {
+		effOriginID, effDestinationID = effDestinationID, effOriginID
+	}
+
 	// --- Pickup Location Validation ---
 	pickupOrder := -1
 	pickupIDFound := false
 	if pickupLocationID != "" {
-		// Check against origin
-		if fmt.Sprintf("%d", trip.Route.OriginID) == pickupLocationID {
-			pickupOrder = -1 // Origin is before all waypoints
+		// Check against effective origin
+		if effOriginID == pickupLocationID {
+			pickupOrder = -1 // Effective origin is before all waypoints
 			pickupIDFound = true
 		} else {
 			// Check waypoints
@@ -828,9 +854,9 @@ func (s *HTTPTripService) ValidateTripBooking(ctx context.Context, tripID int, p
 	dropoffOrder := -1
 	dropoffIDFound := false
 	if dropoffLocationID != "" {
-		// Check against destination
-		if fmt.Sprintf("%d", trip.Route.DestinationID) == dropoffLocationID {
-			dropoffOrder = 999999 // Destination is after all waypoints
+		// Check against effective destination
+		if effDestinationID == dropoffLocationID {
+			dropoffOrder = 999999 // Effective destination is after all waypoints
 			dropoffIDFound = true
 		} else {
 			// Check waypoints

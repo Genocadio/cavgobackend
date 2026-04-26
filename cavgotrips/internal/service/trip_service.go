@@ -113,19 +113,17 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		return nil, models.NewValidationError("invalid vehicle response: " + err.Error())
 	}
 
-	// Check vehicle status
-	if vehicleResp.Status != "AVAILABLE" {
-		return nil, models.NewValidationError("vehicle is not available")
-	}
-
-	// Check for existing active trips for this vehicle
+	// Check existing trips only when new trip requests auto-return.
+	// In that mode, allow at most one active auto-return trip per vehicle.
 	currentTrips, err := s.tripRepo.GetTripsByVehicleID(request.VehicleID)
 	if err != nil {
 		return nil, models.NewValidationError("could not check vehicle's current trips")
 	}
-	for _, t := range currentTrips {
-		if t.Status == "SCHEDULED" || t.Status == "IN_PROGRESS" {
-			return nil, models.NewValidationError("vehicle already has an active trip")
+	if request.AutoReturn {
+		for _, t := range currentTrips {
+			if t.AutoReturn && (t.Status == "SCHEDULED" || t.Status == "IN_PROGRESS") {
+				return nil, models.NewValidationError("vehicle already has an active auto-return trip")
+			}
 		}
 	}
 
@@ -173,6 +171,7 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		RemainingSeats:     func(v int) *int { vv := v; return &vv }(vehicle.Capacity),
 		IsReversed:         request.IsReversed,
 		HasCustomWaypoints: !request.NoWaypoints && len(request.CustomWaypoints) > 0,
+		AutoReturn:         request.AutoReturn,
 	}
 
 	// Validate trip
@@ -389,6 +388,8 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 		return nil, errors.New("trip must be started before updating progress")
 	}
 
+	shouldCreateAutoReturn := trip.AutoReturn && trip.Status != "COMPLETED" && update.Status != nil && *update.Status == "COMPLETED"
+
 	// Update trip fields
 	updates := make(map[string]interface{})
 	if update.Status != nil {
@@ -526,6 +527,12 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 		}
 	}
 
+	if shouldCreateAutoReturn {
+		if _, err := s.createAutoReturnTripFromCompleted(updatedTrip); err != nil {
+			log.Printf("[AutoReturn] Failed to create return trip from progress update for trip %d: %v", updatedTrip.ID, err)
+		}
+	}
+
 	return updatedTrip, nil
 }
 
@@ -648,6 +655,12 @@ func (s *TripService) CompleteTrip(id int64) (*models.Trip, error) {
 		}
 	}
 
+	if completedTrip.AutoReturn {
+		if _, err := s.createAutoReturnTripFromCompleted(completedTrip); err != nil {
+			log.Printf("[AutoReturn] Failed to create return trip from completed trip %d: %v", completedTrip.ID, err)
+		}
+	}
+
 	return completedTrip, nil
 }
 
@@ -758,6 +771,43 @@ func (s *TripService) GetTripsByVehicleID(vehicleID int64) ([]models.Trip, error
 	return trips, nil
 }
 
+func (s *TripService) GetTripsByVehicleIDPaginated(vehicleID int64, statuses []string, limit, offset int) ([]models.Trip, int64, error) {
+	trips, total, err := s.tripRepo.GetTripsByVehicleIDPaginated(vehicleID, statuses, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range trips {
+		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
+	}
+	return trips, total, nil
+}
+
+func (s *TripService) UpdateLatestVehicleTripAutoReturn(vehicleID int64, autoReturn bool) (*models.Trip, error) {
+	latestTrip, err := s.tripRepo.GetLatestTripByVehicleID(vehicleID)
+	if err != nil {
+		return nil, errors.New("latest trip not found for vehicle")
+	}
+
+	updates := map[string]interface{}{
+		"auto_return": autoReturn,
+		"updated_at":   time.Now(),
+	}
+	if err := s.tripRepo.UpdateProgress(latestTrip.ID, updates); err != nil {
+		return nil, err
+	}
+
+	updatedTrip, err := s.tripRepo.GetByIDWithRelations(latestTrip.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	updatedTrip.Route.Waypoints = nil
+	adjustRouteForReversed(updatedTrip)
+
+	return updatedTrip, nil
+}
+
 func (s *TripService) GetTripsByDriverID(driverID int64) ([]models.Trip, error) {
 	trips, err := s.tripRepo.GetTripsByDriverID(driverID)
 	if err != nil {
@@ -844,8 +894,12 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 	updates := map[string]interface{}{
 		"updated_at": time.Now(),
 	}
+	shouldCreateAutoReturn := false
 	if mappedStatus != "" && mappedStatus != trip.Status {
 		updates["status"] = mappedStatus
+		if mappedStatus == "COMPLETED" && trip.AutoReturn {
+			shouldCreateAutoReturn = true
+		}
 	}
 
 	// Current location updates (convert m/s to km/h for speed)
@@ -1029,6 +1083,12 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 		}
 	}
 
+	if shouldCreateAutoReturn {
+		if _, err := s.createAutoReturnTripFromCompleted(updatedTrip); err != nil {
+			log.Printf("[AutoReturn] Failed to create return trip from Naviga completion for trip %d: %v", updatedTrip.ID, err)
+		}
+	}
+
 	return updatedTrip, nil
 }
 
@@ -1139,10 +1199,12 @@ func (s *TripService) DeleteTrip(id int64) error {
 // UpdateTripFromMQTT updates a trip with data from MQTT service without publishing back to RabbitMQ
 func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, error) {
 	// Get the existing trip to ensure it exists
-	_, err := s.tripRepo.GetByIDWithRelations(mqttTrip.ID)
+	existingTrip, err := s.tripRepo.GetByIDWithRelations(mqttTrip.ID)
 	if err != nil {
 		return nil, fmt.Errorf("trip not found: %w", err)
 	}
+
+	shouldCreateAutoReturn := existingTrip.AutoReturn && existingTrip.Status != "COMPLETED" && mqttTrip.Status == "COMPLETED"
 
 	// Prepare updates map with only the fields that should be updated from MQTT
 	updates := make(map[string]interface{})
@@ -1310,7 +1372,123 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 		}
 	}
 
+	if shouldCreateAutoReturn {
+		if _, err := s.createAutoReturnTripFromCompleted(updatedTrip); err != nil {
+			log.Printf("[AutoReturn] Failed to create return trip from MQTT completion for trip %d: %v", updatedTrip.ID, err)
+		}
+	}
+
 	return updatedTrip, nil
+}
+
+func (s *TripService) createAutoReturnTripFromCompleted(completedTrip *models.Trip) (*models.Trip, error) {
+	if completedTrip == nil {
+		return nil, errors.New("completed trip is required")
+	}
+	if completedTrip.Price == nil || *completedTrip.Price <= 0 {
+		return nil, errors.New("completed trip has invalid price for auto-return")
+	}
+
+	departureTime := time.Now().Unix()
+	if completedTrip.CompletionTime != nil && *completedTrip.CompletionTime > 0 {
+		departureTime = *completedTrip.CompletionTime
+	}
+
+	seats := completedTrip.Seats
+	autoReturnTrip := &models.Trip{
+		RouteID:            completedTrip.RouteID,
+		VehicleID:          completedTrip.VehicleID,
+		Vehicle:            completedTrip.Vehicle,
+		Status:             "SCHEDULED",
+		DepartureTime:      departureTime,
+		ConnectionMode:     completedTrip.ConnectionMode,
+		Price:              completedTrip.Price,
+		Notes:              completedTrip.Notes,
+		Seats:              seats,
+		RemainingSeats:     &seats,
+		IsReversed:         !completedTrip.IsReversed,
+		HasCustomWaypoints: completedTrip.HasCustomWaypoints,
+		AutoReturn:         true,
+	}
+
+	if err := autoReturnTrip.Validate(); err != nil {
+		return nil, err
+	}
+
+	if err := s.tripRepo.Create(autoReturnTrip); err != nil {
+		return nil, err
+	}
+
+	waypoints := append([]models.TripWaypoint(nil), completedTrip.Waypoints...)
+	sort.Slice(waypoints, func(i, j int) bool {
+		return waypoints[i].Order < waypoints[j].Order
+	})
+
+	totalPrice := *completedTrip.Price
+	for i := len(waypoints) - 1; i >= 0; i-- {
+		source := waypoints[i]
+		var pricePtr *float64
+		if source.IsPassThrough || source.Price == nil {
+			pricePtr = nil
+		} else {
+			reversedPrice := totalPrice - *source.Price
+			if reversedPrice <= 0 {
+				min := 0.01
+				pricePtr = &min
+			} else {
+				priceCopy := reversedPrice
+				pricePtr = &priceCopy
+			}
+		}
+
+		newWaypoint := &models.TripWaypoint{
+			TripID:        autoReturnTrip.ID,
+			LocationID:    source.LocationID,
+			Order:         len(waypoints) - i,
+			Price:         pricePtr,
+			IsPassThrough: source.IsPassThrough,
+			IsCustom:      source.IsCustom,
+		}
+
+		if err := s.tripRepo.CreateWaypoint(newWaypoint); err != nil {
+			return nil, err
+		}
+	}
+
+	createdTrip, err := s.tripRepo.GetByIDWithRelations(autoReturnTrip.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	createdTrip.Route.Waypoints = nil
+	adjustRouteForReversed(createdTrip)
+
+	if s.tripLogService != nil {
+		tripLogID, _ := s.tripLogService.LogTripUpdate(createdTrip, "created")
+		for _, wp := range createdTrip.Waypoints {
+			_ = s.tripLogService.LogWaypointUpdate(&wp, createdTrip.ID, "created", tripLogID)
+		}
+	}
+
+	if s.rabbitMQService != nil && s.tripExchange != "" {
+		_ = s.rabbitMQService.PublishTripEventToExchange(s.tripExchange, "created", *createdTrip)
+	}
+
+	if s.sseService != nil {
+		s.sseService.BroadcastTripEventToSessions(models.TripEventMessage{
+			Event: "created",
+			Data:  *createdTrip,
+		})
+	}
+
+	if s.poster != nil && s.scheduler != nil {
+		companyID := createdTrip.Vehicle.CompanyID
+		if s.scheduler.IsTimerActive(companyID) {
+			s.poster.PostTripUpdate(companyID, createdTrip)
+		}
+	}
+
+	return createdTrip, nil
 }
 
 // updateWaypointProgress automatically manages waypoint progress based on order

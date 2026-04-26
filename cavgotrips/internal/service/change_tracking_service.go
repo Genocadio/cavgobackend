@@ -14,13 +14,13 @@ import (
 )
 
 type ChangeTrackingService struct {
-	repo              repository.ChangeTrackingRepository
-	currentBatch      *models.ChangeBatch
-	batchMutex        sync.Mutex
-	mergeTimer        *time.Timer
-	mergeTimerMutex   sync.Mutex
-	lastChangeTime    time.Time
-	lastChangeMutex   sync.Mutex
+	repo            repository.ChangeTrackingRepository
+	currentBatch    *models.ChangeBatch
+	batchMutex      sync.Mutex
+	mergeTimer      *time.Timer
+	mergeTimerMutex sync.Mutex
+	lastChangeTime  time.Time
+	lastChangeMutex sync.Mutex
 }
 
 func NewChangeTrackingService(repo repository.ChangeTrackingRepository) *ChangeTrackingService {
@@ -29,8 +29,19 @@ func NewChangeTrackingService(repo repository.ChangeTrackingRepository) *ChangeT
 	}
 }
 
+func normalizeOperation(change models.Change) string {
+	if change.Operation != "" {
+		return change.Operation
+	}
+	if change.IsDeleted {
+		return models.ChangeOperationDeleted
+	}
+	// Backward compatibility for old rows that don't have explicit operation.
+	return models.ChangeOperationUpdated
+}
+
 // RecordChange creates a change record in current unmerged batch (or creates new batch if none exists)
-func (s *ChangeTrackingService) RecordChange(changedType string, changedID int64, isDeleted bool) error {
+func (s *ChangeTrackingService) RecordChange(changedType string, changedID int64, operation string) error {
 	s.batchMutex.Lock()
 	defer s.batchMutex.Unlock()
 
@@ -43,8 +54,10 @@ func (s *ChangeTrackingService) RecordChange(changedType string, changedID int64
 		s.currentBatch = batch
 	}
 
+	isDeleted := operation == models.ChangeOperationDeleted
+
 	// Create change record
-	err := s.repo.CreateChange(s.currentBatch.ID, changedType, changedID, isDeleted)
+	err := s.repo.CreateChange(s.currentBatch.ID, changedType, changedID, isDeleted, operation)
 	if err != nil {
 		return err
 	}
@@ -188,57 +201,175 @@ func (s *ChangeTrackingService) CompareHash(clientHash string) (bool, *models.Ma
 	return matches, clientMainHash, currentMainHash
 }
 
-// GetChangedRoutesSinceHash returns changed routes, deleted IDs, and total count
-func (s *ChangeTrackingService) GetChangedRoutesSinceHash(hash string, limit, offset int) ([]models.Route, []int64, int64, error) {
+func (s *ChangeTrackingService) GetRouteSyncChangesSinceHash(hash string, limit, offset int) ([]models.RouteSyncChange, []models.Route, []int64, int64, error) {
 	clientMainHash, err := s.repo.GetMainHashByHash(hash)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, nil, 0, err
 	}
 
 	if clientMainHash == nil {
-		// Hash not found - this should be caught by handler, but handle gracefully
-		return nil, nil, 0, fmt.Errorf("hash not found: %s", hash)
+		return nil, nil, nil, 0, fmt.Errorf("hash not found: %s", hash)
 	}
 
-	// Get changed routes since this main hash
-	routes, total, err := s.repo.GetChangedRoutesSinceMainHash(clientMainHash.ID, limit, offset)
+	changes, total, err := s.repo.GetLatestEntityChangesSinceMainHash(clientMainHash.ID, "route", limit, offset)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, nil, 0, err
 	}
 
-	// Get deleted IDs
 	deletedIDs, err := s.repo.GetDeletedIDsSinceMainHash(clientMainHash.ID, "route")
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, nil, 0, err
 	}
 
+	routeIDs := make([]int64, 0, len(changes))
+	for _, change := range changes {
+		operation := normalizeOperation(change)
+		if operation == models.ChangeOperationDeleted {
+			continue
+		}
+		routeIDs = append(routeIDs, change.ChangedID)
+	}
+
+	routes, err := s.repo.GetRoutesByIDs(routeIDs)
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
+
+	routeMap := make(map[int64]models.Route, len(routes))
+	for _, route := range routes {
+		routeMap[route.ID] = route
+	}
+
+	deletedSet := make(map[int64]bool, len(deletedIDs))
+	for _, id := range deletedIDs {
+		deletedSet[id] = true
+	}
+
+	detailed := make([]models.RouteSyncChange, 0, len(changes))
+	routePayload := make([]models.Route, 0, len(changes))
+	for _, change := range changes {
+		operation := normalizeOperation(change)
+		item := models.RouteSyncChange{
+			ID:        change.ChangedID,
+			Operation: operation,
+			ChangedAt: change.CreatedAt,
+		}
+
+		if operation != models.ChangeOperationDeleted {
+			if route, ok := routeMap[change.ChangedID]; ok {
+				routeCopy := route
+				item.Route = &routeCopy
+				routePayload = append(routePayload, route)
+			} else {
+				item.Operation = models.ChangeOperationDeleted
+				deletedSet[change.ChangedID] = true
+			}
+		}
+
+		detailed = append(detailed, item)
+	}
+
+	finalDeletedIDs := make([]int64, 0, len(deletedSet))
+	for id := range deletedSet {
+		finalDeletedIDs = append(finalDeletedIDs, id)
+	}
+	sort.Slice(finalDeletedIDs, func(i, j int) bool { return finalDeletedIDs[i] < finalDeletedIDs[j] })
+
+	return detailed, routePayload, finalDeletedIDs, total, nil
+}
+
+func (s *ChangeTrackingService) GetLocationSyncChangesSinceHash(hash string, limit, offset int) ([]models.LocationSyncChange, []models.Location, []int64, int64, error) {
+	clientMainHash, err := s.repo.GetMainHashByHash(hash)
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
+
+	if clientMainHash == nil {
+		return nil, nil, nil, 0, fmt.Errorf("hash not found: %s", hash)
+	}
+
+	changes, total, err := s.repo.GetLatestEntityChangesSinceMainHash(clientMainHash.ID, "location", limit, offset)
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
+
+	deletedIDs, err := s.repo.GetDeletedIDsSinceMainHash(clientMainHash.ID, "location")
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
+
+	locationIDs := make([]int64, 0, len(changes))
+	for _, change := range changes {
+		operation := normalizeOperation(change)
+		if operation == models.ChangeOperationDeleted {
+			continue
+		}
+		locationIDs = append(locationIDs, change.ChangedID)
+	}
+
+	locations, err := s.repo.GetLocationsByIDs(locationIDs)
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
+
+	locationMap := make(map[int64]models.Location, len(locations))
+	for _, location := range locations {
+		locationMap[location.ID] = location
+	}
+
+	deletedSet := make(map[int64]bool, len(deletedIDs))
+	for _, id := range deletedIDs {
+		deletedSet[id] = true
+	}
+
+	detailed := make([]models.LocationSyncChange, 0, len(changes))
+	locationPayload := make([]models.Location, 0, len(changes))
+	for _, change := range changes {
+		operation := normalizeOperation(change)
+		item := models.LocationSyncChange{
+			ID:        change.ChangedID,
+			Operation: operation,
+			ChangedAt: change.CreatedAt,
+		}
+
+		if operation != models.ChangeOperationDeleted {
+			if location, ok := locationMap[change.ChangedID]; ok {
+				locationCopy := location
+				item.Location = &locationCopy
+				locationPayload = append(locationPayload, location)
+			} else {
+				item.Operation = models.ChangeOperationDeleted
+				deletedSet[change.ChangedID] = true
+			}
+		}
+
+		detailed = append(detailed, item)
+	}
+
+	finalDeletedIDs := make([]int64, 0, len(deletedSet))
+	for id := range deletedSet {
+		finalDeletedIDs = append(finalDeletedIDs, id)
+	}
+	sort.Slice(finalDeletedIDs, func(i, j int) bool { return finalDeletedIDs[i] < finalDeletedIDs[j] })
+
+	return detailed, locationPayload, finalDeletedIDs, total, nil
+}
+
+// GetChangedRoutesSinceHash returns changed routes, deleted IDs, and total count
+func (s *ChangeTrackingService) GetChangedRoutesSinceHash(hash string, limit, offset int) ([]models.Route, []int64, int64, error) {
+	_, routes, deletedIDs, total, err := s.GetRouteSyncChangesSinceHash(hash, limit, offset)
+	if err != nil {
+		return nil, nil, 0, err
+	}
 	return routes, deletedIDs, total, nil
 }
 
 // GetChangedLocationsSinceHash returns changed locations, deleted IDs, and total count
 func (s *ChangeTrackingService) GetChangedLocationsSinceHash(hash string, limit, offset int) ([]models.Location, []int64, int64, error) {
-	clientMainHash, err := s.repo.GetMainHashByHash(hash)
+	_, locations, deletedIDs, total, err := s.GetLocationSyncChangesSinceHash(hash, limit, offset)
 	if err != nil {
 		return nil, nil, 0, err
 	}
-
-	if clientMainHash == nil {
-		// Hash not found - this should be caught by handler, but handle gracefully
-		return nil, nil, 0, fmt.Errorf("hash not found: %s", hash)
-	}
-
-	// Get changed locations since this main hash
-	locations, total, err := s.repo.GetChangedLocationsSinceMainHash(clientMainHash.ID, limit, offset)
-	if err != nil {
-		return nil, nil, 0, err
-	}
-
-	// Get deleted IDs
-	deletedIDs, err := s.repo.GetDeletedIDsSinceMainHash(clientMainHash.ID, "location")
-	if err != nil {
-		return nil, nil, 0, err
-	}
-
 	return locations, deletedIDs, total, nil
 }
 
@@ -309,4 +440,3 @@ func (s *ChangeTrackingService) StartInactivityMonitor() {
 		}
 	}()
 }
-

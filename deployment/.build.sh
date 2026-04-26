@@ -23,6 +23,7 @@ fi
 # shellcheck source=/dev/null
 source "$VENV_DIR/bin/activate"
 
+# Keep pip available and current in the environment.
 python -m pip install --upgrade pip >/dev/null
 
 if [[ ! -f "$REQ_FILE" ]]; then
@@ -54,4 +55,3 @@ else
 fi
 
 python build-images.py "$@"
-

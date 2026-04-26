@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { InferModel } from "drizzle-orm";
 import { db } from "../db/client";
 import { tripLocations } from "../db/schema";
@@ -37,5 +37,11 @@ export async function upsertTripLocation(location: TripLocation): Promise<TripLo
 export async function getTripLocationById(id: string): Promise<TripLocation | null> {
   const [row] = await db.select().from(tripLocations).where(eq(tripLocations.id, id));
   return row ? mapLocation(row) : null;
+}
+
+export async function getTripLocationByIds(ids: string[]): Promise<TripLocation[]> {
+  if (ids.length === 0) return [];
+  const rows = await db.select().from(tripLocations).where(inArray(tripLocations.id, ids));
+  return rows.map(mapLocation);
 }
 

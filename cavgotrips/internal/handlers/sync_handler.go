@@ -109,6 +109,7 @@ func (h *SyncHandler) SyncRoutesByHash(w http.ResponseWriter, r *http.Request) {
 			Hash:       hashValue,
 			Changed:    true, // Always true when no hash provided (initial sync)
 			Routes:     allRoutes,
+			Changes:    []models.RouteSyncChange{},
 			DeletedIDs: []int64{},
 			Page:       page,
 			Limit:      limit,
@@ -139,6 +140,7 @@ func (h *SyncHandler) SyncRoutesByHash(w http.ResponseWriter, r *http.Request) {
 			Hash:       "",
 			Changed:    true,
 			Routes:     allRoutes,
+			Changes:    []models.RouteSyncChange{},
 			DeletedIDs: []int64{},
 			Page:       page,
 			Limit:      limit,
@@ -159,6 +161,7 @@ func (h *SyncHandler) SyncRoutesByHash(w http.ResponseWriter, r *http.Request) {
 			Hash:       currentMainHash.Hash,
 			Changed:    false,
 			Routes:     []models.Route{},
+			Changes:    []models.RouteSyncChange{},
 			DeletedIDs: []int64{},
 			Message:    "Invalid hash: hash not found in database. Please sync without hash parameter to get all data.",
 		}
@@ -170,7 +173,7 @@ func (h *SyncHandler) SyncRoutesByHash(w http.ResponseWriter, r *http.Request) {
 	// (e.g., unmerged changes that haven't been merged into a new hash yet)
 	if matches {
 		// Check for changes since this hash was created
-		routes, deletedIDs, total, err := h.changeTrackingService.GetChangedRoutesSinceHash(hash, limit, offset)
+		changes, routes, deletedIDs, total, err := h.changeTrackingService.GetRouteSyncChangesSinceHash(hash, limit, offset)
 		if err != nil {
 			log.Printf("[SyncHandler] Error getting changed routes: %v", err)
 			// If error, return unchanged response
@@ -178,6 +181,7 @@ func (h *SyncHandler) SyncRoutesByHash(w http.ResponseWriter, r *http.Request) {
 				Hash:       currentMainHash.Hash,
 				Changed:    false,
 				Routes:     []models.Route{},
+				Changes:    []models.RouteSyncChange{},
 				DeletedIDs: []int64{},
 			}
 			utils.JSONResponse(w, response, http.StatusOK)
@@ -190,6 +194,7 @@ func (h *SyncHandler) SyncRoutesByHash(w http.ResponseWriter, r *http.Request) {
 				Hash:       currentMainHash.Hash, // Hash hasn't changed yet (unmerged changes)
 				Changed:    true,
 				Routes:     routes,
+				Changes:    changes,
 				DeletedIDs: deletedIDs,
 				Page:       page,
 				Limit:      limit,
@@ -204,6 +209,7 @@ func (h *SyncHandler) SyncRoutesByHash(w http.ResponseWriter, r *http.Request) {
 			Hash:       currentMainHash.Hash,
 			Changed:    false,
 			Routes:     []models.Route{},
+			Changes:    []models.RouteSyncChange{},
 			DeletedIDs: []int64{},
 		}
 		utils.JSONResponse(w, response, http.StatusOK)
@@ -211,7 +217,7 @@ func (h *SyncHandler) SyncRoutesByHash(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Hash doesn't match, get changed routes
-	routes, deletedIDs, total, err := h.changeTrackingService.GetChangedRoutesSinceHash(hash, limit, offset)
+	changes, routes, deletedIDs, total, err := h.changeTrackingService.GetRouteSyncChangesSinceHash(hash, limit, offset)
 	if err != nil {
 		log.Printf("[SyncHandler] Error getting changed routes: %v", err)
 		utils.ErrorResponse(w, "Failed to get changed routes: "+err.Error(), http.StatusInternalServerError)
@@ -222,6 +228,7 @@ func (h *SyncHandler) SyncRoutesByHash(w http.ResponseWriter, r *http.Request) {
 		Hash:       currentMainHash.Hash,
 		Changed:    true,
 		Routes:     routes,
+		Changes:    changes,
 		DeletedIDs: deletedIDs,
 		Page:       page,
 		Limit:      limit,
@@ -278,6 +285,7 @@ func (h *SyncHandler) SyncLocationsByHash(w http.ResponseWriter, r *http.Request
 			Hash:       hashValue,
 			Changed:    true, // Always true when no hash provided (initial sync)
 			Locations:  allLocations,
+			Changes:    []models.LocationSyncChange{},
 			DeletedIDs: []int64{},
 			Page:       page,
 			Limit:      limit,
@@ -303,6 +311,7 @@ func (h *SyncHandler) SyncLocationsByHash(w http.ResponseWriter, r *http.Request
 			Hash:       "",
 			Changed:    true,
 			Locations:  allLocations,
+			Changes:    []models.LocationSyncChange{},
 			DeletedIDs: []int64{},
 			Page:       page,
 			Limit:      limit,
@@ -323,6 +332,7 @@ func (h *SyncHandler) SyncLocationsByHash(w http.ResponseWriter, r *http.Request
 			Hash:       currentMainHash.Hash,
 			Changed:    false,
 			Locations:  []models.Location{},
+			Changes:    []models.LocationSyncChange{},
 			DeletedIDs: []int64{},
 			Message:    "Invalid hash: hash not found in database. Please sync without hash parameter to get all data.",
 		}
@@ -334,7 +344,7 @@ func (h *SyncHandler) SyncLocationsByHash(w http.ResponseWriter, r *http.Request
 	// (e.g., unmerged changes that haven't been merged into a new hash yet)
 	if matches {
 		// Check for changes since this hash was created
-		locations, deletedIDs, total, err := h.changeTrackingService.GetChangedLocationsSinceHash(hash, limit, offset)
+		changes, locations, deletedIDs, total, err := h.changeTrackingService.GetLocationSyncChangesSinceHash(hash, limit, offset)
 		if err != nil {
 			log.Printf("[SyncHandler] Error getting changed locations: %v", err)
 			// If error, return unchanged response
@@ -342,6 +352,7 @@ func (h *SyncHandler) SyncLocationsByHash(w http.ResponseWriter, r *http.Request
 				Hash:       currentMainHash.Hash,
 				Changed:    false,
 				Locations:  []models.Location{},
+				Changes:    []models.LocationSyncChange{},
 				DeletedIDs: []int64{},
 			}
 			utils.JSONResponse(w, response, http.StatusOK)
@@ -354,6 +365,7 @@ func (h *SyncHandler) SyncLocationsByHash(w http.ResponseWriter, r *http.Request
 				Hash:       currentMainHash.Hash, // Hash hasn't changed yet (unmerged changes)
 				Changed:    true,
 				Locations:  locations,
+				Changes:    changes,
 				DeletedIDs: deletedIDs,
 				Page:       page,
 				Limit:      limit,
@@ -368,6 +380,7 @@ func (h *SyncHandler) SyncLocationsByHash(w http.ResponseWriter, r *http.Request
 			Hash:       currentMainHash.Hash,
 			Changed:    false,
 			Locations:  []models.Location{},
+			Changes:    []models.LocationSyncChange{},
 			DeletedIDs: []int64{},
 		}
 		utils.JSONResponse(w, response, http.StatusOK)
@@ -375,7 +388,7 @@ func (h *SyncHandler) SyncLocationsByHash(w http.ResponseWriter, r *http.Request
 	}
 
 	// Hash doesn't match, get changed locations
-	locations, deletedIDs, total, err := h.changeTrackingService.GetChangedLocationsSinceHash(hash, limit, offset)
+	changes, locations, deletedIDs, total, err := h.changeTrackingService.GetLocationSyncChangesSinceHash(hash, limit, offset)
 	if err != nil {
 		log.Printf("[SyncHandler] Error getting changed locations: %v", err)
 		utils.ErrorResponse(w, "Failed to get changed locations: "+err.Error(), http.StatusInternalServerError)
@@ -386,6 +399,7 @@ func (h *SyncHandler) SyncLocationsByHash(w http.ResponseWriter, r *http.Request
 		Hash:       currentMainHash.Hash,
 		Changed:    true,
 		Locations:  locations,
+		Changes:    changes,
 		DeletedIDs: deletedIDs,
 		Page:       page,
 		Limit:      limit,
@@ -394,4 +408,3 @@ func (h *SyncHandler) SyncLocationsByHash(w http.ResponseWriter, r *http.Request
 
 	utils.JSONResponse(w, response, http.StatusOK)
 }
-

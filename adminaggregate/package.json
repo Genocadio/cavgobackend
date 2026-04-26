@@ -5,7 +5,7 @@
   "license": "ISC",
   "author": "Geno Yves Cadiot",
   "type": "commonjs",
-  "packageManager": "pnpm@10.25.0",
+  "packageManager": "bun@1.1.30",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

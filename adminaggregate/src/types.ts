@@ -232,17 +232,60 @@ export interface CompanyUserResponseDto {
   companyName: string;
   firstName: string;
   lastName: string;
-  email: string;
-  phone: string;
+  email: string | null;
+  phone: string | null;
   status: Status;
-  dateOfBirth: string;
-  address: string;
-  role: string;
-  licenseNumber: string;
-  licenseExpiry: string;
+  dateOfBirth: string | null;
+  address: string | null;
+  role: string | null;
+  licenseNumber: string | null;
+  licenseExpiry: string | null;
   createdAt: string;
   updatedAt: string;
   vehicle: VehicleResponseDto | null;
+}
+
+export interface LocationSyncResponseDto {
+  id: number;
+  latitude: number;
+  longitude: number;
+  code: string | null;
+  google_place_name: string | null;
+  custom_name: string | null;
+  province: string | null;
+  district: string | null;
+  place_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface LocationsHashResponse {
+  hash: string;
+  changed: boolean;
+  locations: LocationSyncResponseDto[];
+  changes?: unknown[];
+  deleted_ids?: number[];
+  page: number;
+  limit: number;
+  total: number;
+  total_pages: number;
+  message?: string;
+}
+
+export interface PaginatedResponse<T> {
+  content?: T[];
+  items?: T[];
+  data?: T[];
+  pageable?: unknown;
+  totalPages?: number;
+  totalElements?: number;
+  last?: boolean;
+  numberOfElements?: number;
+  size?: number;
+  number?: number;
+  sort?: unknown;
+  first?: boolean;
+  empty?: boolean;
 }
 
 // Event types
