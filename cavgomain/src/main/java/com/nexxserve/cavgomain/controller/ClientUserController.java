@@ -1,7 +1,6 @@
 package com.nexxserve.cavgomain.controller;
 
 import com.nexxserve.cavgomain.dto.request.ClientUserRequestDto;
-import com.nexxserve.cavgomain.dto.response.AuthResponseDto;
 import com.nexxserve.cavgomain.dto.response.ClientUserResponseDto;
 import com.nexxserve.cavgomain.enums.ClientType;
 import com.nexxserve.cavgomain.service.ClientUserService;
@@ -18,10 +17,7 @@ public class ClientUserController {
 
     private final ClientUserService clientUserService;
 
-    @PostMapping
-    public AuthResponseDto createClientUser(@Valid @RequestBody ClientUserRequestDto user) {
-        return clientUserService.createClientUser(user);
-    }
+    // Registration removed — users authenticate via Nexxauth, then sync locally
 
     @PutMapping("/{id}")
     public ClientUserResponseDto updateClientUser(@PathVariable Long id, @Valid @RequestBody ClientUserRequestDto user) {

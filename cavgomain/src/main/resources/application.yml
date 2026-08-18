@@ -25,11 +25,13 @@ spring:
       simple:
         auto-startup: false  # Don't auto-start listeners on app startup
 
-jwt:
- secret: "u8F3v1Q2w4E6r8T9y2B5n7M0p3L6s9V1x"
- expiration: 3600 # in seconds, e.g., 1 hour
- access-token-expiration: 3600
- refresh-token-expiration: 86400
+# Nexxauth identity — tokens are issued by Nexxauth, verified offline here
+nexxauth:
+  public-key: ${NEXXAUTH_PUBLIC_KEY:}
+  base-url: ${NEXXAUTH_BASE_URL:}
+  organisation-id: ${NEXXAUTH_ORGANISATION_ID:}
+  client-id: ${NEXXAUTH_CLIENT_ID:}
+  client-token: ${NEXXAUTH_CLIENT_TOKEN:}
 
 eureka:
  client:

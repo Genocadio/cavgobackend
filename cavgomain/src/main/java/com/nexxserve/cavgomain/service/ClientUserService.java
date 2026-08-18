@@ -1,15 +1,11 @@
 package com.nexxserve.cavgomain.service;
 
 import com.nexxserve.cavgomain.dto.request.ClientUserRequestDto;
-import com.nexxserve.cavgomain.dto.response.AuthResponseDto;
 import com.nexxserve.cavgomain.dto.response.ClientUserResponseDto;
 import com.nexxserve.cavgomain.entity.ClientUser;
 import com.nexxserve.cavgomain.enums.ClientType;
 import com.nexxserve.cavgomain.repository.ClientUserRepository;
-import com.nexxserve.cavgomain.repository.UserRepository;
-import com.nexxserve.cavgomain.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,37 +18,6 @@ import java.util.stream.Collectors;
 public class ClientUserService {
 
     private final ClientUserRepository clientUserRepository;
-    private final PasswordEncoder passwordEncoder;
-    private final JwtTokenProvider tokenProvider;
-    private final UserRepository userRepository;
-
-    public AuthResponseDto createClientUser(ClientUserRequestDto requestDto) {
-        // Check across ALL user types (CompanyUser, ClientUser, etc.)
-        if (userRepository.findByEmail(requestDto.getEmail()).isPresent()) {
-            throw new IllegalArgumentException("Email already exists");
-        }
-        if (userRepository.findByPhone(requestDto.getPhone()).isPresent()) {
-            throw new IllegalArgumentException("Phone already exists");
-        }
-
-        ClientUser user = requestDto.toEntity();
-        user.setPassword(passwordEncoder.encode(user.getPassword()));
-        ClientUser savedUser = clientUserRepository.save(user);
-
-        String accessToken = tokenProvider.generateAccessToken(savedUser);
-        String refreshToken = tokenProvider.generateRefreshToken(savedUser);
-
-        return AuthResponseDto.builder()
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
-                .userId(savedUser.getId())
-                .username(savedUser.getFirstName().concat(" ").concat(savedUser.getLastName()))
-                .email(savedUser.getEmail())
-                .phone(savedUser.getPhone())
-                .userType(savedUser.getClass().getSimpleName())
-                .isCompanyUser(false)
-                .build();
-    }
 
     public ClientUserResponseDto updateClientUser(Long id, ClientUserRequestDto requestDto) {
         ClientUser existingUser = findEntityById(id);

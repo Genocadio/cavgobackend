@@ -24,8 +24,7 @@ public class ClientUserRequestDto {
     @NotBlank(message = "Phone is required")
     private String phone;
 
-    @NotBlank(message = "Password is required")
-    private String password;
+    // Password removed — authentication is managed by Nexxauth
 
     private UserStatus status = UserStatus.ACTIVE;
     private LocalDate dateOfBirth;
@@ -41,7 +40,6 @@ public class ClientUserRequestDto {
         clientUser.setLastName(this.lastName);
         clientUser.setEmail(this.email);
         clientUser.setPhone(this.phone);
-        clientUser.setPassword(this.password);
         clientUser.setStatus(this.status);
         clientUser.setDateOfBirth(this.dateOfBirth);
         clientUser.setAddress(this.address);

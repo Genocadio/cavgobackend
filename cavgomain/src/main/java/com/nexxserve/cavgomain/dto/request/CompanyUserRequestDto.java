@@ -22,14 +22,12 @@ public class CompanyUserRequestDto {
     @NotBlank(message = "Last name is required")
     private String lastName;
 
-
     @Email(message = "Email should be valid")
     private String email;
-    @NotBlank(message = "Email is required")
+    @NotBlank(message = "Phone is required")
     private String phone;
 
-    @NotBlank(message = "Password is required")
-    private String password;
+    // Password removed — authentication is managed by Nexxauth
 
     private UserStatus status = UserStatus.ACTIVE;
 
@@ -43,14 +41,19 @@ public class CompanyUserRequestDto {
 
     private LocalDate licenseExpiry;
 
+    /** Nexxauth user ID to link this company user to an existing Nexxauth identity */
+    private Long nexxauthUserId;
+
     public CompanyUser toEntity(Company company) {
         CompanyUser user = new CompanyUser();
         user.setCompany(company);
+        if (this.nexxauthUserId != null) {
+            user.setId(this.nexxauthUserId);
+        }
         user.setFirstName(this.firstName);
         user.setLastName(this.lastName);
         user.setEmail(this.email);
         user.setPhone(this.phone);
-        user.setPassword(this.password);
         user.setStatus(this.status);
         user.setDateOfBirth(this.dateOfBirth);
         user.setAddress(this.address);

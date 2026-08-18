@@ -6,6 +6,11 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
 
+/**
+ * User profile mirror — identity and authentication are managed by Nexxauth.
+ * The {@code id} is the Nexxauth org-user id (provided externally, never
+ * auto-generated). Passwords are not stored locally.
+ */
 @Entity
 @Table(name = "users")
 @Inheritance(strategy = InheritanceType.JOINED)
@@ -14,20 +19,22 @@ import lombok.ToString;
 @ToString(callSuper = true)
 public abstract class User extends BaseEntity {
 
-    @Column(name = "first_name", nullable = false)
+    // Override BaseEntity: Nexxauth provides the ID externally, never auto-generate
+    @Id
+    @Column(name = "id")
+    private Long id;
+
+    @Column(name = "first_name")
     private String firstName;
 
-    @Column(name = "last_name", nullable = false)
+    @Column(name = "last_name")
     private String lastName;
 
-    @Column(name = "email", unique = true)
+    @Column(name = "email")
     private String email;
 
-    @Column(name = "phone", unique = true, nullable = false)
+    @Column(name = "phone")
     private String phone;
-
-    @Column(name = "password", nullable = false)
-    private String password;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status")
