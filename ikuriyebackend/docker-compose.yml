@@ -1,0 +1,12 @@
+services:
+  delivery-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env
+    ports:
+      - "5080:8080"
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

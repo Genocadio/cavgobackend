@@ -1,0 +1,137 @@
+package com.gocavgo.delivary.service.delivery;
+
+import com.gocavgo.delivary.enums.transfer.TransferAcceptorType;
+import com.gocavgo.delivary.enums.user.DriverStatus;
+import com.gocavgo.delivary.enums.user.Role;
+import com.gocavgo.delivary.enums.user.UserStatus;
+import com.gocavgo.delivary.repository.office.OfficeJpaRepository;
+import com.gocavgo.delivary.repository.user.DriverProfileRepository;
+import com.gocavgo.delivary.repository.user.UserRepository;
+import com.gocavgo.delivary.enums.delivery.DeliveryType;
+import com.gocavgo.delivary.enums.delivery.PackageStatus;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+@Component
+@RequiredArgsConstructor
+public class PackageValidationService {
+
+    private final UserRepository userRepository;
+    private final DriverProfileRepository driverProfileRepository;
+    private final OfficeJpaRepository officeRepository;
+
+    private static final Map<PackageStatus, Set<PackageStatus>> OPEN_TRANSITIONS = Map.of(
+            PackageStatus.CREATED, Set.of(PackageStatus.ACCEPTED, PackageStatus.CANCELLED),
+            PackageStatus.ACCEPTED, Set.of(PackageStatus.PICKED_UP, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED),
+            PackageStatus.PICKED_UP, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED),
+            PackageStatus.IN_TRANSIT, Set.of(PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED),
+            PackageStatus.PENDING_CONFIRMATION, Set.of(PackageStatus.DELIVERED, PackageStatus.CANCELLED),
+            PackageStatus.DELIVERED, Set.of(PackageStatus.COMPLETED, PackageStatus.CANCELLED),
+            PackageStatus.COMPLETED, Set.of(),
+            PackageStatus.CANCELLED, Set.of()
+    );
+
+    private static final Map<PackageStatus, Set<PackageStatus>> ROUTE_TRANSITIONS = Map.of(
+            PackageStatus.CREATED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.CANCELLED),
+            PackageStatus.ORIGIN_OFFICE, Set.of(PackageStatus.ASSIGNED_DRIVER, PackageStatus.CANCELLED),
+            PackageStatus.ASSIGNED_DRIVER, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED),
+            PackageStatus.IN_TRANSIT, Set.of(PackageStatus.DESTINATION_OFFICE, PackageStatus.CANCELLED),
+            PackageStatus.DESTINATION_OFFICE, Set.of(PackageStatus.READY_FOR_COLLECTION, PackageStatus.CANCELLED),
+            PackageStatus.READY_FOR_COLLECTION, Set.of(PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED),
+            PackageStatus.PENDING_CONFIRMATION, Set.of(PackageStatus.DELIVERED, PackageStatus.CANCELLED),
+            PackageStatus.DELIVERED, Set.of(PackageStatus.COMPLETED, PackageStatus.CANCELLED),
+            PackageStatus.COMPLETED, Set.of(),
+            PackageStatus.CANCELLED, Set.of()
+    );
+
+    private static final Set<Role> CREATOR_ROLES = Set.of(Role.CUSTOMER, Role.WORKER, Role.DRIVER);
+    private static final Set<Role> ACCEPTOR_ROLES = Set.of(Role.WORKER, Role.DRIVER);
+    private static final Set<Role> ASSIGNER_ROLES = Set.of(Role.WORKER, Role.DRIVER, Role.ADMIN, Role.SUPER_ADMIN);
+
+    public void validateCreator(Long userId, Role role) {
+        var user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Creator not found: " + userId));
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new RuntimeException("Creator is not ACTIVE");
+        }
+        if (!CREATOR_ROLES.contains(role)) {
+            throw new RuntimeException("User role cannot create packages: " + role);
+        }
+    }
+
+    public void validateAcceptor(Long userId, Role role) {
+        var user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Acceptor not found: " + userId));
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new RuntimeException("Acceptor is not ACTIVE");
+        }
+        if (!ACCEPTOR_ROLES.contains(role)) {
+            throw new RuntimeException("User role cannot accept packages: " + role);
+        }
+    }
+
+    /** Returns the role of the acceptor (WORKER or DRIVER). Call after validateAcceptor. */
+    public Role resolveAcceptorRole(Long userId, Role role) {
+        return role;
+    }
+
+    public void validateDriver(Long driverId) {
+        var user = userRepository.findById(driverId)
+                .orElseThrow(() -> new RuntimeException("Driver not found: " + driverId));
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new RuntimeException("Driver is not ACTIVE");
+        }
+        var driverProfile = driverProfileRepository.findByUserId(driverId)
+                .orElseThrow(() -> new RuntimeException("Driver profile not found"));
+        if (driverProfile.getStatus() != DriverStatus.ONLINE) {
+            throw new RuntimeException("Driver is not ONLINE: " + driverProfile.getStatus());
+        }
+    }
+
+    /**
+     * Throws if the given office id does not exist. Null is allowed (no office).
+     */
+    public void validateOffice(UUID officeId) {
+        if (officeId != null && !officeRepository.existsById(officeId)) {
+            throw new RuntimeException("Office not found: " + officeId);
+        }
+    }
+
+    public void validateAssigner(Long userId, Role role) {
+        if (!ASSIGNER_ROLES.contains(role)) {
+            throw new RuntimeException("User role cannot assign drivers: " + role);
+        }
+    }
+
+    public void validateTransition(PackageStatus current, PackageStatus next, DeliveryType deliveryType) {
+        var transitions = deliveryType == DeliveryType.FIXED_ROUTE ? ROUTE_TRANSITIONS : OPEN_TRANSITIONS;
+        var allowed = transitions.get(current);
+        if (allowed == null || !allowed.contains(next)) {
+            throw new RuntimeException("Invalid status transition: " + current + " -> " + next);
+        }
+    }
+
+    public List<PackageStatus> getNextAllowedStates(PackageStatus current, DeliveryType deliveryType) {
+        var transitions = deliveryType == DeliveryType.FIXED_ROUTE ? ROUTE_TRANSITIONS : OPEN_TRANSITIONS;
+        return transitions.getOrDefault(current, Set.of()).stream().toList();
+    }
+
+    /**
+     * Validates that the actor's system role is allowed by the transfer's acceptorType.
+     */
+    public void validateAcceptorType(TransferAcceptorType acceptorType, Role actorRole, UUID transferId) {
+        var ctx = transferId != null ? "Transfer " + transferId : "This transfer";
+        if (acceptorType == TransferAcceptorType.WORKER && actorRole != Role.WORKER) {
+            throw new RuntimeException(ctx + " requires WORKER role, but actor has " + actorRole);
+        }
+        if (acceptorType == TransferAcceptorType.DRIVER && actorRole != Role.DRIVER) {
+            throw new RuntimeException(ctx + " requires DRIVER role, but actor has " + actorRole);
+        }
+        // BOTH allows both WORKER and DRIVER — no validation needed
+    }
+}

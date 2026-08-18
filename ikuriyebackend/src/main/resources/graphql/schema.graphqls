@@ -1,0 +1,898 @@
+"System-level roles assigned to users. Determines access and permissions across the platform."
+enum Role {
+    "Super admin — full system access"
+    SUPER_ADMIN
+    "Admin — elevated management access"
+    ADMIN
+    "Customer — end user who creates delivery requests"
+    CUSTOMER
+    "Worker — operational employee who handles packages"
+    WORKER
+    "Driver — responsible for transporting packages"
+    DRIVER
+}
+
+"Account status for a user."
+enum UserStatus {
+    "User is active and can use the platform"
+    ACTIVE
+    "User has been disabled (e.g. banned from Supabase)"
+    DISABLED
+    "User has not yet been fully activated"
+    PENDING
+}
+
+"Delivery type for a package."
+enum DeliveryType {
+    "Open delivery — flexible status transitions (CREATED → ACCEPTED → PICKED_UP → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED → COMPLETED)"
+    OPEN
+    "Fixed-route delivery — follows office-to-office flow (CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → DESTINATION_OFFICE → READY_FOR_COLLECTION → PENDING_CONFIRMATION → DELIVERED → COMPLETED)"
+    FIXED_ROUTE
+}
+
+"Role a user plays as custodian of a package at a given stage."
+enum CustodianRole {
+    "A worker currently handling the package"
+    WORKER
+    "The driver transporting the package"
+    DRIVER
+    "An office that holds the package (origin or destination)"
+    OFFICE
+    "The receiver who the package is delivered to"
+    RECEIVER
+}
+
+"Whether a location is the origin or destination of a shipment."
+enum LocationType {
+    "Pickup / sender location"
+    ORIGIN
+    "Drop-off / receiver location"
+    DESTINATION
+}
+
+"Role of a person associated with a package (sender or receiver)."
+enum PersonRole {
+    "The person sending the package"
+    SENDER
+    "The person receiving the package"
+    RECEIVER
+}
+
+"Current lifecycle status of a package."
+enum PackageStatus {
+    "Package has been created and is waiting to be accepted"
+    CREATED
+    "Package has been accepted by a worker"
+    ACCEPTED
+    "Package has been picked up by the driver"
+    PICKED_UP
+    "Package is in transit to its destination"
+    IN_TRANSIT
+    "Delivery has been initiated — a delivery code was generated and published to the sender/receiver; awaiting confirmDelivery"
+    PENDING_CONFIRMATION
+    "Package has been delivered to the receiver"
+    DELIVERED
+    "Package delivery is fully completed"
+    COMPLETED
+    "Package has been cancelled"
+    CANCELLED
+    "Package has arrived at the origin office (FIXED_ROUTE only)"
+    ORIGIN_OFFICE
+    "A driver has been assigned to the package (FIXED_ROUTE only)"
+    ASSIGNED_DRIVER
+    "Package has arrived at the destination office (FIXED_ROUTE only)"
+    DESTINATION_OFFICE
+    "Package is ready for the receiver to collect (FIXED_ROUTE only)"
+    READY_FOR_COLLECTION
+}
+
+"Sort direction."
+enum SortOrder {
+    "Ascending order (oldest first)."
+    ASC
+    "Descending order (newest first)."
+    DESC
+}
+
+"Registered user of the platform. Identity is managed by Nexxauth; the local row is a profile mirror synced on login."
+type User {
+    "Nexxauth org-user id (the JWT sub claim)"
+    id: ID!
+    "Email address (from Nexxauth)"
+    email: String!
+    "Phone number"
+    phone: String
+    "Given name"
+    firstName: String
+    "Family name"
+    lastName: String
+    "User name"
+    username: String
+    "System role — determines permissions"
+    role: Role!
+    "Account status"
+    status: UserStatus!
+    "ISO-8601 timestamp of creation"
+    createdAt: String!
+    "ISO-8601 timestamp of last update"
+    updatedAt: String!
+}
+
+"Type of media link."
+enum MediaType {
+    "Video link"
+    VIDEO
+    "Picture link"
+    PICTURE
+}
+
+"A media link associated with a package (video or picture)."
+type PackageMedia {
+    "Internal UUID"
+    id: ID!
+    "URL of the media"
+    url: String!
+    "Type of media"
+    mediaType: MediaType!
+    "ISO-8601 timestamp of creation"
+    createdAt: String!
+}
+type PackageCustodian {
+    "Internal UUID"
+    id: ID!
+    "User who holds custody"
+    userId: ID!
+    "Display name of the custodian"
+    name: String
+    "Phone number of the custodian"
+    phone: String
+    "Role at time of custody"
+    role: CustodianRole!
+    "ISO-8601 timestamp when custody was assigned"
+    assignedAt: String!
+}
+
+"A delivery package — the core domain entity."
+type DeliveryPackage {
+    "Internal UUID"
+    id: ID!
+    "Public-facing tracking code (e.g. CAV-XXXXXXXX)"
+    trackingCode: String!
+    "Type of delivery (OPEN or FIXED_ROUTE)"
+    deliveryType: DeliveryType!
+    "Current lifecycle status"
+    status: PackageStatus!
+    "User who created the package"
+    creatorId: ID!
+    "Company / office associated with the package"
+    companyId: ID
+    "Trip identifier for grouped shipments"
+    tripId: ID
+    "History of custodians who held this package"
+    custodians: [PackageCustodian!]!
+    "Sender and receiver information"
+    people: [PackagePerson!]!
+    "Origin and destination locations"
+    locations: [PackageLocation!]!
+    "Optional package details (category, weight, dimensions, etc.)"
+    details: PackageDetails
+    "Timeline of events"
+    events: [PackageEvent!]!
+    "History of custody transfers"
+    custody: [PackageCustody!]!
+    "Open transfers containing this package (PENDING or REQUESTED). Frontend can use transfer.ruleType to determine if a code is required."
+    transfers: [Transfer!]!
+    "ISO-8601 timestamp of creation"
+    createdAt: String!
+    "ISO-8601 timestamp of last update"
+    updatedAt: String!
+}
+
+"Paginated delivery package results."
+type DeliveryPackagePage {
+    "List of packages for the current page."
+    items: [DeliveryPackage!]!
+    "Total number of packages matching the query."
+    totalCount: Int!
+    "Total number of pages."
+    totalPages: Int!
+    "Current page number (0-based)."
+    currentPage: Int!
+}
+
+"A person associated with a package (sender or receiver). May be registered or unregistered."
+type PackagePerson {
+    "Internal UUID"
+    id: ID!
+    "Role — SENDER or RECEIVER"
+    role: PersonRole!
+    "User ID if this person is a registered user"
+    userId: ID
+    "Display name"
+    name: String
+    "Phone number"
+    phone: String
+}
+
+"A geographic location associated with a package (origin or destination)."
+type PackageLocation {
+    "Internal UUID"
+    id: ID!
+    "Whether this is ORIGIN or DESTINATION"
+    type: LocationType!
+    "Latitude"
+    latitude: Float!
+    "Longitude"
+    longitude: Float!
+    "Human-readable place name"
+    placeName: String
+    "External place ID (e.g. Google Maps place ID)"
+    placeId: String
+    "Optional office UUID if this location is an office"
+    officeId: ID
+}
+
+"Optional metadata about a package (category, weight, dimensions, declared value)."
+type PackageDetails {
+    "Category / type of item"
+    category: String
+    "Free-text description"
+    description: String
+    "Whether the item is fragile"
+    fragile: Boolean!
+    "Weight (kg)"
+    weight: Float
+    "Length (cm)"
+    length: Float
+    "Width (cm)"
+    width: Float
+    "Height (cm)"
+    height: Float
+    "Declared monetary value"
+    declaredValue: Float
+    "Media links (videos or pictures)"
+    media: [PackageMedia!]
+}
+type PackageEvent {
+    "Internal UUID"
+    id: ID!
+    "Type of event (e.g. CREATED, ACCEPTED, PICKED_UP)"
+    eventType: String!
+    "User who performed the action"
+    actorId: ID!
+    "Human-readable description"
+    description: String
+    "ISO-8601 timestamp"
+    createdAt: String!
+}
+
+"A record of custody being transferred from one entity to another."
+type PackageCustody {
+    "Internal UUID"
+    id: ID!
+    "Who custody was transferred from"
+    fromEntity: String!
+    "Who custody was transferred to"
+    toEntity: String!
+    "ISO-8601 timestamp of the transfer"
+    timestamp: String!
+    "Optional notes about the transfer"
+    notes: String
+}
+
+"Return type for createPackage mutation. Contains the created package and optional transfer."
+type PackageCreation {
+    "The created delivery package"
+    deliveryPackage: DeliveryPackage!
+    "Optional transfer auto-created with the package. Present when transferRuleType was provided in CreatePackageInput."
+    transfer: Transfer
+}
+
+"Return type for acceptTransfer mutation. Contains the updated package."
+type AcceptOffer {
+    "The updated delivery package"
+    deliveryPackage: DeliveryPackage!
+}
+
+"Return type for initiateDelivery / regenerateDeliveryCode mutations. Contains the updated package and the one-time delivery code."
+type DeliveryCodeResult {
+    "The updated delivery package"
+    deliveryPackage: DeliveryPackage!
+    "Six-digit numeric delivery code — required by confirmDelivery to confirm the delivery. One-time display only."
+    deliveryCode: String!
+}
+
+"Return type for acceptTransfer mutation. Contains the completed transfer and the list of accepted packages."
+type TransferAcceptResult {
+    "The completed transfer"
+    transfer: Transfer!
+    "List of accept results for each package in the transfer"
+    acceptedPackages: [AcceptOffer!]!
+}
+
+"Input: a person associated with the package (sender or receiver)."
+input PersonInput {
+    "Role — SENDER or RECEIVER"
+    role: PersonRole!
+    "User ID if this person is a registered user"
+    userId: ID
+    "Display name"
+    name: String
+    "Phone number"
+    phone: String
+}
+
+"Input: a geographic location for the shipment."
+input LocationInput {
+    "Whether this is ORIGIN or DESTINATION"
+    type: LocationType!
+    "Latitude"
+    latitude: Float!
+    "Longitude"
+    longitude: Float!
+    "Human-readable place name"
+    placeName: String
+    "External place ID"
+    placeId: String
+    "Optional office UUID"
+    officeId: ID
+}
+
+"Input: optional package details."
+input DetailInput {
+    "Category / type of item"
+    category: String
+    "Free-text description"
+    description: String
+    "Whether the item is fragile"
+    fragile: Boolean
+    "Weight in kg"
+    weight: Float
+    "Length in cm"
+    length: Float
+    "Width in cm"
+    width: Float
+    "Height in cm"
+    height: Float
+    "Declared monetary value"
+    declaredValue: Float
+    "Media links (videos or pictures)"
+    media: [MediaInput!]
+}
+
+"Input: a media link associated with a package."
+input MediaInput {
+    "URL of the media"
+    url: String!
+    "Type of media"
+    mediaType: MediaType!
+}
+input CreatePackageInput {
+    "Type of delivery (OPEN or FIXED_ROUTE)"
+    deliveryType: DeliveryType!
+    "Sender information (optional for authenticated CUSTOMER users — auto-filled from profile)"
+    sender: PersonInput
+    "Receiver information"
+    receiver: PersonInput!
+    "Pickup location"
+    origin: LocationInput!
+    "Drop-off location"
+    destination: LocationInput!
+    "Optional item details"
+    details: DetailInput
+    "Optional: auto-create a transfer with this package"
+    transferRuleType: TransferRuleType
+    "Optional: match company filter for auto-created transfer"
+    transferMatchCompanyId: ID
+    "Optional: match user filter for auto-created transfer"
+    transferMatchUserId: ID
+}
+
+"Input: accept packages via a transfer (transition from CREATED to ACCEPTED for all packages in the transfer)."
+input AcceptTransferInput {
+    "Transfer UUID"
+    transferId: ID!
+    "Transfer code — required for SECURE transfers, optional for AUTO"
+    transferCode: String
+}
+
+"Input: assign a driver to a package."
+input AssignDriverInput {
+    "Package UUID"
+    packageId: ID!
+    "Driver to assign"
+    driverId: ID!
+    "User who is making the assignment"
+    assignedBy: ID!
+    "Optional notes about the assignment"
+    notes: String
+}
+
+"Input: advance a package to a new status."
+input UpdatePackageStatusInput {
+    "Package UUID"
+    packageId: ID!
+    "User performing the update"
+    actorId: ID!
+    "Target status — must be a valid transition from the current status"
+    status: PackageStatus!
+    "Optional notes about the status change"
+    notes: String
+}
+
+"Input: assign a company/office to a package."
+input AssignPackageCompanyInput {
+    "Package UUID"
+    packageId: ID!
+    "Company/office UUID"
+    companyId: ID!
+}
+
+"Input: initiate delivery for a package. Transitions to PENDING_CONFIRMATION and generates a one-time delivery code."
+input InitiateDeliveryInput {
+    "Package UUID"
+    packageId: ID!
+}
+
+"Input: confirm delivery of a package that is PENDING_CONFIRMATION. Requires the delivery code. Sets the package to DELIVERED."
+input ConfirmDeliveryInput {
+    "Package UUID"
+    packageId: ID!
+    "Six-digit delivery code received via the notice feed"
+    deliveryCode: String!
+}
+
+"Input: regenerate the delivery code for a package. Only allowed while the package is PENDING_CONFIRMATION."
+input RegenerateDeliveryCodeInput {
+    "Package UUID"
+    packageId: ID!
+}
+
+"Input: assign a trip identifier to a package."
+input AssignPackageTripInput {
+    "Package UUID"
+    packageId: ID!
+    "Trip UUID"
+    tripId: ID!
+}
+
+"Input: assign a system role to an existing user. The role is pushed to Nexxauth so the user's next tokens carry it. Users are registered directly against Nexxauth by the apps (Android/web) — the backend never provisions them."
+input AssignRoleInput {
+    "Nexxauth user id"
+    userId: ID!
+    "Target role"
+    role: Role!
+    "Required when role is WORKER — the office the worker belongs to."
+    officeId: ID
+}
+
+"A role definition as managed in Nexxauth. Role names flow into user tokens and are mapped back to local system roles by the backend; permissions are resolved server-side by Nexxauth and never shipped in tokens."
+type OrgRole {
+    "Nexxauth role id"
+    id: ID!
+    "Role name — use the lower-cased local role name (super_admin, admin, customer, worker, driver) so the backend's role checks recognize it"
+    name: String!
+    "Permissions granted by this role"
+    permissions: [String!]!
+    "Whether new registrations are auto-assigned this role (at most one per organisation)"
+    isDefault: Boolean!
+}
+
+"Input: create a role definition in Nexxauth. Name should be the lower-cased local role name so the backend's role checks recognize it."
+input CreateRoleInput {
+    "Role name (super_admin, admin, customer, worker, driver)"
+    name: String!
+    "Permissions granted by this role"
+    permissions: [String!]!
+    "Auto-assign this role to new registrations (default false)"
+    isDefault: Boolean
+}
+
+"Input: update a role definition in Nexxauth. Null fields keep their current value; pass an empty permissions list to clear all permissions."
+input UpdateRoleInput {
+    "Nexxauth role id"
+    roleId: ID!
+    "New role name (omit to keep)"
+    name: String
+    "Replace permissions (omit to keep)"
+    permissions: [String!]
+    "Toggle auto-assign to new registrations (omit to keep)"
+    isDefault: Boolean
+}
+
+"An office/branch — a physical location that workers belong to and packages pass through."
+type Office {
+    "Internal UUID"
+    id: ID!
+    "Office name"
+    name: String!
+    "Contact details (phone, email, etc.)"
+    contact: String
+    "The standalone package_locations row describing this office's physical location"
+    locationId: ID
+    "The full location object, when locationId is set"
+    location: PackageLocation
+    "ISO-8601 timestamp of creation"
+    createdAt: String!
+    "ISO-8601 timestamp of last update"
+    updatedAt: String!
+}
+
+"Input: create a new office."
+input CreateOfficeInput {
+    "Office name"
+    name: String!
+    "Contact details (phone, email, etc.)"
+    contact: String
+    "ID of the standalone location row for this office. Must reference an existing package_locations row."
+    locationId: ID
+}
+
+"Input: update an office. Null fields keep their current value."
+input UpdateOfficeInput {
+    "Office UUID"
+    officeId: ID!
+    "New office name"
+    name: String
+    "New contact details"
+    contact: String
+    "New location row ID. Must reference an existing package_locations row."
+    locationId: ID
+}
+
+"Input: create a standalone location row (not tied to a package). Usable as an office's location."
+input CreateLocationInput {
+    "Whether this is ORIGIN or DESTINATION"
+    type: LocationType!
+    "Latitude"
+    latitude: Float!
+    "Longitude"
+    longitude: Float!
+    "Human-readable place name"
+    placeName: String
+    "External place ID (e.g. Google Maps place ID)"
+    placeId: String
+}
+
+"Rule type for a package transfer."
+enum TransferRuleType {
+    "Automatic transfer — no code required"
+    AUTO
+    "Secure transfer — requires a transfer code for verification"
+    SECURE
+    "Confirm transfer — user requests, owner confirms acceptance"
+    CONFIRM
+}
+
+"Who can accept/join a transfer."
+enum TransferAcceptorType {
+    "Only workers can accept"
+    WORKER
+    "Only drivers can accept"
+    DRIVER
+    "Both workers and drivers can accept (default)"
+    BOTH
+}
+
+"Current status of a package transfer."
+enum TransferStatus {
+    "Transfer is pending (open and active)"
+    PENDING
+    "User has requested this CONFIRM transfer — waiting for owner confirmation"
+    REQUESTED
+    "Transfer has been completed"
+    DONE
+    "Transfer has been cancelled"
+    CANCELED
+}
+
+"A package linked to a transfer."
+type TransferPackage {
+    "Internal UUID"
+    id: ID!
+    "Transfer this package belongs to"
+    transferId: ID!
+    "The package UUID"
+    packageId: ID!
+    "User who added the package"
+    addedBy: ID!
+    "ISO-8601 timestamp when added"
+    addedAt: String!
+}
+
+"A transfer groups multiple packages for coordinated handover."
+type Transfer {
+    "Internal UUID"
+    id: ID!
+    "User who created the transfer"
+    creatorId: ID!
+    "Rule type — AUTO or SECURE"
+    ruleType: TransferRuleType!
+    "Who can accept this transfer (default BOTH)"
+    acceptorType: TransferAcceptorType!
+    "Optional company filter"
+    matchCompanyId: ID
+    "Optional user filter"
+    matchUserId: ID
+    "User who requested this transfer (CONFIRM mode)"
+    requestorId: ID
+    "Current status"
+    status: TransferStatus!
+    "Transfer code for SECURE transfers (only returned on create/regenerate — null in queries)"
+    transferCode: String
+    "Packages in this transfer"
+    packages: [TransferPackage!]!
+    "ISO-8601 timestamp of creation"
+    createdAt: String!
+    "ISO-8601 timestamp of last update"
+    updatedAt: String!
+}
+
+"Input: create a new transfer."
+input CreateTransferInput {
+    "Package UUIDs to include in the transfer"
+    packageIds: [ID!]!
+    "Rule type — AUTO or SECURE"
+    ruleType: TransferRuleType!
+    "Who can accept this transfer (default BOTH)"
+    acceptorType: TransferAcceptorType = BOTH
+    "Optional company to match"
+    matchCompanyId: ID
+    "Optional user to match"
+    matchUserId: ID
+}
+
+"Input: add packages to an existing transfer."
+input AddPackagesToTransferInput {
+    "Transfer UUID"
+    transferId: ID!
+    "Package UUIDs to add"
+    packageIds: [ID!]!
+}
+
+"Input: update a transfer's rule type or acceptor type."
+input UpdateTransferInput {
+    "Transfer UUID"
+    transferId: ID!
+    "New rule type (nullable — omit to keep current)"
+    ruleType: TransferRuleType
+    "New acceptor type (nullable — omit to keep current)"
+    acceptorType: TransferAcceptorType
+}
+
+"Input: regenerate a secure transfer code."
+input RegenerateTransferCodeInput {
+    "Transfer UUID"
+    transferId: ID!
+}
+
+"Read operations."
+type Query {
+    "List all registered users."
+    users: [User!]!
+    "Search users by name, role, and/or company. All filters are optional and combinable."
+    searchUsers(
+        "Text to match against first name, last name or user name (optional)."
+        query: String
+        "Filter by system role (optional)."
+        role: Role
+        "Filter by company/office ID (optional)."
+        companyId: ID
+    ): [User!]!
+    "Get a single user by internal UUID."
+    user(id: ID!): User
+    "List all offices."
+    offices: [Office!]!
+    "Get a single office by internal UUID."
+    office(id: ID!): Office
+    "Get the profile of the currently authenticated user. Requires authentication."
+    myProfile: User
+    "List the organisation's role definitions as managed in Nexxauth. Admin or Super Admin only."
+    roles: [OrgRole!]!
+    "Get a package by internal UUID."
+    package(id: ID!): DeliveryPackage
+    "Get a package by its public tracking code."
+    packageByTrackingCode(code: String!): DeliveryPackage
+    "Get all packages created by a specific user."
+    packagesByCreator(
+        creatorId: ID!
+        "Optional filter by status."
+        status: PackageStatus
+        "Sort order by creation date (ASC, DESC). Defaults to ASC."
+        order: SortOrder = ASC
+        "Page number (0-based). Defaults to 0."
+        page: Int = 0
+        "Page size. Defaults to 20."
+        size: Int = 20
+    ): DeliveryPackagePage!
+    "Get all packages currently assigned to a specific driver."
+    packagesByDriver(
+        driverId: ID!
+        "Optional filter by status."
+        status: PackageStatus
+        "Sort order by creation date (ASC, DESC). Defaults to ASC."
+        order: SortOrder = ASC
+        "Page number (0-based). Defaults to 0."
+        page: Int = 0
+        "Page size. Defaults to 20."
+        size: Int = 20
+    ): DeliveryPackagePage!
+    "Get all packages by current lifecycle status."
+    packagesByStatus(
+        status: PackageStatus!
+        "Sort order by creation date (ASC, DESC). Defaults to ASC."
+        order: SortOrder = ASC
+        "Page number (0-based). Defaults to 0."
+        page: Int = 0
+        "Page size. Defaults to 20."
+        size: Int = 20
+    ): DeliveryPackagePage!
+    "Get all packages where a user is a custodian in a specific role."
+    packagesByCustodian(
+        role: CustodianRole!
+        custodianId: ID!
+        "Optional filter by status."
+        status: PackageStatus
+        "Sort order by creation date (ASC, DESC). Defaults to ASC."
+        order: SortOrder = ASC
+        "Page number (0-based). Defaults to 0."
+        page: Int = 0
+        "Page size. Defaults to 20."
+        size: Int = 20
+    ): DeliveryPackagePage!
+    "Get all packages where a user is a custodian in any role."
+    packagesByUser(
+        userId: ID!
+        "Optional filter by status."
+        status: PackageStatus
+        "Sort order by creation date (ASC, DESC). Defaults to ASC."
+        order: SortOrder = ASC
+        "Page number (0-based). Defaults to 0."
+        page: Int = 0
+        "Page size. Defaults to 20."
+        size: Int = 20
+    ): DeliveryPackagePage!
+    "Get packages for the authenticated user. CUSTOMER: packages where user is sender/receiver (by userId or phone). WORKER: packages with status CREATED or where user is a custodian. DRIVER: packages where user is a custodian."
+    myPackages(
+        "Optional filter by status."
+        status: PackageStatus
+        "Sort order by creation date (ASC, DESC). Defaults to ASC."
+        order: SortOrder = ASC
+        "Page number (0-based). Defaults to 0."
+        page: Int = 0
+        "Page size. Defaults to 20."
+        size: Int = 20
+    ): DeliveryPackagePage!
+    "Get all packages that are available to be accepted (status = CREATED)."
+    availablePackages(
+        "Optional filter by status."
+        status: PackageStatus
+        "Sort order by creation date (ASC, DESC). Defaults to ASC."
+        order: SortOrder = ASC
+        "Page number (0-based). Defaults to 0."
+        page: Int = 0
+        "Page size. Defaults to 20."
+        size: Int = 20
+    ): DeliveryPackagePage!
+    "Get the event timeline for a package."
+    packageHistory(packageId: ID!): [PackageEvent!]!
+    "Get the custody-transfer history for a package."
+    packageCustody(packageId: ID!): [PackageCustody!]!
+    "Get a transfer by internal UUID. Requires authentication."
+    transfer(id: ID!): Transfer!
+    "Get all transfers created by the authenticated user. Requires authentication."
+    myTransfers: [Transfer!]!
+    "Get transfers by status. Requires authentication."
+    transfersByStatus(status: TransferStatus!): [Transfer!]!
+    "Get the authenticated user's notice feed, newest first. Requires authentication."
+    myNotices: [Notice!]!
+    "Count of unread notices for the authenticated user. Requires authentication."
+    unreadNoticeCount: Int!
+}
+
+"A notice — one event that multiple recipients can view."
+type Notice {
+    "Internal UUID"
+    id: ID!
+    "PACKAGE or TRANSFER"
+    resourceType: String!
+    "The package or transfer this notice is about"
+    resourceId: ID!
+    "Type of event (e.g. PACKAGE_DELIVERED, TRANSFER_DONE)"
+    eventType: String!
+    "User who caused the event, if applicable"
+    actorId: ID
+    "Short human-readable title"
+    title: String!
+    "Human-readable message with resource-specific details"
+    message: String!
+    "JSON payload with before/after state, tracking code, etc."
+    payload: String
+    "Delivery status for the current user"
+    viewer: NoticeViewer!
+    "ISO-8601 timestamp of creation"
+    createdAt: String!
+}
+
+"Per-user delivery/read state for a notice."
+type NoticeViewer {
+    "Internal UUID"
+    id: ID!
+    "The notice this viewer row belongs to"
+    noticeId: ID!
+    "The recipient user"
+    userId: ID!
+    "ISO-8601 timestamp when the notice was delivered to this user"
+    deliveredAt: String
+    "ISO-8601 timestamp when the user read the notice, null if unread"
+    readAt: String
+}
+
+"Real-time subscriptions. Requires WebSocket transport."
+type Subscription {
+    """
+    Real-time notification for newly created packages that include an auto-created transfer.
+    Events are filtered per-subscriber based on the transfer's targeting fields:
+    - acceptorType: DRIVER → only Driver role; WORKER → only Worker role; BOTH → all
+    - matchUserId: if set, only events targeting that specific user
+    - matchCompanyId: if set, only users belonging to that company
+    Only authenticated users with DRIVER or WORKER roles receive events.
+    """
+    newPackageTransfer: PackageCreation!
+}
+
+"Write operations."
+type Mutation {
+    "Sync the authenticated user's profile from Nexxauth into the local database. Creates a new user if none exists, updates fields/roles/status if they changed. Nexxauth is the source of truth for identity."
+    syncUser: User!
+    "Assign a system role to an existing user, pushing the role to Nexxauth so future tokens carry it. Super Admin only. Assigning the WORKER role requires an officeId, which ties the user to that office via a worker profile."
+    assignRole(input: AssignRoleInput!): User!
+    "Create a role definition in Nexxauth. Super Admin only."
+    createRole(input: CreateRoleInput!): OrgRole!
+    "Update a role definition in Nexxauth (rename, replace permissions, toggle default). Super Admin only."
+    updateRole(input: UpdateRoleInput!): OrgRole!
+    "Delete a role definition in Nexxauth. Super Admin only."
+    deleteRole(roleId: ID!): Boolean!
+    "Create a new office. Admin or Super Admin only."
+    createOffice(input: CreateOfficeInput!): Office!
+    "Update an office. Admin or Super Admin only."
+    updateOffice(input: UpdateOfficeInput!): Office!
+    "Create a standalone location row that an office can reference via locationId. Admin or Super Admin only."
+    createLocation(input: CreateLocationInput!): PackageLocation!
+    "Disable a user account in Nexxauth and locally. Admin or Super Admin only."
+    disableUser(userId: ID!): User!
+    "Create a new delivery package. WORKER and DRIVER creators become the first custodian. CUSTOMER creators are not custodians. If transferRuleType is provided, automatically creates a transfer with this package."
+    createPackage(input: CreatePackageInput!): PackageCreation!
+    "Accept a transfer — behaviour depends on the transfer's ruleType: AUTO auto-accepts and auto-completes, SECURE requires transferCode then auto-accepts and auto-completes, CONFIRM sets to REQUESTED for owner approval."
+    acceptTransfer(input: AcceptTransferInput!): TransferAcceptResult!
+    "Assign a driver to a package. Transitions FIXED_ROUTE packages to ASSIGNED_DRIVER status. Worker, Driver (self-assign or transfer), Admin, or Super Admin only."
+    assignDriver(input: AssignDriverInput!): DeliveryPackage!
+    "Advance a package to the next status. Validates state-machine transitions; the actor must be the current custodian or trusted office staff."
+    updatePackageStatus(input: UpdatePackageStatusInput!): DeliveryPackage!
+    "Assign a company/office to a package."
+    assignPackageCompany(input: AssignPackageCompanyInput!): DeliveryPackage!
+    "Assign a trip identifier to a package."
+    assignPackageTrip(input: AssignPackageTripInput!): DeliveryPackage!
+    "Initiate delivery: transitions the package to PENDING_CONFIRMATION, generates a one-time delivery code, and publishes the status change + code to the sender and receiver only via their notice feed (custodians never receive the code). Current custodian (Worker/Driver) only."
+    initiateDelivery(input: InitiateDeliveryInput!): DeliveryCodeResult!
+    "Confirm delivery: verifies the delivery code and sets the package to DELIVERED. Callable by the sender, receiver, or the custodian who initiated delivery."
+    confirmDelivery(input: ConfirmDeliveryInput!): DeliveryPackage!
+    "Regenerate the delivery code while the package is PENDING_CONFIRMATION. Invalidates the previous code and re-publishes the new one to the notice feed. Current custodian only."
+    regenerateDeliveryCode(input: RegenerateDeliveryCodeInput!): DeliveryCodeResult!
+    "Create a new transfer with one or more packages. If ruleType is SECURE, a transfer code is generated and returned. Requires authentication."
+    createTransfer(input: CreateTransferInput!): Transfer!
+    "Add packages to an existing transfer. Only the transfer owner can add packages. If a package is in another open transfer owned by the same user, it is moved. Requires authentication."
+    addPackagesToTransfer(input: AddPackagesToTransferInput!): Transfer!
+    "Regenerate the transfer code for a SECURE transfer. Only the transfer owner can regenerate. Requires authentication."
+    regenerateTransferCode(input: RegenerateTransferCodeInput!): Transfer!
+    "Update a transfer (change rule type). Only the transfer owner can update. Requires authentication."
+    updateTransfer(input: UpdateTransferInput!): Transfer!
+    "Cancel a transfer. Only the transfer owner can cancel."
+    cancelTransfer(transferId: ID!): Transfer!
+    "Confirm a REQUESTED CONFIRM transfer. Only the transfer owner can confirm. Auto-accepts packages for the requestor and completes the transfer."
+    confirmTransfer(transferId: ID!): Transfer!
+    "Reject a REQUESTED CONFIRM transfer. Only the transfer owner can reject. Resets status back to PENDING and clears requestor."
+    rejectTransfer(transferId: ID!): Transfer!
+    "Mark a notice as read for the authenticated user. Pass the viewer id returned by myNotices."
+    markNoticeRead(viewerId: ID!): NoticeViewer!
+}
