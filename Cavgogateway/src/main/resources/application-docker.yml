@@ -93,6 +93,37 @@ spring:
                             name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
                             strategy: RETAIN_FIRST
 
+                    - id: ikuriyebackend
+                      uri: lb://ikuriyebackend
+                      predicates:
+                        - Path=/api/ikuriye/**
+                      filters:
+                        - StripPrefix=2
+                        - name: DedupeResponseHeader
+                          args:
+                            name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                            strategy: RETAIN_FIRST
+
+                    # GraphQL route for ikuriyebackend
+                    - id: ikuriyebackend-graphql
+                      uri: lb://ikuriyebackend
+                      predicates:
+                        - Path=/ikuriye/graphql
+                      filters:
+                        - StripPrefix=1
+                        - name: DedupeResponseHeader
+                          args:
+                            name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                            strategy: RETAIN_FIRST
+
+                    # WebSocket route for ikuriyebackend subscriptions
+                    - id: ikuriyebackend-ws
+                      uri: lb:ws://ikuriyebackend
+                      predicates:
+                        - Path=/ikuriye/graphql
+                      filters:
+                        - StripPrefix=1
+
 server:
   port: 8080
   # Add Netty specific configuration for SSE

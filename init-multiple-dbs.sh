@@ -33,5 +33,6 @@ create_db_if_not_exists "cavgomqt"
 
 create_db_if_not_exists "ridehail"
 create_db_if_not_exists "navigation"
+create_db_if_not_exists "ikuriye"
 echo "Database initialization completed successfully!"
 

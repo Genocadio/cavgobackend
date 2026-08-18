@@ -342,6 +342,7 @@ build_and_push "booking" "./cavgoBooking"
 build_and_push "cavgomqt" "./cavgomqt"
 build_and_push "ussd" "./ussdService"
 build_and_push "adminaggre" "./adminaggre"
+build_and_push "ikuriyebackend" "./ikuriyebackend"
 
 # Show completion message based on mode
 if [ "$BUILD_ONLY" = true ]; then
@@ -369,6 +370,7 @@ elif [ "$PUSH_ONLY" = true ]; then
     echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:cavgomqt"
     echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ussd"
     echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:adminaggre"
+    echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ikuriyebackend"
 else
     print_success "All images have been built and pushed successfully!"
     if [ "$USE_BUILDX" = true ]; then
@@ -391,6 +393,7 @@ else
     echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:cavgomqt"
     echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ussd"
     echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:adminaggre"
+    echo "  - ${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ikuriyebackend"
 fi
 
 # Optional: Clean up local images to save space (only if not in build-only mode)
@@ -410,6 +413,7 @@ if [ "$BUILD_ONLY" != true ]; then
         docker rmi "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:cavgomqt" 2>/dev/null || true
         docker rmi "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ussd" 2>/dev/null || true
         docker rmi "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:adminaggre" 2>/dev/null || true
+        docker rmi "${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:ikuriyebackend" 2>/dev/null || true
         print_success "Local images cleaned up!"
     fi
 fi
