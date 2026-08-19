@@ -39,7 +39,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
-    
+
   postgres:
     image: postgres:15-alpine
     container_name: cavgo-postgres
@@ -268,10 +268,10 @@ services:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
       SERVER_PORT: 6100
       NEXXAUTH_BASE_URL: ${NEXXAUTH_BASE_URL:https://auth.med.rw/master}
-      NEXXAUTH_ORGANISATION_ID: ${NEXXAUTH_ORGANISATION_ID:}
-      NEXXAUTH_PUBLIC_KEY: ${NEXXAUTH_PUBLIC_KEY:}
-      NEXXAUTH_CLIENT_ID: ${NEXXAUTH_CLIENT_ID:}
-      NEXXAUTH_CLIENT_TOKEN: ${NEXXAUTH_CLIENT_TOKEN:}
+      NEXXAUTH_ORGANISATION_ID: ${NEXXAUTH_ORGANISATION_ID:1}
+      NEXXAUTH_PUBLIC_KEY: ${NEXXAUTH_PUBLIC_KEY:MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2G52RDx6567hgWYJPe2xSdHvsvYSfEkYtw+gBmGsUAGE0lLrgTgtT0tMlx/J7ADAU4byULpGNdJcb87P0iwcT32cqyeGlOpkgxgGkRKC7V4h4HdwVHLf78IT00pWAVdTK+K7MNzcJGB5/qOond0WWkgto803MpYUPabvVTsD2r6FyPy3f5WokFKsrHGO8KTPKQ0oYdRYcZ+1aO2QjJO4PMIUg9k2pquB+OJmCYVeGxi0tpNCYIoWZoYIQbUIRzfRTi/p8yRE1INlfnxYNTBQWEQHs0zplYSSr+H2gNBMAJfJ7tLVZ/Lc6OWUQJBJ5n8rOKH66VWYWbFbRUL6UOfmGQIDAQAB}
+      NEXXAUTH_CLIENT_ID: ${NEXXAUTH_CLIENT_ID:cli_vrwPaVOqk-EJHFft9o1Mq1g1W3h_KTCv6aNw6IlVit4}
+      NEXXAUTH_CLIENT_TOKEN: ${NEXXAUTH_CLIENT_TOKEN:nx_A-PoujyVQeOc-M9IWCPmRYtJ8QKIByUVZqHVm66By2M}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:*}
     ports:
       - "6100:6100"
@@ -390,7 +390,7 @@ services:
       - cavgo-network
   # Navigation Service (Java)
   navigation:
-    build: 
+    build:
       context: ./Navigation
       dockerfile: Dockerfile
     container_name: cavgo-navigation
@@ -430,4 +430,4 @@ volumes:
 
 networks:
   cavgo-network:
-    driver: bridge 
+    driver: bridge
