@@ -7,6 +7,7 @@ import com.nexxserve.cavgomain.entity.Vehicle;
 import com.nexxserve.cavgomain.entity.VehicleAssignment;
 import com.nexxserve.cavgomain.entity.VehicleLocation;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
+import com.nexxserve.cavgomain.enums.VehicleStatus;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
 import com.nexxserve.cavgomain.repository.VehicleLocationRepository;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -34,6 +36,8 @@ public class InternalApiService {
 
     public List<InternalVehicleResponseDto> getAllVehicles() {
         return vehicleRepository.findAllWithActiveAssignments().stream()
+                .sorted(Comparator.comparingInt((Vehicle v) -> v.getStatus() == VehicleStatus.OCCUPIED ? 0 : 1)
+                        .thenComparing(Vehicle::getId, Comparator.reverseOrder()))
                 .map(this::toInternalVehicleDto)
                 .collect(Collectors.toList());
     }
@@ -49,6 +53,8 @@ public class InternalApiService {
 
     public List<InternalVehicleResponseDto> getVehiclesByCompany(Long companyId) {
         return vehicleRepository.findByCompanyIdWithActiveAssignments(companyId).stream()
+                .sorted(Comparator.comparingInt((Vehicle v) -> v.getStatus() == VehicleStatus.OCCUPIED ? 0 : 1)
+                        .thenComparing(Vehicle::getId, Comparator.reverseOrder()))
                 .map(this::toInternalVehicleDto)
                 .collect(Collectors.toList());
     }

@@ -32,17 +32,14 @@ public interface VehicleRepository extends JpaRepository<Vehicle, Long> {
     @Query("SELECT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.id = :id")
     Optional<Vehicle> findByIdWithActiveAssignment(@Param("id") Long id);
 
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.company.id = :companyId " +
-           "ORDER BY CASE WHEN v.status = com.nexxserve.cavgomain.enums.VehicleStatus.OCCUPIED THEN 0 ELSE 1 END, v.id DESC")
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.company.id = :companyId")
     List<Vehicle> findByCompanyIdWithActiveAssignments(@Param("companyId") Long companyId);
 
-    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va " +
-           "ORDER BY CASE WHEN v.status = com.nexxserve.cavgomain.enums.VehicleStatus.OCCUPIED THEN 0 ELSE 1 END, v.id DESC")
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va")
     List<Vehicle> findAllWithActiveAssignments();
 
     @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va " +
-           "WHERE (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit) " +
-           "ORDER BY CASE WHEN v.status = com.nexxserve.cavgomain.enums.VehicleStatus.OCCUPIED THEN 0 ELSE 1 END, v.id DESC")
+           "WHERE (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit)")
     List<Vehicle> findAllWithActiveAssignmentsAfterTime(@Param("timeLimit") LocalDateTime timeLimit);
 
     @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.licensePlate = :licensePlate")

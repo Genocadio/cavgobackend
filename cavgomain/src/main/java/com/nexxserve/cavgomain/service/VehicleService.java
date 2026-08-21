@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -134,6 +135,8 @@ public class VehicleService {
             vehicles = vehicleRepository.findAllWithActiveAssignmentsAfterTime(LocalDateTime.of(1970, 1, 1, 0, 0));
         }
         return vehicles.stream()
+                .sorted(Comparator.comparingInt((Vehicle v) -> v.getStatus() == VehicleStatus.OCCUPIED ? 0 : 1)
+                        .thenComparing(Vehicle::getId, Comparator.reverseOrder()))
                 .map(VehicleResponseDto::fromEntity)
                 .toList();
     }
