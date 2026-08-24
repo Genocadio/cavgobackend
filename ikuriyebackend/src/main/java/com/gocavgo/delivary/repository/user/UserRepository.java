@@ -14,5 +14,6 @@ public interface UserRepository {
     List<UserEntity> searchUsersByIds(List<Long> userIds, String query);
     boolean existsByEmail(String email);
     Optional<UserEntity> findByPhone(String phone);
+    List<UserEntity> findByAvatarStorageMode(String storageMode);
     void deleteById(Long id);
 }

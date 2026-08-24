@@ -47,6 +47,15 @@ public class UserEntity {
     @Column(unique = true)
     private String username;
 
+    @Column(name = "avatar_storage_path", columnDefinition = "TEXT")
+    private String avatarStoragePath;
+
+    @Column(name = "avatar_bucket", length = 64)
+    private String avatarBucket;
+
+    @Column(name = "avatar_storage_mode", length = 16)
+    private String avatarStorageMode;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private UserStatus status;

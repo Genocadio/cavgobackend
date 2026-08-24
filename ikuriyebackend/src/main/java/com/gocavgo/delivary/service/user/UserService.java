@@ -7,12 +7,14 @@ import com.gocavgo.delivary.entity.user.WorkerProfileEntity;
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
 import com.gocavgo.delivary.mapper.user.UserMapper;
+import com.gocavgo.delivary.repository.delivery.PackageMediaJpaRepository;
 import com.gocavgo.delivary.repository.office.OfficeJpaRepository;
 import com.gocavgo.delivary.repository.user.DriverProfileRepository;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.repository.user.WorkerProfileRepository;
 import com.gocavgo.delivary.security.NexxauthClient;
 import com.gocavgo.delivary.security.NexxauthRoles;
+import com.gocavgo.delivary.service.storage.StorageService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +55,8 @@ public class UserService {
     private final OfficeJpaRepository officeRepository;
     private final UserMapper userMapper;
     private final NexxauthClient nexxauthClient;
+    private final StorageService storageService;
+    private final PackageMediaJpaRepository mediaRepo;
 
     /**
      * Mirrors the authenticated user (identified by their Nexxauth org-user id)
@@ -231,6 +235,26 @@ public class UserService {
         return toUserResponse(saved, resolveRoleFromNexxauth(userId));
     }
 
+    @Transactional
+    public UserResponse updateAvatarByMediaId(Long userId, String mediaId) {
+        var user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found: " + userId));
+        UUID mediaUuid;
+        try {
+            mediaUuid = UUID.fromString(mediaId);
+        } catch (IllegalArgumentException e) {
+            throw new RuntimeException("Invalid mediaId format: " + mediaId);
+        }
+        var media = mediaRepo.findById(mediaUuid)
+                .orElseThrow(() -> new RuntimeException("Media not found: " + mediaId));
+        user.setAvatarStoragePath(media.getStoragePath());
+        user.setAvatarBucket(media.getBucket());
+        user.setAvatarStorageMode(media.getStorageMode());
+        var saved = userRepository.save(user);
+        log.info("updateAvatar: user={}, mediaId={}, bucket={}, path={}", userId, mediaId, media.getBucket(), media.getStoragePath());
+        return toUserResponse(saved, resolveRoleFromNexxauth(userId));
+    }
+
     public UUID getCompanyIdForUser(Long userId) {
         var worker = workerProfileRepository.findByUserId(userId);
         if (worker.isPresent()) {
@@ -295,7 +319,22 @@ public class UserService {
     }
 
     private UserResponse toUserResponse(UserEntity user, Role role) {
-        return userMapper.toResponse(user, role);
+        var base = userMapper.toResponse(user, role);
+        // Resolve avatar URL from storage path — handles both local and Supabase
+        if (user.getAvatarStoragePath() != null && user.getAvatarBucket() != null) {
+            boolean isLocal = "local".equals(user.getAvatarStorageMode());
+            var avatarUrl = storageService.getFileUrl(user.getAvatarBucket(), user.getAvatarStoragePath(), isLocal);
+            if (avatarUrl != null) {
+                return new UserResponse(
+                        base.id(), base.email(), base.phone(),
+                        base.firstName(), base.lastName(), base.username(),
+                        avatarUrl,
+                        base.role(), base.status(),
+                        base.createdAt(), base.updatedAt()
+                );
+            }
+        }
+        return base;
     }
 
     /**

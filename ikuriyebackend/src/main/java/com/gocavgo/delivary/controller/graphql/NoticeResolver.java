@@ -78,7 +78,7 @@ public class NoticeResolver {
             NoticeViewerResponse viewer,
             Instant createdAt
     ) {
-        NoticeResponse(NoticeEntity notice, NoticeViewerEntity viewer) {
+        public NoticeResponse(NoticeEntity notice, NoticeViewerEntity viewer) {
             this(
                     notice.getId(),
                     notice.getResourceType().name(),

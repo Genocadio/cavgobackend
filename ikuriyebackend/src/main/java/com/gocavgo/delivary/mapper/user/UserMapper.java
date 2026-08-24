@@ -10,6 +10,7 @@ import org.mapstruct.Mapping;
 public interface UserMapper {
 
     @Mapping(target = "role", expression = "java(role)")
+    @Mapping(target = "avatarUrl", ignore = true)
     UserResponse toResponse(UserEntity entity, Role role);
 
     default UserResponse toResponseWithNullCheck(UserEntity entity, Role role) {

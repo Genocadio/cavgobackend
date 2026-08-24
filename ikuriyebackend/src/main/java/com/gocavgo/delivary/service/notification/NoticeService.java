@@ -1,5 +1,6 @@
 package com.gocavgo.delivary.service.notification;
 
+import com.gocavgo.delivary.controller.graphql.NoticeResolver;
 import com.gocavgo.delivary.entity.delivery.PackageCustodianEntity;
 import com.gocavgo.delivary.entity.delivery.PackageEntity;
 import com.gocavgo.delivary.entity.notification.NoticeEntity;
@@ -15,6 +16,7 @@ import com.gocavgo.delivary.repository.delivery.PackagePersonJpaRepository;
 import com.gocavgo.delivary.repository.notification.NoticeRepository;
 import com.gocavgo.delivary.repository.notification.NoticeViewerRepository;
 import com.gocavgo.delivary.repository.transfer.TransferPackageJpaRepository;
+import com.gocavgo.delivary.service.subscription.NoticePublisher;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +46,7 @@ public class NoticeService {
     private final PackagePersonJpaRepository personRepo;
     private final PackageCustodianJpaRepository custodianRepo;
     private final TransferPackageJpaRepository transferPackageRepo;
+    private final NoticePublisher noticePublisher;
 
     // ── Title / message templates ───────────────────────────────────────
 
@@ -322,7 +325,17 @@ public class NoticeService {
                         .createdAt(now)
                         .build())
                 .toList();
-        viewerRepo.saveAll(viewers);
+        var saved = viewerRepo.saveAll(viewers);
+
+        // Publish each notice to the GraphQL subscription so connected clients
+        // receive real-time updates (replaces Supabase Realtime).
+        var notice = noticeRepo.findById(noticeId).orElse(null);
+        if (notice != null) {
+            for (var viewer : saved) {
+                var response = new NoticeResolver.NoticeResponse(notice, viewer);
+                noticePublisher.publish(new NoticePublisher.NoticeEvent(viewer.getUserId(), response));
+            }
+        }
     }
 
     // ── Payload builders ────────────────────────────────────────────────

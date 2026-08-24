@@ -17,4 +17,5 @@ public interface PackageCustodianJpaRepository extends JpaRepository<PackageCust
     Optional<PackageCustodianEntity> findByPackageIdAndUserIdAndRole(UUID packageId, Long userId, CustodianRole role);
     Optional<PackageCustodianEntity> findTopByPackageIdOrderByAssignedAtDesc(UUID packageId);
     List<PackageCustodianEntity> findByUserIdAndRole(Long userId, CustodianRole role);
+    void deleteByPackageId(UUID packageId);
 }

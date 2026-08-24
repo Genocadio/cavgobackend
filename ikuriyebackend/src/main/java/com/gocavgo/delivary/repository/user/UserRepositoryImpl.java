@@ -56,6 +56,11 @@ public class UserRepositoryImpl implements UserRepository {
     }
 
     @Override
+    public List<UserEntity> findByAvatarStorageMode(String storageMode) {
+        return jpaRepository.findByAvatarStorageMode(storageMode);
+    }
+
+    @Override
     public void deleteById(Long id) {
         jpaRepository.deleteById(id);
     }

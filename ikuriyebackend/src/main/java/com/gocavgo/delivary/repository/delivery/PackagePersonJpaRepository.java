@@ -12,4 +12,5 @@ public interface PackagePersonJpaRepository extends JpaRepository<PackagePersonE
     List<UUID> findUserIdsByPackageId(UUID packageId);
     List<PackagePersonEntity> findByUserId(Long userId);
     List<PackagePersonEntity> findByPhone(String phone);
+    void deleteByPackageId(UUID packageId);
 }

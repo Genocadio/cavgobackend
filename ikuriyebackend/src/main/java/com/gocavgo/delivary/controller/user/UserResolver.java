@@ -79,4 +79,12 @@ public class UserResolver {
         return userService.disableUser(userId);
     }
 
+    @MutationMapping
+    @PreAuthorize("isAuthenticated()")
+    public UserResponse updateAvatar(@Argument String mediaId) {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        var userId = Long.parseLong(auth.getName());
+        return userService.updateAvatarByMediaId(userId, mediaId);
+    }
+
 }

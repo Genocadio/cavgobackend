@@ -60,6 +60,21 @@ eureka:
     prefer-ip-address: true
     instance-id: ${spring.application.name}:${random.uuid}
 
+# Supabase Storage — file uploads (package media + profile avatars).
+# The backend proxies uploads and generates signed URLs so clients never
+# see Supabase URLs or bucket names.
+supabase:
+  url: ${SUPABASE_URL:}
+  service-key: ${SUPABASE_SERVICE_KEY:}
+
+# Local file storage — used when Supabase is not configured or unavailable.
+# Files are stored under this path, served via /api/files/local/{bucket}/...
+storage:
+  local:
+    base-path: ${LOCAL_STORAGE_PATH:./storage}
+  migration:
+    enabled: ${STORAGE_MIGRATION_ENABLED:true}
+
 server:
   port: ${SERVER_PORT:6100}
 

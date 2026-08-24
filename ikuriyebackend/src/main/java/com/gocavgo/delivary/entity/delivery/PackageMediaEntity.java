@@ -31,11 +31,20 @@ public class PackageMediaEntity {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "package_id", nullable = false)
+    @Column(name = "package_id")
     private UUID packageId;
 
     @Column(nullable = false, columnDefinition = "TEXT")
     private String url;
+
+    @Column(name = "storage_path", columnDefinition = "TEXT")
+    private String storagePath;
+
+    @Column(name = "bucket", length = 64)
+    private String bucket;
+
+    @Column(name = "storage_mode", length = 16)
+    private String storageMode;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "media_type", nullable = false)

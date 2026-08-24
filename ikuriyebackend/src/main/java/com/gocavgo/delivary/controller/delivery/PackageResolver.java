@@ -313,4 +313,12 @@ public class PackageResolver {
     public PackageResponse assignPackageTrip(@Argument @Valid AssignPackageTripInput input) {
         return packageService.assignPackageTrip(input);
     }
+
+    @MutationMapping
+    @PreAuthorize("isAuthenticated()")
+    public boolean deletePackage(@Argument UUID packageId) {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        var userId = Long.parseLong(auth.getName());
+        return packageService.deletePackage(userId, packageId);
+    }
 }

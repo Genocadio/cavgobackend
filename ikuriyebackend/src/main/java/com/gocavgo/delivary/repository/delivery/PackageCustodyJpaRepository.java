@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface PackageCustodyJpaRepository extends JpaRepository<PackageCustodyEntity, UUID> {
     List<PackageCustodyEntity> findByPackageIdOrderByTimestampAsc(UUID packageId);
+    void deleteByPackageId(UUID packageId);
 }

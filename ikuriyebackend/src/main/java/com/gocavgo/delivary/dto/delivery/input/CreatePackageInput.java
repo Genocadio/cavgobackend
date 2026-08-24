@@ -52,8 +52,7 @@ public record CreatePackageInput(
     }
 
     public record MediaInput(
-            String url,
-            MediaType mediaType
+            String mediaId
     ) {
     }
 }

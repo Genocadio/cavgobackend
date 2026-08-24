@@ -8,5 +8,6 @@ import java.util.UUID;
 
 public interface PackageMediaJpaRepository extends JpaRepository<PackageMediaEntity, UUID> {
     List<PackageMediaEntity> findByPackageId(UUID packageId);
+    List<PackageMediaEntity> findByStorageMode(String storageMode);
     void deleteByPackageId(UUID packageId);
 }

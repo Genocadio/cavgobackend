@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface PackageEventJpaRepository extends JpaRepository<PackageEventEntity, UUID> {
     List<PackageEventEntity> findByPackageIdOrderByCreatedAtAsc(UUID packageId);
+    void deleteByPackageId(UUID packageId);
 }

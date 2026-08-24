@@ -3,7 +3,6 @@ package com.gocavgo.delivary.dto.delivery.output;
 import com.gocavgo.delivary.enums.delivery.CustodianRole;
 import com.gocavgo.delivary.enums.delivery.DeliveryType;
 import com.gocavgo.delivary.enums.delivery.LocationType;
-import com.gocavgo.delivary.enums.delivery.MediaType;
 import com.gocavgo.delivary.enums.delivery.PackageStatus;
 import com.gocavgo.delivary.enums.delivery.PersonRole;
 import com.gocavgo.delivary.dto.transfer.output.TransferResponse;
@@ -76,8 +75,7 @@ public record PackageResponse(
     public record MediaResponse(
             UUID id,
             String url,
-            MediaType mediaType,
-            Instant createdAt
+            String mimeType
     ) {
     }
 

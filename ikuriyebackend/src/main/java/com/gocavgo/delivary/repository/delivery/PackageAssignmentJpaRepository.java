@@ -9,4 +9,5 @@ import java.util.UUID;
 public interface PackageAssignmentJpaRepository extends JpaRepository<PackageAssignmentEntity, UUID> {
     List<PackageAssignmentEntity> findByPackageIdOrderByAssignedAtDesc(UUID packageId);
     List<PackageAssignmentEntity> findByDriverId(Long driverId);
+    void deleteByPackageId(UUID packageId);
 }

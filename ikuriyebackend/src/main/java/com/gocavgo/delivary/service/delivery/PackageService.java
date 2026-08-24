@@ -44,6 +44,7 @@ import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.enums.notification.NoticeEventType;
 import com.gocavgo.delivary.service.notification.NoticeEventMapper;
 import com.gocavgo.delivary.service.notification.NoticeService;
+import com.gocavgo.delivary.service.storage.StorageService;
 import com.gocavgo.delivary.service.subscription.PackageTransferPublisher;
 import com.gocavgo.delivary.service.transfer.TransferService;
 import com.gocavgo.delivary.enums.transfer.TransferRuleType;
@@ -96,6 +97,7 @@ public class PackageService {
     private final TransferJpaRepository transferRepo;
     private final TransferPackageJpaRepository transferPackageRepo;
     private final DeliveryMapper deliveryMapper;
+    private final StorageService storageService;
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -175,11 +177,19 @@ public class PackageService {
 
             if (det.media() != null) {
                 for (var m : det.media()) {
-                    mediaRepo.save(PackageMediaEntity.builder()
-                            .packageId(pkg.getId())
-                            .url(m.url())
-                            .mediaType(m.mediaType())
-                            .build());
+                    // Link pre-uploaded media to this package by mediaId
+                    try {
+                        var mediaId = java.util.UUID.fromString(m.mediaId());
+                        var existingMedia = mediaRepo.findById(mediaId).orElse(null);
+                        if (existingMedia != null) {
+                            existingMedia.setPackageId(pkg.getId());
+                            mediaRepo.save(existingMedia);
+                        } else {
+                            log.warn("Media not found for mediaId={}, skipping", m.mediaId());
+                        }
+                    } catch (IllegalArgumentException e) {
+                        log.warn("Invalid mediaId format: {}, skipping", m.mediaId());
+                    }
                 }
             }
         }
@@ -796,6 +806,56 @@ public class PackageService {
         throw new RuntimeException("Only the sender, receiver, or current custodian can confirm delivery");
     }
 
+    /**
+     * Deletes a package and ALL its data: media files (from Supabase/local),
+     * media DB rows, events, custody, people, locations, details, custodians,
+     * assignments, delivery codes, and transfer links.
+     */
+    @Transactional
+    public boolean deletePackage(Long actorId, UUID packageId) {
+        var pkg = packageRepo.findById(packageId)
+                .orElseThrow(() -> new RuntimeException("Package not found: " + packageId));
+
+        // Only creator, admin/super_admin, or current custodian can delete
+        var role = SecurityUtils.getCurrentUserRole();
+        boolean isCreator = pkg.getCreatorId() != null && pkg.getCreatorId().equals(actorId);
+        boolean isAdmin = role == Role.ADMIN || role == Role.SUPER_ADMIN;
+        boolean isCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(packageId)
+                .map(c -> c.getUserId().equals(actorId)).orElse(false);
+
+        if (!isCreator && !isAdmin && !isCustodian) {
+            throw new RuntimeException("Only the creator, admin, or current custodian can delete this package");
+        }
+
+        // 1. Delete media files from storage (Supabase or local disk)
+        var mediaItems = mediaRepo.findByPackageId(packageId);
+        for (var media : mediaItems) {
+            storageService.deleteFile(media.getBucket(), media.getStoragePath(), media.getStorageMode());
+        }
+
+        // 2. Delete media DB rows
+        mediaRepo.deleteByPackageId(packageId);
+
+        // 3. Delete related DB rows (order matters for FK constraints)
+        deliveryCodeRepo.findByPackageId(packageId).ifPresent(deliveryCodeRepo::delete);
+        eventRepo.deleteByPackageId(packageId);
+        custodyRepo.deleteByPackageId(packageId);
+        custodianRepo.deleteByPackageId(packageId);
+        personRepo.deleteByPackageId(packageId);
+        locationRepo.deleteByPackageId(packageId);
+        detailRepo.deleteByPackageId(packageId);
+        assignmentRepo.deleteByPackageId(packageId);
+
+        // 4. Delete transfer links (don't delete the transfer itself)
+        transferPackageRepo.deleteByPackageId(packageId);
+
+        // 5. Delete the package
+        packageRepo.delete(pkg);
+
+        log.info("Package deleted: id={}, media={}, by user={}", packageId, mediaItems.size(), actorId);
+        return true;
+    }
+
     @Transactional(readOnly = true)
     public PackageResponse getPackageById(UUID id) {
         var pkg = packageRepo.findById(id)
@@ -1156,7 +1216,19 @@ public class PackageService {
 
         var detail = includeDetails ? detailRepo.findByPackageId(pkg.getId()).map(d -> {
             var media = mediaRepo.findByPackageId(pkg.getId()).stream()
-                    .map(deliveryMapper::toMediaResponse)
+                    .map(m -> {
+                        // Resolve URL from storage path — handles both local and Supabase
+                        String url = null;
+                        if (m.getStoragePath() != null && m.getBucket() != null) {
+                            boolean isLocal = "local".equals(m.getStorageMode());
+                            url = storageService.getFileUrl(m.getBucket(), m.getStoragePath(), isLocal);
+                        }
+                        // Derive MIME type from mediaType enum
+                        String mime = m.getMediaType() == com.gocavgo.delivary.enums.delivery.MediaType.VIDEO
+                                ? "video/mp4" : "image/jpeg";
+                        return new PackageResponse.MediaResponse(
+                                m.getId(), url != null ? url : "", mime);
+                    })
                     .toList();
             return deliveryMapper.toDetailResponse(d, media);
         }).orElse(null) : null;

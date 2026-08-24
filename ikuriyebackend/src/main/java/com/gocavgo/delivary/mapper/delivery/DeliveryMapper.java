@@ -30,8 +30,6 @@ public interface DeliveryMapper {
 
     PackageResponse.LocationResponse toLocationResponse(PackageLocationEntity entity);
 
-    PackageResponse.MediaResponse toMediaResponse(PackageMediaEntity entity);
-
     @Mapping(target = "media", source = "media")
     PackageResponse.DetailResponse toDetailResponse(PackageDetailEntity entity, List<PackageResponse.MediaResponse> media);
 

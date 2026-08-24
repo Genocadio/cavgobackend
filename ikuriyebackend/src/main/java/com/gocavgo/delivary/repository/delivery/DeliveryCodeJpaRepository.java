@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface DeliveryCodeJpaRepository extends JpaRepository<DeliveryCodeEntity, UUID> {
     Optional<DeliveryCodeEntity> findByPackageId(UUID packageId);
+    void deleteByPackageId(UUID packageId);
 }

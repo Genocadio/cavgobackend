@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface PackageDetailJpaRepository extends JpaRepository<PackageDetailEntity, UUID> {
     Optional<PackageDetailEntity> findByPackageId(UUID packageId);
+    void deleteByPackageId(UUID packageId);
 }

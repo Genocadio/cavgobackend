@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface PackageLocationJpaRepository extends JpaRepository<PackageLocationEntity, UUID> {
     List<PackageLocationEntity> findByPackageId(UUID packageId);
+    void deleteByPackageId(UUID packageId);
 }

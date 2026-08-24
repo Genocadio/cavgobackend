@@ -12,6 +12,7 @@ public record UserResponse(
         String firstName,
         String lastName,
         String username,
+        String avatarUrl,
         Role role,
         UserStatus status,
         Instant createdAt,

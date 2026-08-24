@@ -108,6 +108,8 @@ type User {
     lastName: String
     "User name"
     username: String
+    "Profile picture signed URL (7-day expiry, auto-refreshed by backend)"
+    avatarUrl: String
     "System role — determines permissions"
     role: Role!
     "Account status"
@@ -128,14 +130,12 @@ enum MediaType {
 
 "A media link associated with a package (video or picture)."
 type PackageMedia {
-    "Internal UUID"
+    "Media ID (from upload)"
     id: ID!
-    "URL of the media"
+    "Fetchable URL (signed or direct)"
     url: String!
-    "Type of media"
-    mediaType: MediaType!
-    "ISO-8601 timestamp of creation"
-    createdAt: String!
+    "MIME type (e.g. image/jpeg, video/mp4)"
+    mimeType: String!
 }
 type PackageCustodian {
     "Internal UUID"
@@ -360,12 +360,10 @@ input DetailInput {
     media: [MediaInput!]
 }
 
-"Input: a media link associated with a package."
+"Input: reference uploaded media when creating a package."
 input MediaInput {
-    "URL of the media"
-    url: String!
-    "Type of media"
-    mediaType: MediaType!
+    "Media IDs returned by POST /api/files/upload"
+    mediaId: ID!
 }
 input CreatePackageInput {
     "Type of delivery (OPEN or FIXED_ROUTE)"
@@ -839,6 +837,13 @@ type Subscription {
     Only authenticated users with DRIVER or WORKER roles receive events.
     """
     newPackageTransfer: PackageCreation!
+
+    """
+    Real-time notice feed. Emits a Notice whenever one is created for the
+    authenticated user. Each subscriber only receives notices addressed to
+    them (filtered by the notice_viewers.user_id row).
+    """
+    noticeCreated: Notice!
 }
 
 "Write operations."
@@ -895,4 +900,8 @@ type Mutation {
     rejectTransfer(transferId: ID!): Transfer!
     "Mark a notice as read for the authenticated user. Pass the viewer id returned by myNotices."
     markNoticeRead(viewerId: ID!): NoticeViewer!
+    "Update the authenticated user's profile picture. Pass the mediaId returned by POST /api/files/upload."
+    updateAvatar(mediaId: ID!): User!
+    "Delete a package and all its media (files + DB rows). Only the creator, admin, or current custodian can delete."
+    deletePackage(packageId: ID!): Boolean!
 }
