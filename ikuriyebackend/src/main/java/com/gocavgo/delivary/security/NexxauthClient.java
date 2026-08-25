@@ -54,12 +54,25 @@ public class NexxauthClient {
             @Value("${nexxauth.client-id}") String clientId,
             @Value("${nexxauth.client-token}") String clientToken
     ) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new IllegalStateException("nexxauth.base-url is not configured (NEXXAUTH_BASE_URL)");
+        }
+        if (organisationId == null) {
+            throw new IllegalStateException("nexxauth.organisation-id is not configured (NEXXAUTH_ORGANISATION_ID)");
+        }
+        if (clientId == null || clientId.isBlank()) {
+            throw new IllegalStateException("nexxauth.client-id is not configured (NEXXAUTH_CLIENT_ID)");
+        }
+        if (clientToken == null || clientToken.isBlank()) {
+            throw new IllegalStateException("nexxauth.client-token is not configured (NEXXAUTH_CLIENT_TOKEN)");
+        }
         // base-url already includes the platform segment (origin + platform
         // slug); organisations are addressed by their numeric id, never a slug.
         this.orgBaseUrl = baseUrl.replaceAll("/+$", "")
                 + "/organisations/" + organisationId;
         this.clientId = clientId;
         this.clientToken = clientToken;
+        log.info("Nexxauth SERVER client initialised — org endpoint: {}", this.orgBaseUrl);
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
