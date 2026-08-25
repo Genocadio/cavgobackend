@@ -46,7 +46,9 @@ public class NexxauthClient {
     private final String clientId;
     private final String clientToken;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.ALWAYS)
+            .build();
 
     public NexxauthClient(
             @Value("${nexxauth.base-url}") String baseUrl,
