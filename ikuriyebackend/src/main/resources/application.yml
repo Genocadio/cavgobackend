@@ -78,6 +78,12 @@ storage:
   migration:
     enabled: ${STORAGE_MIGRATION_ENABLED:true}
 
+logging:
+  level:
+    # Suppress noisy ClosedChannelException from WebSocket subscriptions —
+    # this fires whenever a client disconnects mid-push (backgrounded, network drop).
+    org.springframework.graphql.server.webmvc.GraphQlWebSocketHandler: WARN
+
 server:
   port: ${SERVER_PORT:6100}
 
