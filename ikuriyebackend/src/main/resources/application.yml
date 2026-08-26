@@ -37,6 +37,9 @@ spring:
       enabled: true
     schema:
       locations: classpath:graphql/
+    websocket:
+      path: /graphql
+      connection-init-timeout: 10s
 
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:*}

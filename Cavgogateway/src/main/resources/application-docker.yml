@@ -104,7 +104,17 @@ spring:
                             name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
                             strategy: RETAIN_FIRST
 
-                    # GraphQL route for ikuriyebackend
+                    # WebSocket route for ikuriyebackend subscriptions — MUST come before HTTP route
+                    # so WebSocket upgrade requests are matched first and forwarded with ws:// scheme.
+                    - id: ikuriyebackend-ws
+                      uri: lb:ws://ikuriyebackend
+                      predicates:
+                        - Path=/ikuriye/graphql
+                        - Header=Upgrade, websocket
+                      filters:
+                        - StripPrefix=1
+
+                    # GraphQL HTTP route for ikuriyebackend (queries/mutations only)
                     - id: ikuriyebackend-graphql
                       uri: lb://ikuriyebackend
                       predicates:
@@ -115,14 +125,6 @@ spring:
                           args:
                             name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
                             strategy: RETAIN_FIRST
-
-                    # WebSocket route for ikuriyebackend subscriptions
-                    - id: ikuriyebackend-ws
-                      uri: lb:ws://ikuriyebackend
-                      predicates:
-                        - Path=/ikuriye/graphql
-                      filters:
-                        - StripPrefix=1
 
 server:
   port: 8080
