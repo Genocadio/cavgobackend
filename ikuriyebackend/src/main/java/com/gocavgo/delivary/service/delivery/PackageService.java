@@ -51,6 +51,7 @@ import com.gocavgo.delivary.enums.transfer.TransferRuleType;
 import com.gocavgo.delivary.enums.transfer.TransferStatus;
 import com.gocavgo.delivary.dto.transfer.input.CreateTransferInput;
 import com.gocavgo.delivary.dto.transfer.output.TransferResponse;
+import com.gocavgo.delivary.entity.transfer.TransferEntity;
 import com.gocavgo.delivary.entity.transfer.TransferPackageEntity;
 import com.gocavgo.delivary.repository.transfer.TransferJpaRepository;
 import com.gocavgo.delivary.repository.transfer.TransferPackageJpaRepository;
@@ -961,17 +962,35 @@ public class PackageService {
     @Transactional(readOnly = true)
     public DeliveryPackagePage getAvailablePackages(PackageStatus statusFilter, SortOrder order,
                                                     int page, int size) {
+        return getAvailablePackages(statusFilter, order, page, size, null, null, null);
+    }
+
+    /**
+     * Fetch packages available for the current user, taking into account
+     * transfer targeting (matchUserId, acceptorType, matchCompanyId).
+     * Packages in PENDING/REQUESTED transfers that target the current user
+     * are still shown so drivers/workers don't miss subscription-recovery polls.
+     */
+    @Transactional(readOnly = true)
+    public DeliveryPackagePage getAvailablePackages(PackageStatus statusFilter, SortOrder order,
+                                                    int page, int size,
+                                                    Long currentUserId, Role currentRole,
+                                                    java.util.UUID currentCompanyId) {
         var status = statusFilter != null ? statusFilter : PackageStatus.CREATED;
         var pageable = resolvePageRequest(order, page, size);
         var paged = packageRepo.findByStatus(status, pageable);
 
-        // Exclude packages that are in a PENDING or REQUESTED transfer — they are
-        // already claimed and should not appear as available.
-        var unavailablePackageIds = java.util.stream.Stream.of(
+        // Exclude packages in PENDING/REQUESTED transfers — UNLESS the transfer
+        // targets the current user (via matchUserId, acceptorType, or matchCompanyId).
+        var pendingTransfers = java.util.stream.Stream.of(
                         transferRepo.findByStatus(TransferStatus.PENDING),
                         transferRepo.findByStatus(TransferStatus.REQUESTED)
                 )
                 .flatMap(java.util.Collection::stream)
+                .toList();
+
+        var unavailablePackageIds = pendingTransfers.stream()
+                .filter(t -> !transferTargetsUser(t, currentUserId, currentRole, currentCompanyId))
                 .flatMap(t -> transferPackageRepo.findPackageIdsByTransferId(t.getId()).stream())
                 .collect(java.util.stream.Collectors.toSet());
 
@@ -985,6 +1004,42 @@ public class PackageService {
     @Transactional(readOnly = true)
     public DeliveryPackagePage getAvailablePackages() {
         return getAvailablePackages(null, SortOrder.ASC, 0, 20);
+    }
+
+    /**
+     * Returns true if the given transfer targets the specified user based on
+     * acceptorType, matchUserId, and matchCompanyId filters.
+     * Mirrors the subscription resolver's filter logic.
+     */
+    private boolean transferTargetsUser(TransferEntity transfer,
+                                         Long userId, Role role, UUID companyId) {
+        if (userId == null || role == null) return false;
+
+        // matchUserId filter — only the specified user receives it
+        if (transfer.getMatchUserId() != null
+                && !transfer.getMatchUserId().equals(userId)) {
+            return false;
+        }
+
+        // acceptorType filter
+        if (transfer.getAcceptorType() != null) {
+            switch (transfer.getAcceptorType()) {
+                case DRIVER -> { if (role != Role.DRIVER) return false; }
+                case WORKER -> { if (role != Role.WORKER) return false; }
+                case BOTH -> {
+                    if (role != Role.DRIVER && role != Role.WORKER) return false;
+                }
+            }
+        }
+
+        // matchCompanyId filter
+        if (transfer.getMatchCompanyId() != null) {
+            if (companyId == null || !transfer.getMatchCompanyId().equals(companyId)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     @Transactional(readOnly = true)

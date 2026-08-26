@@ -88,7 +88,22 @@ public class PackageResolver {
             @Argument int page,
             @Argument int size
     ) {
-        return packageService.getAvailablePackages(status, order != null ? order : SortOrder.ASC, page, size);
+        Long currentUserId = null;
+        Role currentRole = null;
+        java.util.UUID currentCompanyId = null;
+        try {
+            var auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getName() != null) {
+                currentUserId = Long.parseLong(auth.getName());
+                currentRole = NexxauthRoles.primaryRole(auth.getAuthorities());
+                currentCompanyId = userService.getCompanyIdForUser(currentUserId);
+            }
+        } catch (Exception ignored) {
+            // Not authenticated — proceed without user context (legacy callers)
+        }
+        return packageService.getAvailablePackages(
+                status, order != null ? order : SortOrder.ASC, page, size,
+                currentUserId, currentRole, currentCompanyId);
     }
 
     @QueryMapping
