@@ -91,6 +91,7 @@ public class PackageService {
     private final PackageCustodyJpaRepository custodyRepo;
     private final PackageCustodianJpaRepository custodianRepo;
     private final DeliveryCodeJpaRepository deliveryCodeRepo;
+    private final DeliveryCodeRateLimiter deliveryCodeRateLimiter;
     private final UserRepository userRepository;
     private final NoticeService noticeService;
     private final PackageTransferPublisher packageTransferPublisher;
@@ -744,6 +745,8 @@ public class PackageService {
     }
 
     private void verifyDeliveryCode(UUID packageId, String rawCode) {
+        deliveryCodeRateLimiter.checkRateLimit(packageId);
+
         if (rawCode == null || rawCode.isBlank()) {
             throw new RuntimeException("Delivery code is required");
         }
@@ -756,8 +759,10 @@ public class PackageService {
             throw new RuntimeException("Delivery code has expired");
         }
         if (!verifyCode(rawCode, code.getCodeHash())) {
+            deliveryCodeRateLimiter.recordFailedAttempt(packageId);
             throw new RuntimeException("Invalid delivery code");
         }
+        deliveryCodeRateLimiter.recordSuccess(packageId);
         code.setUsedAt(Instant.now());
         deliveryCodeRepo.save(code);
     }
