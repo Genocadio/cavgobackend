@@ -1,55 +1,24 @@
 package com.nexxserve.cavgogateway.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.reactive.CorsWebFilter;
-import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
+/**
+ * CORS is now handled by spring.cloud.gateway.globalcors in application.yml / application-docker.yml.
+ * This class only logs the resolved CORS configuration at startup for debugging.
+ */
 @Configuration
 public class CorsConfig {
 
-    // Comma-separated list of allowed origins, or "*" to allow all.
-    // Example: CORS_ALLOWED_ORIGINS=https://book.gocavgo.com,https://admin.gocavgo.com
-    // Example: CORS_ALLOWED_ORIGINS=*
+    private static final Logger logger = LoggerFactory.getLogger(CorsConfig.class);
+
     @Value("${cors.allowed-origins:*}")
     private String allowedOrigins;
 
-    @Bean
-    public CorsWebFilter corsWebFilter() {
-        CorsConfiguration corsConfig = new CorsConfiguration();
-
-        if ("*".equals(allowedOrigins)) {
-            // Use allowedOriginPattern to allow all while still honoring credentials.
-            corsConfig.addAllowedOriginPattern("*");
-        } else {
-            // Explicit origins from the comma-separated env var.
-            for (String origin : allowedOrigins.split(",")) {
-                corsConfig.addAllowedOriginPattern(origin.strip());
-            }
-        }
-
-        corsConfig.addAllowedMethod("GET");
-        corsConfig.addAllowedMethod("POST");
-        corsConfig.addAllowedMethod("PUT");
-        corsConfig.addAllowedMethod("DELETE");
-        corsConfig.addAllowedMethod("PATCH");
-        corsConfig.addAllowedMethod("HEAD");
-        corsConfig.addAllowedMethod("OPTIONS");
-
-        corsConfig.addAllowedHeader("*");
-        corsConfig.setAllowCredentials(true);
-
-        // Expose common headers for SSE (e.g. Last-Event-ID) and auth.
-        corsConfig.addExposedHeader("*");
-
-        // Cache preflight response for 1 hour.
-        corsConfig.setMaxAge(3600L);
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", corsConfig);
-
-        return new CorsWebFilter(source);
+    @jakarta.annotation.PostConstruct
+    public void logCorsConfig() {
+        logger.info("🔑 CORS allowed-origins resolved to: {}", allowedOrigins);
     }
 }
