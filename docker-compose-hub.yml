@@ -3,49 +3,48 @@ services:
     image: rabbitmq:4-management
     container_name: rabbitmq
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${PORT_RABBITMQ:-5672}:5672"
+      - "${PORT_RABBITMQ_MGMT:-15672}:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: admin
-      RABBITMQ_DEFAULT_PASS: admin
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-admin}
     networks:
       - cavgo-network
-    restart: unless-stopped
 
   # Redis Cache
   redis:
     image: redis:7-alpine
     container_name: cavgo-redis
     ports:
-      - "6379:6379"
+      - "${PORT_REDIS:-6379}:6379"
     networks:
       - cavgo-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 3
-    restart: unless-stopped
+      start_period: 10s
 
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     container_name: cavgo-postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
     volumes:
       - /opt/cavgo-data/postgres:/var/lib/postgresql/data
-      - ./init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+      - ./init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     networks:
       - cavgo-network
-    restart: unless-stopped
 
   # OSRM Data Preparation (Run once manually)
   osrm-setup:
@@ -64,22 +63,24 @@ services:
   osrm:
     image: ghcr.io/project-osrm/osrm-backend
     container_name: osrm-rwanda
-    command: osrm-routed --algorithm mld /data/rwanda-latest.osrm
+    command: ["osrm-routed", "--algorithm", "mld", "/data/rwanda-latest.osrm"]
     ports:
-      - "5000:5000"
+      - "${PORT_OSRM:-5000}:5000"
     volumes:
       - osrm_data:/data:ro
     networks:
       - cavgo-network
+
+    # IMPORTANT:
+    # The official OSRM image does not contain curl or wget.
+    # OSRM itself is PID 1, so kill -0 1 verifies that osrm-routed
+    # is still running.
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- 'http://127.0.0.1:5000/route/v1/driving/30.0619,-1.9536;30.1044,-1.9706' 2>&1 | grep -q '\"code\":\"Ok\"' || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
       start_period: 30s
-    restart: unless-stopped
-    depends_on:
-      - redis
 
   # Eureka Service Discovery
   eurekacavgo:
@@ -88,7 +89,7 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: docker
     ports:
-      - "8761:8761"
+      - "${PORT_EUREKA:-8761}:8761"
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,13 +103,12 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://localhost:8761/actuator/health",
+          "http://localhost:${PORT_EUREKA:-8761}/actuator/health"
         ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    restart: unless-stopped
 
   # Main Service (Java)
   cavgomain:
@@ -116,24 +116,24 @@ services:
     container_name: cavgo-main
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/cavgomain
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_DATASOURCE_URL: ${CAVGOMAIN_DB_URL:-jdbc:postgresql://postgres:5432/cavgomain}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       SPRING_JPA_SHOW_SQL: false
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
-      SPRING_RABBITMQ_HOST: rabbitmq
-      SPRING_RABBITMQ_PORT: 5672
-      SPRING_RABBITMQ_USERNAME: admin
-      SPRING_RABBITMQ_PASSWORD: admin
-      AGGREGATOR_BASE_URL: http://adminaggregate:4000
-      NEXXAUTH_BASE_URL: ${NEXXAUTH_BASE_URL:-https://auth.med.rw/master}
-      NEXXAUTH_ORGANISATION_ID: ${NEXXAUTH_ORGANISATION_ID:-1}
-      NEXXAUTH_PUBLIC_KEY: ${NEXXAUTH_PUBLIC_KEY:-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2G52RDx6567hgWYJPe2xSdHvsvYSfEkYtw+gBmGsUAGE0lLrgTgtT0tMlx/J7ADAU4byULpGNdJcb87P0iwcT32cqyeGlOpkgxgGkRKC7V4h4HdwVHLf78IT00pWAVdTK+K7MNzcJGB5/qOond0WWkgto803MpYUPabvVTsD2r6FyPy3f5WokFKsrHGO8KTPKQ0oYdRYcZ+1aO2QjJO4PMIUg9k2pquB+OJmCYVeGxi0tpNCYIoWZoYIQbUIRzfRTi/p8yRE1INlfnxYNTBQWEQHs0zplYSSr+H2gNBMAJfJ7tLVZ/Lc6OWUQJBJ5n8rOKH66VWYWbFbRUL6UOfmGQIDAQAB}
-      NEXXAUTH_CLIENT_ID: ${NEXXAUTH_CLIENT_ID:-cli_vrwPaVOqk-EJHFft9o1Mq1g1W3h_KTCv6aNw6IlVit4}
-      NEXXAUTH_CLIENT_TOKEN: ${NEXXAUTH_CLIENT_TOKEN:-nx_PjNP5l_Iz7XjTKhJhMxFO6p6R19eS-rmYA762CKs_7U}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:${PORT_EUREKA:-8761}/eureka/
+      SPRING_RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      SPRING_RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-admin}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin}
+      AGGREGATOR_BASE_URL: http://adminaggregate:${PORT_ADMINAGGREGATE:-4000}
+      NEXXAUTH_BASE_URL: ${NEXXAUTH_HUB_BASE_URL:-https://auth.nexxserve.dev/cavgo}
+      NEXXAUTH_ORGANISATION_ID: ${NEXXAUTH_HUB_ORGANISATION_ID:-5}
+      NEXXAUTH_PUBLIC_KEY: ${NEXXAUTH_HUB_PUBLIC_KEY:-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0b5n8Swo0KRi11RfAU8wRptBv2MR8M7Px5wMwf/zyCiPITLSKWUiCE851q5K2yxehk6tXEbDw5C8H1S3g4cupQsaHMQ/zmMl1eLP8lsPQpePKk5OIkK5XPWGWXw9SWsX/OtqP+C9vYKLOvwFFT49jtk0pJ73LAkvgkC4HrfEcWsJ4Fhz4C2bZZmVRdgvTmQ9w9BVJurub8XVLRqQIgmAM6L2h/4I1fnvqOL2kGvkpBMi1BSycpOZdb2Vyo8615eyYfNzHd5+/tKTu0969lX86MAirNzqi641RXVaYYXvntnAT2s4qQtm3xr366W8sCjsWFMcbzlhJ0IxFgBHWG7InwIDAQAB}
+      NEXXAUTH_CLIENT_ID: ${NEXXAUTH_HUB_CLIENT_ID:-cli_cGRCaq-j5jnqlfH7plfU5M56K1v-f0U3r8J7Nfp_Oig}
+      NEXXAUTH_CLIENT_TOKEN: ${NEXXAUTH_HUB_CLIENT_TOKEN:-nx_DklNkeKfaiKLRw3JlBM4Zm-7zJaarZbxd7xrSklZeQ8}
     ports:
-      - "6060:6060"
+      - "${PORT_MAIN:-6060}:6060"
     depends_on:
       postgres:
         condition: service_healthy
@@ -143,21 +143,20 @@ services:
         condition: service_started
     networks:
       - cavgo-network
+    # NOTE: Spring Security (Nexxauth JWT) returns 403 for /actuator/**
+    # even from inside the container, so wget can never pass.
+    # nc -z verifies Tomcat's listening socket instead (liveness).
+    # Proper fix: permitAll() on /actuator/health in the app security config.
     healthcheck:
       test:
         [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:6060/actuator/health",
+          "CMD-SHELL",
+          "nc -z 127.0.0.1 ${PORT_MAIN:-6060} || exit 1"
         ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    restart: unless-stopped
 
   # Gateway Service (Java)
   cavgogateway:
@@ -165,9 +164,10 @@ services:
     container_name: cavgo-gateway
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:${PORT_EUREKA:-8761}/eureka/
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
     ports:
-      - "8080:8080"
+      - "${PORT_GATEWAY:-8080}:8080"
     depends_on:
       eurekacavgo:
         condition: service_healthy
@@ -183,13 +183,12 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://localhost:8080/actuator/health",
+          "http://localhost:${PORT_GATEWAY:-8080}/actuator/health"
         ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    restart: unless-stopped
 
   # Ridehail Service (Java)
   ridehail:
@@ -197,12 +196,12 @@ services:
     container_name: cavgo-ridehail
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ridehail
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
+      SPRING_DATASOURCE_URL: ${RIDEHAIL_DB_URL:-jdbc:postgresql://postgres:5432/ridehail}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:${PORT_EUREKA:-8761}/eureka/
     ports:
-      - "6070:6070"
+      - "${PORT_RIDEHAIL:-6070}:6070"
     depends_on:
       postgres:
         condition: service_healthy
@@ -210,73 +209,64 @@ services:
         condition: service_healthy
     networks:
       - cavgo-network
+    # NOTE: Spring Security returns 403 for /actuator/** (see cavgomain note).
     healthcheck:
       test:
         [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:6070/actuator/health",
+          "CMD-SHELL",
+          "nc -z 127.0.0.1 ${PORT_RIDEHAIL:-6070} || exit 1"
         ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    restart: unless-stopped
 
   # Meilisearch (search provider for locations, routes, trips)
   meilisearch:
     image: getmeili/meilisearch:v1.13
     container_name: cavgo-meilisearch
     environment:
-      MEILI_ENV: ${MEILI_ENV:-production}
+      MEILI_ENV: ${MEILI_ENV:-development}
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-cavgoSearchMasterKey}
       MEILI_DB_PATH: /meili_data
+    ports:
+      - "${PORT_MEILISEARCH:-7700}:7700"
     volumes:
       - meili_data:/meili_data
     healthcheck:
-      test:
-        [
-          "CMD",
-          "curl",
-          "-f",
-          "http://localhost:7700/health",
-        ]
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT_MEILISEARCH:-7700}/health"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 8s
     networks:
       - cavgo-network
-    restart: unless-stopped
 
   # Trips Service (Go)
   cavgotrips:
     image: genoyves/cavgo-system:trips
     container_name: cavgo-trips
     environment:
-      DATABASE_URL: host=postgres user=postgres password=postgres dbname=cavgotrips port=5432 sslmode=disable
+      DATABASE_URL: ${CAVGOTRIPS_DB_URL:-host=postgres user=postgres password=postgres dbname=cavgotrips port=5432 sslmode=disable}
       PORT: 6080
-      EUREKA_SERVER_URL: http://eurekacavgo:8761
+      EUREKA_SERVER_URL: http://eurekacavgo:${PORT_EUREKA:-8761}
       EUREKA_APP_NAME: CAVGOTRIPS
-      VEHICLE_SERVICE_URL: http://cavgomain:6060/main/vehicles/
+      VEHICLE_SERVICE_URL: http://cavgomain:${PORT_MAIN:-6060}/main/vehicles/
       EUREKA_REGISTER: true
       EUREKA_PREFER_IP: true
-      RABBITMQ_HOST: rabbitmq:5672
-      RABBITMQ_USER: admin
-      RABBITMQ_PASS: admin
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}:${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-admin}
       RABBITMQ_QUEUE: tripservicesend
       RABBITMQ_EXCHANGE: bookings.fanout
       STORE_LOGS: "true"
-      TRIP_UPDATE_BASE_URL: http://adminaggregate:4000
+      TRIP_UPDATE_BASE_URL: http://adminaggregate:${PORT_ADMINAGGREGATE:-4000}
       SEARCH_PROVIDER: auto
-      MEILISEARCH_URL: http://meilisearch:7700
+      MEILISEARCH_URL: ${MEILISEARCH_URL:-http://meilisearch:7700}
       MEILISEARCH_API_KEY: ${MEILI_MASTER_KEY:-cavgoSearchMasterKey}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-}
     ports:
-      - "6080:6080"
+      - "${PORT_TRIPS:-6080}:6080"
     depends_on:
       cavgomain:
         condition: service_healthy
@@ -296,37 +286,36 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://localhost:6080/health",
+          "http://localhost:${PORT_TRIPS:-6080}/health"
         ]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 5s
-    restart: unless-stopped
 
   # Booking Service (Go)
   cavgobooking:
     image: genoyves/cavgo-system:booking
     container_name: cavgo-booking
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/cavgobooks?sslmode=disable
+      DATABASE_URL: ${CAVGOBOOKS_DB_URL:-postgres://postgres:postgres@postgres:5432/cavgobooks?sslmode=disable}
       SERVER_ADDRESS: :6030
       PORT: 6030
       ENVIRONMENT: docker
-      TRIP_SERVICE_URL: http://cavgotrips:6080
-      EUREKA_SERVER_URL: http://eurekacavgo:8761
+      TRIP_SERVICE_URL: http://cavgotrips:${PORT_TRIPS:-6080}
+      EUREKA_SERVER_URL: http://eurekacavgo:${PORT_EUREKA:-8761}
       EUREKA_APP_NAME: cavgobooking
       EUREKA_REGISTER: true
       EUREKA_PREFER_IP: true
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USER: admin
-      RABBITMQ_PASS: admin
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-admin}
       RABBITMQ_EXCHANGE: bookings.fanout
       BUNDLE_QUEUE_NAME: bookingbundles.queue
       BUNDLE_REPLY_QUEUE_NAME: bookingbundles.reply.queue
     ports:
-      - "6030:6030"
+      - "${PORT_BOOKING:-6030}:6030"
     depends_on:
       postgres:
         condition: service_healthy
@@ -344,35 +333,35 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://localhost:6030/health",
+          "http://localhost:${PORT_BOOKING:-6030}/health"
         ]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 5s
-    restart: unless-stopped
 
+  # MQTT Service
   cavgomqt:
     image: genoyves/cavgo-system:cavgomqt
     container_name: cavgo-maqtt
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/cavgomqt
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_DATASOURCE_URL: ${CAVGOMQT_DB_URL:-jdbc:postgresql://postgres:5432/cavgomqt}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       SPRING_JPA_SHOW_SQL: false
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USER: admin
-      RABBITMQ_PASS: admin
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:${PORT_EUREKA:-8761}/eureka/
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-admin}
       GOOGLE_APPLICATION_CREDENTIALS: /opt/cavgo-data/firebase-credentials.json
-      NAVIGA_BASE_URL: http://navigation:6040
+      NAVIGA_BASE_URL: http://navigation:${PORT_NAVIGATION:-6040}
     ports:
-      - "6090:6090"
+      - "${PORT_MQTT:-6090}:6090"
     volumes:
-      - ${GOOGLE_APPLICATION_CREDENTIALS}:/opt/cavgo-data/firebase-credentials.json:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS:-./firebase-credentials.json}:/opt/cavgo-data/firebase-credentials.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -392,13 +381,12 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://localhost:6090/actuator/health",
+          "http://localhost:${PORT_MQTT:-6090}/actuator/health"
         ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    restart: unless-stopped
 
   # USSD Service (Java)
   cavgoussd:
@@ -407,10 +395,10 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: docker
       TRIP_SERVICE_HOST: cavgotrips
-      TRIP_SERVICE_PORT: 6080
-      BACKEND_BASE_URL: http://cavgomain:6060
+      TRIP_SERVICE_PORT: ${PORT_TRIPS:-6080}
+      BACKEND_BASE_URL: http://cavgomain:${PORT_MAIN:-6060}
     ports:
-      - "6050:6050"
+      - "${PORT_USSD:-6050}:6050"
     depends_on:
       eurekacavgo:
         condition: service_healthy
@@ -420,37 +408,34 @@ services:
         condition: service_healthy
     networks:
       - cavgo-network
+    # NOTE: Spring Security returns 403 for /actuator/** (see cavgomain note).
     healthcheck:
       test:
         [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:6050/actuator/health",
+          "CMD-SHELL",
+          "nc -z 127.0.0.1 ${PORT_USSD:-6050} || exit 1"
         ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    restart: unless-stopped
 
+  # Admin Aggregate Service
   adminaggregate:
     image: genoyves/cavgo-system:adminaggregate
     container_name: cavgo-adminaggregate
     environment:
       NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/adminaggregate?sslmode=disable
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USERNAME: admin
-      RABBITMQ_PASSWORD: admin
-      MAIN_BASE_URL: http://cavgomain:6060
-      TRIPS_BASE_URL: http://cavgotrips:6080
+      DATABASE_URL: ${ADMINAGGREGATE_DB_URL:-postgresql://postgres:postgres@postgres:5432/adminaggregate?sslmode=disable}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USERNAME: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin}
+      MAIN_BASE_URL: http://cavgomain:${PORT_MAIN:-6060}
+      TRIPS_BASE_URL: http://cavgotrips:${PORT_TRIPS:-6080}
     ports:
-      - "4000:4000"
+      - "${PORT_ADMINAGGREGATE:-4000}:4000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -462,29 +447,28 @@ services:
         condition: service_healthy
     networks:
       - cavgo-network
-    restart: unless-stopped
 
-  # Ikuriye Backend Service (Java - Delivery/Packages)
+  # Ikuriye Backend Service
   ikuriyebackend:
     image: genoyves/cavgo-system:ikuriyebackend
     container_name: cavgo-ikuriye
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ikuriye
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_DATASOURCE_URL: ${IKURIYE_DB_URL:-jdbc:postgresql://postgres:5432/ikuriye}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       SPRING_JPA_SHOW_SQL: false
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:${PORT_EUREKA:-8761}/eureka/
       SERVER_PORT: 6100
-      NEXXAUTH_BASE_URL: ${NEXXAUTH_BASE_URL:-https://auth.med.rw/master}
-      NEXXAUTH_ORGANISATION_ID: ${NEXXAUTH_ORGANISATION_ID:-1}
-      NEXXAUTH_PUBLIC_KEY: ${NEXXAUTH_PUBLIC_KEY:-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2G52RDx6567hgWYJPe2xSdHvsvYSfEkYtw+gBmGsUAGE0lLrgTgtT0tMlx/J7ADAU4byULpGNdJcb87P0iwcT32cqyeGlOpkgxgGkRKC7V4h4HdwVHLf78IT00pWAVdTK+K7MNzcJGB5/qOond0WWkgto803MpYUPabvVTsD2r6FyPy3f5WokFKsrHGO8KTPKQ0oYdRYcZ+1aO2QjJO4PMIUg9k2pquB+OJmCYVeGxi0tpNCYIoWZoYIQbUIRzfRTi/p8yRE1INlfnxYNTBQWEQHs0zplYSSr+H2gNBMAJfJ7tLVZ/Lc6OWUQJBJ5n8rOKH66VWYWbFbRUL6UOfmGQIDAQAB}
-      NEXXAUTH_CLIENT_ID: ${NEXXAUTH_CLIENT_ID:-cli_vrwPaVOqk-EJHFft9o1Mq1g1W3h_KTCv6aNw6IlVit4}
-      NEXXAUTH_CLIENT_TOKEN: ${NEXXAUTH_CLIENT_TOKEN:-nx_PjNP5l_Iz7XjTKhJhMxFO6p6R19eS-rmYA762CKs_7U}
+      NEXXAUTH_BASE_URL: ${NEXXAUTH_HUB_BASE_URL:-https://auth.nexxserve.dev/cavgo}
+      NEXXAUTH_ORGANISATION_ID: ${NEXXAUTH_HUB_ORGANISATION_ID:-5}
+      NEXXAUTH_PUBLIC_KEY: ${NEXXAUTH_HUB_PUBLIC_KEY:-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0b5n8Swo0KRi11RfAU8wRptBv2MR8M7Px5wMwf/zyCiPITLSKWUiCE851q5K2yxehk6tXEbDw5C8H1S3g4cupQsaHMQ/zmMl1eLP8lsPQpePKk5OIkK5XPWGWXw9SWsX/OtqP+C9vYKLOvwFFT49jtk0pJ73LAkvgkC4HrfEcWsJ4Fhz4C2bZZmVRdgvTmQ9w9BVJurub8XVLRqQIgmAM6L2h/4I1fnvqOL2kGvkpBMi1BSycpOZdb2Vyo8615eyYfNzHd5+/tKTu0969lX86MAirNzqi641RXVaYYXvntnAT2s4qQtm3xr366W8sCjsWFMcbzlhJ0IxFgBHWG7InwIDAQAB}
+      NEXXAUTH_CLIENT_ID: ${NEXXAUTH_HUB_CLIENT_ID:-cli_cGRCaq-j5jnqlfH7plfU5M56K1v-f0U3r8J7Nfp_Oig}
+      NEXXAUTH_CLIENT_TOKEN: ${NEXXAUTH_HUB_CLIENT_TOKEN:-nx_DklNkeKfaiKLRw3JlBM4Zm-7zJaarZbxd7xrSklZeQ8}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
     ports:
-      - "6100:6100"
+      - "${PORT_IKURIYE:-6100}:6100"
     depends_on:
       postgres:
         condition: service_healthy
@@ -492,40 +476,39 @@ services:
         condition: service_healthy
     networks:
       - cavgo-network
+    # NOTE: Spring Security (Nexxauth JWT) returns 403 for /actuator/**
+    # even from inside the container, so wget can never pass.
+    # nc -z verifies Tomcat's listening socket instead (liveness).
+    # Proper fix: permitAll() on /actuator/health in the app security config.
     healthcheck:
       test:
         [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:6100/actuator/health",
+          "CMD-SHELL",
+          "nc -z 127.0.0.1 ${PORT_IKURIYE:-6100} || exit 1"
         ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    restart: unless-stopped
 
-  # Navigation Service (Java)
+  # Navigation Service
   navigation:
     image: genoyves/cavgo-system:navigation
     container_name: cavgo-navigation
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/navigation
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_DATASOURCE_URL: ${NAVIGATION_DB_URL:-jdbc:postgresql://postgres:5432/navigation}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       SPRING_JPA_SHOW_SQL: false
       SPRING_DATA_REDIS_HOST: redis
-      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PORT: ${PORT_REDIS:-6379}
       SPRING_DATA_REDIS_TIMEOUT: 2000ms
-      OSRM_URL: http://osrm:5000
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:8761/eureka/
+      OSRM_URL: http://osrm:${PORT_OSRM:-5000}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eurekacavgo:${PORT_EUREKA:-8761}/eureka/
     ports:
-      - "6040:6040"
+      - "${PORT_NAVIGATION:-6040}:6040"
     depends_on:
       postgres:
         condition: service_healthy
@@ -545,13 +528,12 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://localhost:6040/actuator/health",
+          "http://localhost:${PORT_NAVIGATION:-6040}/actuator/health"
         ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    restart: unless-stopped
 
 volumes:
   osrm_data:

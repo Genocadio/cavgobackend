@@ -168,8 +168,7 @@ func (s *SSEService) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
+	// CORS headers are added by the API gateway (see middleware/cors.go note).
 
 	// Get flusher
 	flusher, ok := w.(http.Flusher)

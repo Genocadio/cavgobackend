@@ -312,11 +312,11 @@ func loggingMiddleware(next http.Handler) http.Handler {
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
+	// CORS is handled centrally by the API gateway. This service deliberately
+	// does not set Access-Control-* headers to avoid conflicting with the
+	// gateway's CORS (which resolves the allowed origin). Only short-circuit
+	// OPTIONS preflights if they reach this far.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
