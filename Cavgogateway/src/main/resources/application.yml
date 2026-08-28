@@ -8,14 +8,6 @@ spring:
     name: cavgogateway
   cloud:
     gateway:
-      globalcors:
-        cors-configurations:
-          '[/**]':
-            allowedOriginPatterns: ${CORS_ALLOWED_ORIGINS:*}
-            allowedMethods: "*"
-            allowedHeaders: "*"
-            allowCredentials: true
-            maxAge: 3600
       # Add request/response logging filter globally
       default-filters:
         - name: RequestResponse
