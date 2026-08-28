@@ -226,6 +226,32 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # Meilisearch (search provider for locations, routes, trips)
+  meilisearch:
+    image: getmeili/meilisearch:v1.13
+    container_name: cavgo-meilisearch
+    environment:
+      MEILI_ENV: ${MEILI_ENV:-production}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-cavgoSearchMasterKey}
+      MEILI_DB_PATH: /meili_data
+    volumes:
+      - meili_data:/meili_data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:7700/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 8s
+    networks:
+      - cavgo-network
+    restart: unless-stopped
+
   # Trips Service (Go)
   cavgotrips:
     image: genoyves/cavgo-system:trips
@@ -245,6 +271,10 @@ services:
       RABBITMQ_EXCHANGE: bookings.fanout
       STORE_LOGS: "true"
       TRIP_UPDATE_BASE_URL: http://adminaggregate:4000
+      SEARCH_PROVIDER: auto
+      MEILISEARCH_URL: http://meilisearch:7700
+      MEILISEARCH_API_KEY: ${MEILI_MASTER_KEY:-cavgoSearchMasterKey}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
     ports:
       - "6080:6080"
     depends_on:
@@ -253,6 +283,8 @@ services:
       postgres:
         condition: service_healthy
       eurekacavgo:
+        condition: service_healthy
+      meilisearch:
         condition: service_healthy
     networks:
       - cavgo-network
@@ -523,6 +555,7 @@ services:
 
 volumes:
   osrm_data:
+  meili_data:
 
 networks:
   cavgo-network:

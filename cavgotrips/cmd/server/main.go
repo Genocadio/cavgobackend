@@ -17,6 +17,7 @@ import (
 	"cavgotrips/internal/models"
 	"cavgotrips/internal/repository"
 	"cavgotrips/internal/router"
+	"cavgotrips/internal/search"
 	"cavgotrips/internal/service"
 
 	"github.com/joho/godotenv"
@@ -104,6 +105,27 @@ func main() {
 	routeService := service.NewRouteService(routeRepo, changeTrackingService)
 	tripService := service.NewTripService(tripRepo, routeRepo, locationRepo, cfg.VehicleServiceURL, rabbitMQService, sseService, sessionService, tripLogService, tripUpdateScheduler, tripUpdatePoster)
 
+	// Initialize search manager (Meilisearch with transparent fallback to SQL)
+	searchManager, err := search.NewManager(
+		cfg.SearchProvider,
+		cfg.Meilisearch.URL,
+		cfg.Meilisearch.APIKey,
+		locationRepo,
+		routeRepo,
+		tripRepo,
+		func(c *search.MeiliClient) *search.Indexer {
+			return search.NewIndexer(c, locationRepo, routeRepo, tripRepo)
+		},
+	)
+	if err != nil {
+		log.Fatal("Failed to initialize search manager:", err)
+	}
+
+	// Inject search manager into services
+	locationService.SetSearchManager(searchManager)
+	routeService.SetSearchManager(searchManager)
+	tripService.SetSearchManager(searchManager)
+
 	// Backfill remaining_seats for existing trips (sets to seats where null)
 	if err := tripService.BackfillRemainingSeats(); err != nil {
 		log.Printf("[TripInit] Failed to backfill remaining_seats: %v", err)
@@ -189,7 +211,7 @@ func main() {
 	syncHandler := handlers.NewSyncHandler(changeTrackingService, routeService, locationService)
 
 	// Setup router
-	r := router.Setup(locationHandler, routeHandler, tripHandler, sseHandler, syncHandler)
+	r := router.Setup(locationHandler, routeHandler, tripHandler, sseHandler, syncHandler, searchManager, cfg.AdminAPIKey)
 
 	// Strict Eureka lifecycle startup order.
 	eurekaService.EnsureRegistered()

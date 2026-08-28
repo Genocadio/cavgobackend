@@ -3,6 +3,8 @@ package service
 import (
 	"cavgotrips/internal/models"
 	"cavgotrips/internal/repository"
+	"cavgotrips/internal/search"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +28,7 @@ type TripService struct {
 	tripLogService    *TripLogService  // Add TripLogService
 	scheduler         *TripUpdateScheduler
 	poster            *TripUpdatePoster
+	search            *search.Manager
 	batchQueues       map[int64][]models.Trip // Company ID -> queue of trips for batch updates
 	batchQueueMu      sync.RWMutex
 	tripExchange      string // Fanout exchange name for trip events
@@ -57,6 +60,11 @@ func NewTripService(tripRepo repository.TripRepository, routeRepo repository.Rou
 // SetTripExchange sets the fanout exchange name for publishing trip events
 func (s *TripService) SetTripExchange(exchangeName string) {
 	s.tripExchange = exchangeName
+}
+
+// SetSearchManager provides the optional Meilisearch-backed search layer.
+func (s *TripService) SetSearchManager(m *search.Manager) {
+	s.search = m
 }
 
 // BackfillRemainingSeats sets remaining_seats to seats for existing trips where it is NULL
@@ -373,6 +381,8 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		}
 	}
 
+	s.syncTrip(createdTrip)
+
 	return createdTrip, nil
 }
 
@@ -533,6 +543,8 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 		}
 	}
 
+	s.syncTrip(updatedTrip)
+
 	return updatedTrip, nil
 }
 
@@ -595,6 +607,8 @@ func (s *TripService) StartTrip(id int64) (*models.Trip, error) {
 			s.poster.PostTripUpdate(companyID, startedTrip)
 		}
 	}
+
+	s.syncTrip(startedTrip)
 
 	return startedTrip, nil
 }
@@ -660,6 +674,8 @@ func (s *TripService) CompleteTrip(id int64) (*models.Trip, error) {
 			log.Printf("[AutoReturn] Failed to create return trip from completed trip %d: %v", completedTrip.ID, err)
 		}
 	}
+
+	s.syncTrip(completedTrip)
 
 	return completedTrip, nil
 }
@@ -748,6 +764,25 @@ func (s *TripService) GetTripsByFilters(origin, destination, company string) ([]
 }
 
 func (s *TripService) GetTripsByFiltersPaginated(origin, destination, company string, limit, offset int) ([]models.Trip, int64, error) {
+	if s.search != nil {
+		page := 1
+		if limit > 0 {
+			page = offset/limit + 1
+		}
+		trips, total, err := s.search.SearchTripsPaginated(context.Background(), search.TripFilters{
+			Origin:      origin,
+			Destination: destination,
+			Company:     company,
+		}, page, limit)
+		if err != nil {
+			return nil, 0, err
+		}
+		for i := range trips {
+			trips[i].Route.Waypoints = nil
+			adjustRouteForReversed(&trips[i])
+		}
+		return trips, total, nil
+	}
 	trips, total, err := s.tripRepo.GetTripsByFiltersPaginated(origin, destination, company, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -791,7 +826,7 @@ func (s *TripService) UpdateLatestVehicleTripAutoReturn(vehicleID int64, autoRet
 
 	updates := map[string]interface{}{
 		"auto_return": autoReturn,
-		"updated_at":   time.Now(),
+		"updated_at":  time.Now(),
 	}
 	if err := s.tripRepo.UpdateProgress(latestTrip.ID, updates); err != nil {
 		return nil, err
@@ -1089,6 +1124,8 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 		}
 	}
 
+	s.syncTrip(updatedTrip)
+
 	return updatedTrip, nil
 }
 
@@ -1101,6 +1138,26 @@ func (s *TripService) UpdateTripFields(id int64, updates map[string]interface{})
 func (s *TripService) GetTripsByFiltersWithCityRoute(origin, destination, company string, cityRoute *bool, limit, offset int) ([]models.Trip, int64, error) {
 	if cityRoute == nil {
 		return s.GetTripsByFiltersPaginated(origin, destination, company, limit, offset)
+	}
+	if s.search != nil {
+		page := 1
+		if limit > 0 {
+			page = offset/limit + 1
+		}
+		trips, total, err := s.search.SearchTripsPaginated(context.Background(), search.TripFilters{
+			Origin:      origin,
+			Destination: destination,
+			Company:     company,
+			CityRoute:   cityRoute,
+		}, page, limit)
+		if err != nil {
+			return nil, 0, err
+		}
+		for i := range trips {
+			trips[i].Route.Waypoints = nil
+			adjustRouteForReversed(&trips[i])
+		}
+		return trips, total, nil
 	}
 	trips, total, err := s.tripRepo.GetTripsByFiltersWithCityRoute(origin, destination, company, *cityRoute, limit, offset)
 	if err != nil {
@@ -1168,6 +1225,8 @@ func (s *TripService) DeleteTrip(id int64) error {
 			}
 		}
 
+		s.syncTrip(updatedTrip)
+
 		return nil
 	} else if trip.Status == "CANCELLED" {
 		// Get trip with relations for logging before deletion
@@ -1189,11 +1248,23 @@ func (s *TripService) DeleteTrip(id int64) error {
 			})
 		}
 
+		if s.search != nil {
+			s.search.RemoveTrip(id)
+		}
+
 		return nil
 	} else {
 		// Cannot delete COMPLETED or NOT_COMPLETED trips
 		return errors.New("cannot delete completed or not-completed trips")
 	}
+}
+
+// syncTrip pushes a changed trip into the search index (best-effort, async).
+func (s *TripService) syncTrip(trip *models.Trip) {
+	if s.search == nil || trip == nil {
+		return
+	}
+	s.search.SyncTrip(*trip)
 }
 
 // UpdateTripFromMQTT updates a trip with data from MQTT service without publishing back to RabbitMQ
@@ -1377,6 +1448,8 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 			log.Printf("[AutoReturn] Failed to create return trip from MQTT completion for trip %d: %v", updatedTrip.ID, err)
 		}
 	}
+
+	s.syncTrip(updatedTrip)
 
 	return updatedTrip, nil
 }

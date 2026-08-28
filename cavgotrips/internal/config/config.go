@@ -13,6 +13,15 @@ type Config struct {
 	RabbitMQ          RabbitMQConfig
 	StoreLogs         bool
 	TripUpdateBaseURL string
+	// Search configuration (Meilisearch-backed search, optional)
+	Meilisearch    MeiliConfig
+	SearchProvider string // auto (default) | sql | meili
+	AdminAPIKey    string // used to gate /admin/* endpoints
+}
+
+type MeiliConfig struct {
+	URL    string
+	APIKey string
 }
 
 type EurekaConfig struct {
@@ -55,6 +64,12 @@ func Load() *Config {
 		},
 		StoreLogs:         getEnv("STORE_LOGS", "false") == "true",
 		TripUpdateBaseURL: getEnv("TRIP_UPDATE_BASE_URL", ""),
+		Meilisearch: MeiliConfig{
+			URL:    getEnv("MEILISEARCH_URL", "http://localhost:7700"),
+			APIKey: getEnv("MEILISEARCH_API_KEY", ""),
+		},
+		SearchProvider: getEnv("SEARCH_PROVIDER", "auto"),
+		AdminAPIKey:    getEnv("ADMIN_API_KEY", ""),
 	}
 }
 

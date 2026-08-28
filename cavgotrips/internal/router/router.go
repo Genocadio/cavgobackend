@@ -3,6 +3,8 @@ package router
 import (
 	"cavgotrips/internal/handlers"
 	"cavgotrips/internal/middleware"
+	"cavgotrips/internal/search"
+	"cavgotrips/pkg/utils"
 	"encoding/json"
 	"net/http"
 
@@ -15,6 +17,8 @@ func Setup(
 	tripHandler *handlers.TripHandler,
 	sseHandler *handlers.SSEHandler,
 	syncHandler *handlers.SyncHandler,
+	searchManager *search.Manager,
+	adminAPIKey string,
 ) *mux.Router {
 	r := mux.NewRouter()
 
@@ -22,10 +26,27 @@ func Setup(
 	r.Use(middleware.CORSMiddleware)
 
 	// Health check endpoint for Eureka
-	r.HandleFunc("/health", healthCheck).Methods("GET")
+	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		healthCheck(w, r, searchManager)
+	}).Methods("GET")
 
 	// Root endpoint for service discovery
 	r.HandleFunc("/", rootHandler).Methods("GET")
+
+	// Admin search endpoints
+	if searchManager != nil {
+		searchHandler := handlers.NewSearchHandler(searchManager)
+		adminAuth := func(next http.HandlerFunc) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				if adminAPIKey == "" || r.Header.Get("X-Admin-Key") != adminAPIKey {
+					utils.ErrorResponse(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				next(w, r)
+			}
+		}
+		r.HandleFunc("/admin/search/reindex", adminAuth(searchHandler.Reindex)).Methods("POST")
+	}
 
 	// Location endpoints
 	r.HandleFunc("/locations", locationHandler.CreateLocation).Methods("POST")
@@ -91,13 +112,22 @@ func Setup(
 	return r
 }
 
-func healthCheck(w http.ResponseWriter, r *http.Request) {
+func healthCheck(w http.ResponseWriter, r *http.Request, searchManager *search.Manager) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	body := map[string]string{
 		"status":  "UP",
 		"service": "cavgotrips",
-	})
+	}
+	if searchManager != nil {
+		body["search_provider"] = searchManager.ActiveProvider()
+		if searchManager.Enabled() {
+			body["search_enabled"] = "enabled"
+		} else {
+			body["search_enabled"] = "disabled"
+		}
+	}
+	json.NewEncoder(w).Encode(body)
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {

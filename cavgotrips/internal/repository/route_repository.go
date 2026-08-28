@@ -4,6 +4,7 @@ import (
 	"cavgotrips/internal/models"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -432,42 +433,7 @@ func (r *routeRepository) FilterByProvincesPaginated(originProvince, destination
 
 func (r *routeRepository) SearchAndFilter(origin, destination string, cityRoute *bool, originProvince, destinationProvince string) ([]models.Route, error) {
 	var routes []models.Route
-	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
-
-	// Add origin search
-	if origin != "" {
-		query = query.Joins("JOIN locations origin ON routes.origin_id = origin.id").
-			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)",
-				"%"+origin+"%", "%"+origin+"%")
-	}
-
-	// Add destination search
-	if destination != "" {
-		query = query.Joins("JOIN locations destination ON routes.destination_id = destination.id").
-			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)",
-				"%"+destination+"%", "%"+destination+"%")
-	}
-
-	// Add city route filter
-	if cityRoute != nil {
-		query = query.Where("city_route = ?", *cityRoute)
-	}
-
-	// Add origin province filter
-	if originProvince != "" {
-		if origin == "" {
-			query = query.Joins("JOIN locations origin ON routes.origin_id = origin.id")
-		}
-		query = query.Where("LOWER(origin.province) LIKE LOWER(?)", "%"+originProvince+"%")
-	}
-
-	// Add destination province filter
-	if destinationProvince != "" {
-		if destination == "" {
-			query = query.Joins("JOIN locations destination ON routes.destination_id = destination.id")
-		}
-		query = query.Where("LOWER(destination.province) LIKE LOWER(?)", "%"+destinationProvince+"%")
-	}
+	query := buildRouteSearchQuery(r.db, origin, destination, cityRoute, originProvince, destinationProvince)
 
 	err := query.Find(&routes).Error
 	return routes, err
@@ -477,90 +443,102 @@ func (r *routeRepository) SearchAndFilterPaginated(origin, destination string, c
 	var routes []models.Route
 	var total int64
 
-	// Build base query for counting
-	countQuery := r.db.Model(&models.Route{})
-
-	// Add origin search
-	if origin != "" {
-		countQuery = countQuery.Joins("JOIN locations origin ON routes.origin_id = origin.id").
-			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)",
-				"%"+origin+"%", "%"+origin+"%")
-	}
-
-	// Add destination search
-	if destination != "" {
-		countQuery = countQuery.Joins("JOIN locations destination ON routes.destination_id = destination.id").
-			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)",
-				"%"+destination+"%", "%"+destination+"%")
-	}
-
-	// Add city route filter
-	if cityRoute != nil {
-		countQuery = countQuery.Where("city_route = ?", *cityRoute)
-	}
-
-	// Add origin province filter
-	if originProvince != "" {
-		if origin == "" {
-			countQuery = countQuery.Joins("JOIN locations origin ON routes.origin_id = origin.id")
-		}
-		countQuery = countQuery.Where("LOWER(origin.province) LIKE LOWER(?)", "%"+originProvince+"%")
-	}
-
-	// Add destination province filter
-	if destinationProvince != "" {
-		if destination == "" {
-			countQuery = countQuery.Joins("JOIN locations destination ON routes.destination_id = destination.id")
-		}
-		countQuery = countQuery.Where("LOWER(destination.province) LIKE LOWER(?)", "%"+destinationProvince+"%")
-	}
-
-	// Get total count
-	err := countQuery.Count(&total).Error
-	if err != nil {
+	// Count against the same joined, filtered set
+	countQuery := buildRouteSearchFilters(r.db.Model(&models.Route{}), origin, destination, cityRoute, originProvince, destinationProvince)
+	if err := countQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// Build query for results
-	query := r.db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location")
-
-	// Add origin search
-	if origin != "" {
-		query = query.Joins("JOIN locations origin ON routes.origin_id = origin.id").
-			Where("LOWER(origin.custom_name) LIKE LOWER(?) OR LOWER(origin.google_place_name) LIKE LOWER(?)",
-				"%"+origin+"%", "%"+origin+"%")
-	}
-
-	// Add destination search
-	if destination != "" {
-		query = query.Joins("JOIN locations destination ON routes.destination_id = destination.id").
-			Where("LOWER(destination.custom_name) LIKE LOWER(?) OR LOWER(destination.google_place_name) LIKE LOWER(?)",
-				"%"+destination+"%", "%"+destination+"%")
-	}
-
-	// Add city route filter
-	if cityRoute != nil {
-		query = query.Where("city_route = ?", *cityRoute)
-	}
-
-	// Add origin province filter
-	if originProvince != "" {
-		if origin == "" {
-			query = query.Joins("JOIN locations origin ON routes.origin_id = origin.id")
-		}
-		query = query.Where("LOWER(origin.province) LIKE LOWER(?)", "%"+originProvince+"%")
-	}
-
-	// Add destination province filter
-	if destinationProvince != "" {
-		if destination == "" {
-			query = query.Joins("JOIN locations destination ON routes.destination_id = destination.id")
-		}
-		query = query.Where("LOWER(destination.province) LIKE LOWER(?)", "%"+destinationProvince+"%")
-	}
-
-	err = query.Limit(limit).Offset(offset).Find(&routes).Error
+	query := buildRouteSearchQuery(r.db, origin, destination, cityRoute, originProvince, destinationProvince)
+	err := query.Limit(limit).Offset(offset).Find(&routes).Error
 	return routes, total, err
+}
+
+// buildRouteSearchQuery returns a query with the origin/destination locations
+// always joined under distinct aliases (origin_loc/destination_loc) and the
+// relevance-ordered search filters applied. Reusing a single join alias per
+// side removes the double-join risk of the previous conditional joins.
+func buildRouteSearchQuery(db *gorm.DB, origin, destination string, cityRoute *bool, originProvince, destinationProvince string) *gorm.DB {
+	return buildRouteSearchFilters(
+		db.Preload("Origin").Preload("Destination").Preload("Waypoints.Location"),
+		origin, destination, cityRoute, originProvince, destinationProvince,
+	).Order(routeRelevanceOrder(origin, destination))
+}
+
+// buildRouteSearchFilters applies the joins (always both sides, distinct
+// aliases) and WHERE clauses. It does NOT add Preload or ORDER so callers can
+// reuse it for COUNT queries.
+func buildRouteSearchFilters(db *gorm.DB, origin, destination string, cityRoute *bool, originProvince, destinationProvince string) *gorm.DB {
+	query := db.
+		Joins("JOIN locations origin_loc ON routes.origin_id = origin_loc.id").
+		Joins("JOIN locations destination_loc ON routes.destination_id = destination_loc.id")
+
+	if origin != "" {
+		query = query.Where("LOWER(origin_loc.custom_name) LIKE LOWER(?) OR LOWER(origin_loc.google_place_name) LIKE LOWER(?)",
+			"%"+origin+"%", "%"+origin+"%")
+	}
+
+	if destination != "" {
+		query = query.Where("LOWER(destination_loc.custom_name) LIKE LOWER(?) OR LOWER(destination_loc.google_place_name) LIKE LOWER(?)",
+			"%"+destination+"%", "%"+destination+"%")
+	}
+
+	if cityRoute != nil {
+		query = query.Where("routes.city_route = ?", *cityRoute)
+	}
+
+	if originProvince != "" {
+		query = query.Where("LOWER(origin_loc.province) LIKE LOWER(?)", "%"+originProvince+"%")
+	}
+
+	if destinationProvince != "" {
+		query = query.Where("LOWER(destination_loc.province) LIKE LOWER(?)", "%"+destinationProvince+"%")
+	}
+
+	return query
+}
+
+// routeRelevanceOrder ranks matching routes like the location search: custom
+// name matches outrank Google place name matches, and word-start / prefix
+// matches outrank contains matches. Origin matches are ranked below unbucketed
+// destination matches so searching either side is deterministic.
+func routeRelevanceOrder(origin, destination string) string {
+	var clauses []string
+	if origin != "" {
+		clauses = append(clauses, routeSideRank("origin_loc", origin, 0))
+	}
+	if destination != "" {
+		clauses = append(clauses, routeSideRank("destination_loc", destination, 20))
+	}
+	if len(clauses) == 0 {
+		return "routes.id ASC"
+	}
+	return "CASE\n" + strings.Join(clauses, "\n") + "\nELSE 99\nEND, origin_loc.custom_name, destination_loc.custom_name"
+}
+
+// routeSideRank produces the WHEN clauses for one side of the route search.
+// Rank offsets: custom name prefix=0, word-start=1, contains=2; google place
+// name prefix=10, word-start=11, contains=12 (only when the custom name does
+// not already contain the term).
+func routeSideRank(alias, term string, offset int) string {
+	lower := strings.ToLower(escapeLikeTerm(term))
+	start := lower + "%"
+	wordStart := "% " + lower + "%"
+	contains := "%" + lower + "%"
+	return fmt.Sprintf(`
+		WHEN LOWER(%[1]s.custom_name) LIKE '%[2]s' THEN %[3]d
+		WHEN LOWER(%[1]s.custom_name) LIKE '%[4]s' OR LOWER(%[1]s.custom_name) LIKE '%[2]s' THEN %[5]d
+		WHEN LOWER(%[1]s.custom_name) LIKE '%[6]s' THEN %[7]d
+		WHEN LOWER(%[1]s.google_place_name) LIKE '%[2]s' AND (%[1]s.custom_name IS NULL OR LOWER(%[1]s.custom_name) NOT LIKE '%[6]s') THEN %[8]d
+		WHEN LOWER(%[1]s.google_place_name) LIKE '%[4]s' AND (%[1]s.custom_name IS NULL OR LOWER(%[1]s.custom_name) NOT LIKE '%[6]s') THEN %[9]d
+		WHEN LOWER(%[1]s.google_place_name) LIKE '%[6]s' AND (%[1]s.custom_name IS NULL OR LOWER(%[1]s.custom_name) NOT LIKE '%[6]s') THEN %[10]d`,
+		alias, start, offset, wordStart, offset+1, contains, offset+2, offset+10, offset+11, offset+12)
+}
+
+// escapeLikeTerm escapes LIKE wildcards so user terms match literally inside
+// the ranking CASE (the WHERE clause remains fully parameterized).
+func escapeLikeTerm(term string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`, `'`, `''`).Replace(term)
 }
 
 func (r *routeRepository) GetRoutesByPriceRange(minPrice, maxPrice float64) ([]models.Route, error) {

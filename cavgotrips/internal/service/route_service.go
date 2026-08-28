@@ -1,13 +1,18 @@
 package service
 
 import (
+	"context"
+	"log"
+
 	"cavgotrips/internal/models"
 	"cavgotrips/internal/repository"
+	"cavgotrips/internal/search"
 )
 
 type RouteService struct {
 	repo                  repository.RouteRepository
 	changeTrackingService *ChangeTrackingService
+	search                *search.Manager
 }
 
 func NewRouteService(repo repository.RouteRepository, changeTrackingService *ChangeTrackingService) *RouteService {
@@ -15,6 +20,11 @@ func NewRouteService(repo repository.RouteRepository, changeTrackingService *Cha
 		repo:                  repo,
 		changeTrackingService: changeTrackingService,
 	}
+}
+
+// SetSearchManager provides the optional Meilisearch-backed search layer.
+func (s *RouteService) SetSearchManager(m *search.Manager) {
+	s.search = m
 }
 
 func (s *RouteService) CreateRoute(route *models.Route) error {
@@ -37,6 +47,8 @@ func (s *RouteService) CreateRoute(route *models.Route) error {
 			// Don't fail the operation, just log the error
 		}
 	}
+
+	s.syncRoute(route.ID)
 
 	return nil
 }
@@ -86,6 +98,19 @@ func (s *RouteService) SearchAndFilter(origin, destination string, cityRoute *bo
 }
 
 func (s *RouteService) SearchAndFilterPaginated(origin, destination string, cityRoute *bool, originProvince, destinationProvince string, limit, offset int) ([]models.Route, int64, error) {
+	if s.search != nil {
+		page := 1
+		if limit > 0 {
+			page = offset/limit + 1
+		}
+		return s.search.SearchRoutesPaginated(context.Background(), search.RouteFilters{
+			Origin:              origin,
+			Destination:         destination,
+			CityRoute:           cityRoute,
+			OriginProvince:      originProvince,
+			DestinationProvince: destinationProvince,
+		}, page, limit)
+	}
 	return s.repo.SearchAndFilterPaginated(origin, destination, cityRoute, originProvince, destinationProvince, limit, offset)
 }
 
@@ -110,6 +135,8 @@ func (s *RouteService) UpdateRoute(route *models.Route) error {
 		}
 	}
 
+	s.syncRoute(route.ID)
+
 	return nil
 }
 
@@ -126,7 +153,25 @@ func (s *RouteService) DeleteRoute(id int64) error {
 		}
 	}
 
+	if s.search != nil {
+		s.search.RemoveRoute(id)
+	}
+
 	return nil
+}
+
+// syncRoute refreshes the route from the database (with relations) and pushes
+// it into the search index. Best-effort, async.
+func (s *RouteService) syncRoute(id int64) {
+	if s.search == nil {
+		return
+	}
+	route, err := s.repo.GetByID(id)
+	if err != nil {
+		log.Printf("[search] sync route %d: %v", id, err)
+		return
+	}
+	s.search.SyncRoute(*route)
 }
 
 func (s *RouteService) GetRoutesByPriceRange(minPrice, maxPrice float64) ([]models.Route, error) {

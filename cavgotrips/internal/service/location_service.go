@@ -1,15 +1,19 @@
 package service
 
 import (
-	"cavgotrips/internal/models"
-	"cavgotrips/internal/repository"
+	"context"
 	"log"
 	"strings"
+
+	"cavgotrips/internal/models"
+	"cavgotrips/internal/repository"
+	"cavgotrips/internal/search"
 )
 
 type LocationService struct {
 	repo                  repository.LocationRepository
 	changeTrackingService *ChangeTrackingService
+	search                *search.Manager
 }
 
 func NewLocationService(repo repository.LocationRepository, changeTrackingService *ChangeTrackingService) *LocationService {
@@ -17,6 +21,11 @@ func NewLocationService(repo repository.LocationRepository, changeTrackingServic
 		repo:                  repo,
 		changeTrackingService: changeTrackingService,
 	}
+}
+
+// SetSearchManager provides the optional Meilisearch-backed search layer.
+func (s *LocationService) SetSearchManager(m *search.Manager) {
+	s.search = m
 }
 
 // In internal/service/location_service.go
@@ -114,6 +123,11 @@ func (s *LocationService) CreateLocation(location *models.Location) error {
 		}
 	}
 
+	// Write-through index sync (best-effort, async)
+	if s.search != nil {
+		s.search.SyncLocation(*location)
+	}
+
 	return nil
 }
 
@@ -129,10 +143,18 @@ func (s *LocationService) SearchLocations(searchTerm string) ([]models.Location,
 	if searchTerm == "" {
 		return s.repo.GetAll()
 	}
-	return s.repo.Search(searchTerm)
+	locations, _, err := s.SearchLocationsPaginated(searchTerm, 20, 0)
+	return locations, err
 }
 
 func (s *LocationService) SearchLocationsPaginated(searchTerm string, limit, offset int) ([]models.Location, int64, error) {
+	if s.search != nil {
+		page := 1
+		if limit > 0 {
+			page = offset/limit + 1
+		}
+		return s.search.SearchLocationsPaginated(context.Background(), searchTerm, page, limit)
+	}
 	if searchTerm == "" {
 		return s.repo.GetAllPaginated(limit, offset)
 	}
@@ -296,6 +318,11 @@ func (s *LocationService) UpdateLocation(id int64, location *models.Location) er
 		}
 	}
 
+	// Write-through index sync (best-effort, async)
+	if s.search != nil {
+		s.search.SyncLocation(*location)
+	}
+
 	return nil
 }
 
@@ -316,6 +343,11 @@ func (s *LocationService) DeleteLocation(id int64) error {
 			log.Printf("ERROR: Service: Failed to record location deletion for ID: %d, error: %v", id, err)
 			// Don't fail the operation, just log the error
 		}
+	}
+
+	// Remove from the search index (best-effort, async)
+	if s.search != nil {
+		s.search.RemoveLocation(id)
 	}
 
 	return nil

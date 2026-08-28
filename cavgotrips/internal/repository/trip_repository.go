@@ -124,199 +124,23 @@ func (r *tripRepository) GetTripsByFilters(origin, destination, company string) 
 		return nil, err
 	}
 
-	// Remove passed waypoints and drop trips that only have the destination left
-	filteredTrips := make([]models.Trip, 0, len(trips))
-	for _, trip := range trips {
-		filteredWaypoints := make([]models.TripWaypoint, 0, len(trip.Waypoints))
+	filteredTrips := FilterTripsBySearch(trips, origin, destination, company, false)
 
-		for _, wp := range trip.Waypoints {
-			if wp.IsPassed {
-				continue
-			}
-			filteredWaypoints = append(filteredWaypoints, wp)
-		}
-
-		hasUnpassedWaypoints := len(filteredWaypoints) > 0
-
-		trip.Waypoints = filteredWaypoints
-
-		// Only surface in-progress trips that still have pending waypoints
-		if trip.Status == "IN_PROGRESS" && !hasUnpassedWaypoints {
-			continue
-		}
-
-		// Filter by origin/destination in Go (route or any non-passed waypoint)
-		matchOrigin := false
-		matchDestination := false
-
-		// Track waypoint order if both are found as waypoints
-		originWaypointOrder := -1
-		destinationWaypointOrder := -1
-
-		if origin == "" {
-			matchOrigin = true
-		} else {
-			// Check route origin using enhanced search (name or code)
-			if checkLocationMatch(&trip.Route.Origin, origin) {
-				matchOrigin = true
-			}
-			// Check waypoints using enhanced search
-			if !matchOrigin {
-				for _, wp := range trip.Waypoints {
-					if checkLocationMatch(&wp.Location, origin) {
-						matchOrigin = true
-						originWaypointOrder = wp.Order
-						break
-					}
-				}
-			}
-		}
-
-		if destination == "" {
-			matchDestination = true
-		} else {
-			// Check route destination using enhanced search (name or code)
-			if checkLocationMatch(&trip.Route.Destination, destination) {
-				matchDestination = true
-			}
-			// Check waypoints using enhanced search
-			if !matchDestination {
-				for _, wp := range trip.Waypoints {
-					if checkLocationMatch(&wp.Location, destination) {
-						matchDestination = true
-						destinationWaypointOrder = wp.Order
-						break
-					}
-				}
-			}
-		}
-
-		// If both origin and destination are found as waypoints, check order
-		if matchOrigin && matchDestination {
-			if originWaypointOrder != -1 && destinationWaypointOrder != -1 {
-				if originWaypointOrder < destinationWaypointOrder {
-					filteredTrips = append(filteredTrips, trip)
-				}
-			} else {
-				// If not both are waypoints, keep current logic
-				filteredTrips = append(filteredTrips, trip)
-			}
-		}
-	}
-
-	filteredTrips = sortTripsByMatchScore(filteredTrips, origin, destination, company)
-
-	return filteredTrips, nil
+	return SortTripsByMatchScore(filteredTrips, origin, destination, company), nil
 }
 
 func (r *tripRepository) GetTripsByFiltersPaginated(origin, destination, company string, limit, offset int) ([]models.Trip, int64, error) {
-	var trips []models.Trip
-	db := r.db.Preload("Route.Origin").Preload("Route.Destination").Preload("Waypoints.Location").
-		Where("status NOT IN ?", []string{"CANCELLED", "COMPLETED"}).
-		Order("created_at DESC")
-
-	if company != "" {
-		db = db.Where("LOWER(trips.vehicle->>'company_name') LIKE ?", "%"+strings.ToLower(company)+"%")
-	}
-
-	var total int64
-	db.Model(&models.Trip{}).Count(&total)
-
-	if limit > 0 {
-		db = db.Limit(limit)
-	}
-	if offset > 0 {
-		db = db.Offset(offset)
-	}
-
-	err := db.Find(&trips).Error
+	// Filter (and sort) before paginating so that `total` and the returned page
+	// slice describe the same filtered result set. Applying SQL limit/offset
+	// before the in-memory filter would make the total unreachable through
+	// paging.
+	trips, err := r.GetTripsByFilters(origin, destination, company)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// Remove passed waypoints and drop trips that only have the destination left
-	filteredTrips := make([]models.Trip, 0, len(trips))
-	for _, trip := range trips {
-		filteredWaypoints := make([]models.TripWaypoint, 0, len(trip.Waypoints))
-
-		for _, wp := range trip.Waypoints {
-			if wp.IsPassed {
-				continue
-			}
-			filteredWaypoints = append(filteredWaypoints, wp)
-		}
-
-		hasUnpassedWaypoints := len(filteredWaypoints) > 0
-
-		trip.Waypoints = filteredWaypoints
-
-		// Only surface in-progress trips that still have pending waypoints
-		if trip.Status == "IN_PROGRESS" && !hasUnpassedWaypoints {
-			continue
-		}
-
-		// Filter by origin/destination in Go (route or any non-passed waypoint)
-		matchOrigin := false
-		matchDestination := false
-
-		// Track waypoint order if both are found as waypoints
-		originWaypointOrder := -1
-		destinationWaypointOrder := -1
-
-		if origin == "" {
-			matchOrigin = true
-		} else {
-			// Check route origin using enhanced search (name or code)
-			if checkLocationMatch(&trip.Route.Origin, origin) {
-				matchOrigin = true
-			}
-			// Check waypoints using enhanced search
-			if !matchOrigin {
-				for _, wp := range trip.Waypoints {
-					if checkLocationMatch(&wp.Location, origin) {
-						matchOrigin = true
-						originWaypointOrder = wp.Order
-						break
-					}
-				}
-			}
-		}
-
-		if destination == "" {
-			matchDestination = true
-		} else {
-			// Check route destination using enhanced search (name or code)
-			if checkLocationMatch(&trip.Route.Destination, destination) {
-				matchDestination = true
-			}
-			// Check waypoints using enhanced search
-			if !matchDestination {
-				for _, wp := range trip.Waypoints {
-					if checkLocationMatch(&wp.Location, destination) {
-						matchDestination = true
-						destinationWaypointOrder = wp.Order
-						break
-					}
-				}
-			}
-		}
-
-		// If both origin and destination are found as waypoints, check order
-		if matchOrigin && matchDestination {
-			if originWaypointOrder != -1 && destinationWaypointOrder != -1 {
-				if originWaypointOrder < destinationWaypointOrder {
-					filteredTrips = append(filteredTrips, trip)
-				}
-			} else {
-				// If not both are waypoints, keep current logic
-				filteredTrips = append(filteredTrips, trip)
-			}
-		}
-	}
-
-	filteredTrips = sortTripsByMatchScore(filteredTrips, origin, destination, company)
-
-	return filteredTrips, total, nil
+	page, total := PaginateTrips(trips, limit, offset)
+	return page, total, nil
 }
 
 func (r *tripRepository) GetTripsByVehicleID(vehicleID int64) ([]models.Trip, error) {
@@ -532,109 +356,18 @@ func (r *tripRepository) GetTripsByFiltersWithCityRoute(origin, destination, com
 		db = db.Where("LOWER(trips.vehicle->>'company_name') LIKE ?", "%"+strings.ToLower(company)+"%")
 	}
 
-	var total int64
-	db.Model(&models.Trip{}).Count(&total)
-
-	if limit > 0 {
-		db = db.Limit(limit)
-	}
-	if offset > 0 {
-		db = db.Offset(offset)
-	}
-
 	err := db.Find(&trips).Error
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// Remove passed waypoints and drop trips that only have the destination left
-	filteredTrips := make([]models.Trip, 0, len(trips))
-	for _, trip := range trips {
-		filteredWaypoints := make([]models.TripWaypoint, 0, len(trip.Waypoints))
+	// Filter before paginating so total reflects the filtered result set.
+	// In-progress trips that directly match origin+destination are skipped.
+	filteredTrips := FilterTripsBySearch(trips, origin, destination, company, true)
+	sortedTrips := SortTripsByMatchScore(filteredTrips, origin, destination, company)
 
-		for _, wp := range trip.Waypoints {
-			if wp.IsPassed {
-				continue
-			}
-			filteredWaypoints = append(filteredWaypoints, wp)
-		}
-
-		hasUnpassedWaypoints := len(filteredWaypoints) > 0
-
-		trip.Waypoints = filteredWaypoints
-
-		// Only surface in-progress trips that still have pending waypoints
-		if trip.Status == "IN_PROGRESS" && !hasUnpassedWaypoints {
-			continue
-		}
-
-		// Filter by origin/destination in Go (route or any non-passed waypoint)
-		matchOrigin := false
-		matchDestination := false
-
-		// Track waypoint order if both are found as waypoints
-		originWaypointOrder := -1
-		destinationWaypointOrder := -1
-
-		if origin == "" {
-			matchOrigin = true
-		} else {
-			// Check route origin using enhanced search (name or code)
-			if checkLocationMatch(&trip.Route.Origin, origin) {
-				matchOrigin = true
-			}
-			// Check waypoints using enhanced search
-			if !matchOrigin {
-				for _, wp := range trip.Waypoints {
-					if checkLocationMatch(&wp.Location, origin) {
-						matchOrigin = true
-						originWaypointOrder = wp.Order
-						break
-					}
-				}
-			}
-		}
-
-		if destination == "" {
-			matchDestination = true
-		} else {
-			// Check route destination using enhanced search (name or code)
-			if checkLocationMatch(&trip.Route.Destination, destination) {
-				matchDestination = true
-			}
-			// Check waypoints using enhanced search
-			if !matchDestination {
-				for _, wp := range trip.Waypoints {
-					if checkLocationMatch(&wp.Location, destination) {
-						matchDestination = true
-						destinationWaypointOrder = wp.Order
-						break
-					}
-				}
-			}
-		}
-
-		// If both origin and destination are found as waypoints, check order
-		if matchOrigin && matchDestination {
-			// Skip in-progress trips for direct origin/destination results
-			if trip.Status == "IN_PROGRESS" {
-				continue
-			}
-
-			if originWaypointOrder != -1 && destinationWaypointOrder != -1 {
-				if originWaypointOrder < destinationWaypointOrder {
-					filteredTrips = append(filteredTrips, trip)
-				}
-			} else {
-				// If not both are waypoints, keep current logic
-				filteredTrips = append(filteredTrips, trip)
-			}
-		}
-	}
-
-	filteredTrips = sortTripsByMatchScore(filteredTrips, origin, destination, company)
-
-	return filteredTrips, int64(len(filteredTrips)), nil
+	page, total := PaginateTrips(sortedTrips, limit, offset)
+	return page, total, nil
 }
 
 // containsIgnoreCase checks if substr is in s, case-insensitive
@@ -676,6 +409,113 @@ func checkLocationMatch(location *models.Location, searchTerm string) bool {
 		(location.GooglePlaceName != nil && containsIgnoreCase(*location.GooglePlaceName, searchTerm))
 }
 
+// FilterTripsBySearch applies the in-memory filtering shared by every trip
+// search path (SQL and Meilisearch):
+//   - removes waypoints already passed;
+//   - drops in-progress trips that have no pending waypoints left;
+//   - keeps trips whose route origin/destination or a remaining waypoint
+//     matches the given origin/destination terms (respecting waypoint order
+//     when both match as waypoints);
+//   - when skipInProgressOnDirectMatch is true (city-route search), in-progress
+//     trips whose origin and destination both match directly are excluded.
+func FilterTripsBySearch(trips []models.Trip, origin, destination, company string, skipInProgressOnDirectMatch bool) []models.Trip {
+	filtered := make([]models.Trip, 0, len(trips))
+	for _, trip := range trips {
+		filteredWaypoints := make([]models.TripWaypoint, 0, len(trip.Waypoints))
+		for _, wp := range trip.Waypoints {
+			if wp.IsPassed {
+				continue
+			}
+			filteredWaypoints = append(filteredWaypoints, wp)
+		}
+
+		hasUnpassedWaypoints := len(filteredWaypoints) > 0
+		trip.Waypoints = filteredWaypoints
+
+		// Only surface in-progress trips that still have pending waypoints
+		if trip.Status == "IN_PROGRESS" && !hasUnpassedWaypoints {
+			continue
+		}
+
+		// Company filter (already enforced in SQL; kept for the Meili path).
+		// Empty CompanyName defers to the caller's pre-filter.
+		if company != "" && trip.Vehicle.CompanyName != "" && !containsIgnoreCase(trip.Vehicle.CompanyName, company) {
+			continue
+		}
+
+		matchOrigin := origin == ""
+		matchDestination := destination == ""
+
+		// Track waypoint order if both are found as waypoints
+		originWaypointOrder := -1
+		destinationWaypointOrder := -1
+
+		if !matchOrigin {
+			// Check route origin using enhanced search (name or code)
+			if checkLocationMatch(&trip.Route.Origin, origin) {
+				matchOrigin = true
+			}
+			// Check waypoints using enhanced search
+			if !matchOrigin {
+				for _, wp := range trip.Waypoints {
+					if checkLocationMatch(&wp.Location, origin) {
+						matchOrigin = true
+						originWaypointOrder = wp.Order
+						break
+					}
+				}
+			}
+		}
+
+		if !matchDestination {
+			// Check route destination using enhanced search (name or code)
+			if checkLocationMatch(&trip.Route.Destination, destination) {
+				matchDestination = true
+			}
+			// Check waypoints using enhanced search
+			if !matchDestination {
+				for _, wp := range trip.Waypoints {
+					if checkLocationMatch(&wp.Location, destination) {
+						matchDestination = true
+						destinationWaypointOrder = wp.Order
+						break
+					}
+				}
+			}
+		}
+
+		// If both origin and destination are found as waypoints, check order
+		if matchOrigin && matchDestination {
+			if skipInProgressOnDirectMatch && trip.Status == "IN_PROGRESS" {
+				continue
+			}
+			if originWaypointOrder != -1 && destinationWaypointOrder != -1 {
+				if originWaypointOrder < destinationWaypointOrder {
+					filtered = append(filtered, trip)
+				}
+			} else {
+				// If not both are waypoints, keep current logic
+				filtered = append(filtered, trip)
+			}
+		}
+	}
+	return filtered
+}
+
+// PaginateTrips slices an already-filtered (and sorted) trip slice into a page
+// and returns the page alongside the total count of the full set.
+func PaginateTrips(trips []models.Trip, limit, offset int) ([]models.Trip, int64) {
+	total := int64(len(trips))
+	if offset >= len(trips) {
+		return []models.Trip{}, total
+	}
+	end := offset + limit
+	if limit <= 0 || end > len(trips) {
+		end = len(trips)
+	}
+	return trips[offset:end], total
+}
+
 // matchScore returns (score, position):
 // score 3: whole field starts with query
 // score 2: any word starts with query (position = word index)
@@ -699,8 +539,8 @@ func matchScore(field, query string) (int, int) {
 	return 0, -1
 }
 
-// sortTripsByMatchScore sorts trips by the highest match score for origin, destination, or company, then by position, then stable
-func sortTripsByMatchScore(trips []models.Trip, origin, destination, company string) []models.Trip {
+// SortTripsByMatchScore sorts trips by the highest match score for origin, destination, or company, then by position, then stable
+func SortTripsByMatchScore(trips []models.Trip, origin, destination, company string) []models.Trip {
 	type scoredTrip struct {
 		trip    models.Trip
 		score   int
