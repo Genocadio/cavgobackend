@@ -8,7 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.graphql.server.WebGraphQlRequest;
 import org.springframework.graphql.server.WebGraphQlResponse;
 import org.springframework.graphql.server.WebSocketGraphQlInterceptor;
-import org.springframework.graphql.server.WebSocketGraphQlSession;
+import org.springframework.graphql.server.WebSocketSessionInfo;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -35,7 +35,7 @@ public class SecurityWebSocketGraphQlInterceptor implements WebSocketGraphQlInte
     private final UserRepository userRepository;
 
     @Override
-    public Mono<Object> handleConnectionInitialization(WebSocketGraphQlSession session, Map<String, Object> connectionInitPayload) {
+    public Mono<Object> handleConnectionInitialization(WebSocketSessionInfo session, Map<String, Object> connectionInitPayload) {
         if (connectionInitPayload == null || connectionInitPayload.isEmpty()) {
             log.debug("WebSocket connection_init without payload");
             return Mono.empty();
