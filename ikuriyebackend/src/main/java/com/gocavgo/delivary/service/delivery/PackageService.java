@@ -152,13 +152,6 @@ public class PackageService {
         savePerson(pkg.getId(), input.sender());
         savePerson(pkg.getId(), input.receiver());
 
-        // Every office id supplied on a location must reference a valid office
-        if (input.origin() != null) {
-            validationService.validateOffice(input.origin().officeId());
-        }
-        if (input.destination() != null) {
-            validationService.validateOffice(input.destination().officeId());
-        }
         saveLocation(pkg.getId(), input.origin());
         saveLocation(pkg.getId(), input.destination());
 
@@ -697,7 +690,6 @@ public class PackageService {
     public PackageResponse assignPackageCompany(AssignPackageCompanyInput input) {
         var pkg = packageRepo.findById(input.packageId())
                 .orElseThrow(() -> new RuntimeException("Package not found: " + input.packageId()));
-        validationService.validateOffice(input.companyId());
         pkg.setCompanyId(input.companyId());
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);
@@ -1192,7 +1184,7 @@ public class PackageService {
                 .longitude(input.longitude())
                 .placeName(input.placeName())
                 .placeId(input.placeId())
-                .officeId(input.officeId())
+                .officeLocationId(input.officeLocationId())
                 .build());
     }
 

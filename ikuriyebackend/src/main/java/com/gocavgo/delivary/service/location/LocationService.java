@@ -49,7 +49,7 @@ public class LocationService {
                 entity.getLongitude(),
                 entity.getPlaceName(),
                 entity.getPlaceId(),
-                entity.getOfficeId()
+                entity.getOfficeLocationId()
         );
     }
 }

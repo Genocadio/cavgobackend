@@ -8,7 +8,6 @@ import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
 import com.gocavgo.delivary.mapper.user.UserMapper;
 import com.gocavgo.delivary.repository.delivery.PackageMediaJpaRepository;
-import com.gocavgo.delivary.repository.office.OfficeJpaRepository;
 import com.gocavgo.delivary.repository.user.DriverProfileRepository;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.repository.user.WorkerProfileRepository;
@@ -52,7 +51,6 @@ public class UserService {
     private final UserRepository userRepository;
     private final WorkerProfileRepository workerProfileRepository;
     private final DriverProfileRepository driverProfileRepository;
-    private final OfficeJpaRepository officeRepository;
     private final UserMapper userMapper;
     private final NexxauthClient nexxauthClient;
     private final StorageService storageService;
@@ -179,16 +177,6 @@ public class UserService {
     public UserResponse assignRole(AssignRoleInput input) {
         var userId = input.userId();
 
-        // A WORKER must belong to an office — the role is meaningless without one.
-        if (input.role() == Role.WORKER) {
-            if (input.officeId() == null) {
-                throw new RuntimeException("officeId is required when assigning the WORKER role");
-            }
-            if (!officeRepository.existsById(input.officeId())) {
-                throw new RuntimeException("Office not found: " + input.officeId());
-            }
-        }
-
         var user = userRepository.findById(userId).orElse(null);
 
         // Users are created by the apps directly in Nexxauth; a missing local row
@@ -209,10 +197,9 @@ public class UserService {
         var saved = userRepository.save(user);
 
         if (input.role() == Role.WORKER) {
-            upsertWorkerProfile(saved, input.officeId());
+            upsertWorkerProfile(saved);
         } else {
-            // Leaving the WORKER role — drop the profile so the user is no longer
-            // tied to an office.
+            // Leaving the WORKER role — drop the profile.
             workerProfileRepository.findByUserId(saved.getId())
                     .ifPresent(profile -> {
                         log.info("assignRole: removing worker profile id={} for user={} (new role={})",
@@ -289,23 +276,21 @@ public class UserService {
                 .build();
     }
 
-    private void upsertWorkerProfile(UserEntity user, UUID officeId) {
+    private void upsertWorkerProfile(UserEntity user) {
         var existing = workerProfileRepository.findByUserId(user.getId());
         if (existing.isPresent()) {
             var profile = existing.get();
-            profile.setCompanyId(officeId);
             workerProfileRepository.save(profile);
-            log.info("upsertWorkerProfile: updated worker profile id={} for user={} to office={}",
-                    profile.getId(), user.getId(), officeId);
+            log.info("upsertWorkerProfile: updated worker profile id={} for user={}",
+                    profile.getId(), user.getId());
             return;
         }
         var profile = workerProfileRepository.save(WorkerProfileEntity.builder()
                 .user(user)
-                .companyId(officeId)
                 .createdAt(Instant.now())
                 .build());
-        log.info("upsertWorkerProfile: created worker profile id={} for user={} at office={}",
-                profile.getId(), user.getId(), officeId);
+        log.info("upsertWorkerProfile: created worker profile id={} for user={}",
+                profile.getId(), user.getId());
     }
 
     private static int precedence(Role role) {

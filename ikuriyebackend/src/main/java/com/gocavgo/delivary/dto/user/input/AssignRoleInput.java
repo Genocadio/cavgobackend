@@ -9,7 +9,7 @@ import java.util.UUID;
  * Assigns a role to an existing user. Users are registered directly against
  * Nexxauth by the apps (Android/web) — the backend never provisions them, so
  * this input carries no identity fields. The target user must exist in
- * Nexxauth; {@code officeId} is required when the role is {@code WORKER}.
+ * Nexxauth.
  */
 public record AssignRoleInput(
         @NotNull Long userId,

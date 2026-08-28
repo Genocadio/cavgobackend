@@ -177,7 +177,7 @@ public class PackageResolver {
         // Resolve receiver: enrich with profile data if userId provided but name/phone missing.
         var receiver = enrichPerson(input.receiver());
 
-        var companyId = role != Role.CUSTOMER ? userService.getCompanyIdForUser(creatorId) : null;
+        UUID companyId = null;
 
         var resolvedInput = new CreatePackageInput(
                 input.deliveryType(),

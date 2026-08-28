@@ -67,9 +67,6 @@ public class TransferService {
             assertPackageNotInOpenTransfer(packageId, creatorId);
         }
 
-        // A matchCompanyId filter must reference a valid office
-        validationService.validateOffice(input.matchCompanyId());
-
         // Build the transfer entity
         var now = Instant.now();
         String codeHash = null;

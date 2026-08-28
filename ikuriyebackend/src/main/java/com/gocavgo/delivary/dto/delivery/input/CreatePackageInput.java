@@ -34,7 +34,7 @@ public record CreatePackageInput(
             Double longitude,
             String placeName,
             String placeId,
-            UUID officeId
+            UUID officeLocationId
     ) {
     }
 

@@ -11,6 +11,7 @@ import java.util.List;
 
 @Entity
 @Table(name = "companies")
+@Inheritance(strategy = InheritanceType.JOINED)
 @Data
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)

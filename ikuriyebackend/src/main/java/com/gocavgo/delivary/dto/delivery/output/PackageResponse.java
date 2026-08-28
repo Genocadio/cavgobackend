@@ -55,7 +55,7 @@ public record PackageResponse(
             Double longitude,
             String placeName,
             String placeId,
-            UUID officeId
+            UUID officeLocationId
     ) {
     }
 

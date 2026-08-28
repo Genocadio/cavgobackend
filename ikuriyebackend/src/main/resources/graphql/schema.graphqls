@@ -164,7 +164,7 @@ type DeliveryPackage {
     status: PackageStatus!
     "User who created the package"
     creatorId: ID!
-    "Company / office associated with the package"
+    "Company associated with the package"
     companyId: ID
     "Trip identifier for grouped shipments"
     tripId: ID
@@ -228,8 +228,8 @@ type PackageLocation {
     placeName: String
     "External place ID (e.g. Google Maps place ID)"
     placeId: String
-    "Optional office UUID if this location is an office"
-    officeId: ID
+    "Optional FK-free office location UUID"
+    officeLocationId: ID
 }
 
 "Optional metadata about a package (category, weight, dimensions, declared value)."
@@ -334,8 +334,8 @@ input LocationInput {
     placeName: String
     "External place ID"
     placeId: String
-    "Optional office UUID"
-    officeId: ID
+    "Optional FK-free office location UUID"
+    officeLocationId: ID
 }
 
 "Input: optional package details."
@@ -418,11 +418,11 @@ input UpdatePackageStatusInput {
     notes: String
 }
 
-"Input: assign a company/office to a package."
+"Input: assign a company to a package."
 input AssignPackageCompanyInput {
     "Package UUID"
     packageId: ID!
-    "Company/office UUID"
+    "Company UUID"
     companyId: ID!
 }
 
@@ -460,7 +460,7 @@ input AssignRoleInput {
     userId: ID!
     "Target role"
     role: Role!
-    "Required when role is WORKER — the office the worker belongs to."
+    "Optional office reference for the assigned user."
     officeId: ID
 }
 
@@ -498,47 +498,7 @@ input UpdateRoleInput {
     isDefault: Boolean
 }
 
-"An office/branch — a physical location that workers belong to and packages pass through."
-type Office {
-    "Internal UUID"
-    id: ID!
-    "Office name"
-    name: String!
-    "Contact details (phone, email, etc.)"
-    contact: String
-    "The standalone package_locations row describing this office's physical location"
-    locationId: ID
-    "The full location object, when locationId is set"
-    location: PackageLocation
-    "ISO-8601 timestamp of creation"
-    createdAt: String!
-    "ISO-8601 timestamp of last update"
-    updatedAt: String!
-}
-
-"Input: create a new office."
-input CreateOfficeInput {
-    "Office name"
-    name: String!
-    "Contact details (phone, email, etc.)"
-    contact: String
-    "ID of the standalone location row for this office. Must reference an existing package_locations row."
-    locationId: ID
-}
-
-"Input: update an office. Null fields keep their current value."
-input UpdateOfficeInput {
-    "Office UUID"
-    officeId: ID!
-    "New office name"
-    name: String
-    "New contact details"
-    contact: String
-    "New location row ID. Must reference an existing package_locations row."
-    locationId: ID
-}
-
-"Input: create a standalone location row (not tied to a package). Usable as an office's location."
+"Input: create a standalone location row (not tied to a package)."
 input CreateLocationInput {
     "Whether this is ORIGIN or DESTINATION"
     type: LocationType!
@@ -674,15 +634,11 @@ type Query {
         query: String
         "Filter by system role (optional)."
         role: Role
-        "Filter by company/office ID (optional)."
+        "Filter by company ID (optional)."
         companyId: ID
     ): [User!]!
     "Get a single user by internal UUID."
     user(id: ID!): User
-    "List all offices."
-    offices: [Office!]!
-    "Get a single office by internal UUID."
-    office(id: ID!): Office
     "Get the profile of the currently authenticated user. Requires authentication."
     myProfile: User
     "List the organisation's role definitions as managed in Nexxauth. Admin or Super Admin only."
@@ -850,7 +806,7 @@ type Subscription {
 type Mutation {
     "Sync the authenticated user's profile from Nexxauth into the local database. Creates a new user if none exists, updates fields/roles/status if they changed. Nexxauth is the source of truth for identity."
     syncUser: User!
-    "Assign a system role to an existing user, pushing the role to Nexxauth so future tokens carry it. Super Admin only. Assigning the WORKER role requires an officeId, which ties the user to that office via a worker profile."
+    "Assign a system role to an existing user, pushing the role to Nexxauth so future tokens carry it. Super Admin only."
     assignRole(input: AssignRoleInput!): User!
     "Create a role definition in Nexxauth. Super Admin only."
     createRole(input: CreateRoleInput!): OrgRole!
@@ -858,11 +814,7 @@ type Mutation {
     updateRole(input: UpdateRoleInput!): OrgRole!
     "Delete a role definition in Nexxauth. Super Admin only."
     deleteRole(roleId: ID!): Boolean!
-    "Create a new office. Admin or Super Admin only."
-    createOffice(input: CreateOfficeInput!): Office!
-    "Update an office. Admin or Super Admin only."
-    updateOffice(input: UpdateOfficeInput!): Office!
-    "Create a standalone location row that an office can reference via locationId. Admin or Super Admin only."
+    "Create a standalone location row. Admin or Super Admin only."
     createLocation(input: CreateLocationInput!): PackageLocation!
     "Disable a user account in Nexxauth and locally. Admin or Super Admin only."
     disableUser(userId: ID!): User!
@@ -874,7 +826,7 @@ type Mutation {
     assignDriver(input: AssignDriverInput!): DeliveryPackage!
     "Advance a package to the next status. Validates state-machine transitions; the actor must be the current custodian or trusted office staff."
     updatePackageStatus(input: UpdatePackageStatusInput!): DeliveryPackage!
-    "Assign a company/office to a package."
+    "Assign a company to a package."
     assignPackageCompany(input: AssignPackageCompanyInput!): DeliveryPackage!
     "Assign a trip identifier to a package."
     assignPackageTrip(input: AssignPackageTripInput!): DeliveryPackage!

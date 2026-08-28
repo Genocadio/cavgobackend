@@ -11,6 +11,6 @@ public record LocationResponse(
         Double longitude,
         String placeName,
         String placeId,
-        UUID officeId
+        UUID officeLocationId
 ) {
 }

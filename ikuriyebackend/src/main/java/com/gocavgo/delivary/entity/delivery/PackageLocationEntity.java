@@ -49,6 +49,6 @@ public class PackageLocationEntity {
     @Column(name = "place_id")
     private String placeId;
 
-    @Column(name = "office_id")
-    private UUID officeId;
+    @Column(name = "office_location_id")
+    private UUID officeLocationId;
 }

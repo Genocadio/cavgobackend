@@ -4,7 +4,6 @@ import com.gocavgo.delivary.enums.transfer.TransferAcceptorType;
 import com.gocavgo.delivary.enums.user.DriverStatus;
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
-import com.gocavgo.delivary.repository.office.OfficeJpaRepository;
 import com.gocavgo.delivary.repository.user.DriverProfileRepository;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.enums.delivery.DeliveryType;
@@ -23,7 +22,6 @@ public class PackageValidationService {
 
     private final UserRepository userRepository;
     private final DriverProfileRepository driverProfileRepository;
-    private final OfficeJpaRepository officeRepository;
 
     private static final Map<PackageStatus, Set<PackageStatus>> OPEN_TRANSITIONS = Map.of(
             PackageStatus.CREATED, Set.of(PackageStatus.ACCEPTED, PackageStatus.CANCELLED),
@@ -90,15 +88,6 @@ public class PackageValidationService {
                 .orElseThrow(() -> new RuntimeException("Driver profile not found"));
         if (driverProfile.getStatus() != DriverStatus.ONLINE) {
             throw new RuntimeException("Driver is not ONLINE: " + driverProfile.getStatus());
-        }
-    }
-
-    /**
-     * Throws if the given office id does not exist. Null is allowed (no office).
-     */
-    public void validateOffice(UUID officeId) {
-        if (officeId != null && !officeRepository.existsById(officeId)) {
-            throw new RuntimeException("Office not found: " + officeId);
         }
     }
 

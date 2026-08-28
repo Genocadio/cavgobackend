@@ -20,6 +20,11 @@ public class CompanyUser extends User {
     @ToString.Exclude
     private Company company;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "office_id")
+    @ToString.Exclude
+    private Office office;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "role")
     private CompanyUserRole role;
