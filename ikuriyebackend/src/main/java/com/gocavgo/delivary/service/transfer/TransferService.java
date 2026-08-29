@@ -4,6 +4,7 @@ import com.gocavgo.delivary.enums.notification.NoticeEventType;
 import com.gocavgo.delivary.enums.transfer.TransferAcceptorType;
 import com.gocavgo.delivary.enums.transfer.TransferRuleType;
 import com.gocavgo.delivary.enums.transfer.TransferStatus;
+import com.gocavgo.delivary.exception.BusinessValidationException;
 import com.gocavgo.delivary.service.notification.NoticeEventMapper;
 import com.gocavgo.delivary.dto.transfer.input.AddPackagesToTransferInput;
 import com.gocavgo.delivary.dto.transfer.input.CreateTransferInput;
@@ -118,7 +119,7 @@ public class TransferService {
                 actorId, input.transferId(), input.packageIds().size());
 
         var transfer = transferRepo.findById(input.transferId())
-                .orElseThrow(() -> new RuntimeException("Transfer not found: " + input.transferId()));
+                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + input.transferId()));
 
         assertOwner(transfer, actorId);
 
@@ -158,12 +159,12 @@ public class TransferService {
         log.info("regenerateTransferCode: actorId={}, transferId={}", actorId, input.transferId());
 
         var transfer = transferRepo.findById(input.transferId())
-                .orElseThrow(() -> new RuntimeException("Transfer not found: " + input.transferId()));
+                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + input.transferId()));
 
         assertOwner(transfer, actorId);
 
         if (transfer.getRuleType() != TransferRuleType.SECURE) {
-            throw new RuntimeException("Cannot regenerate code for non-SECURE transfer");
+            throw new BusinessValidationException("Cannot regenerate code for non-SECURE transfer");
         }
 
         var rawCode = generateTransferCode();
@@ -182,7 +183,7 @@ public class TransferService {
         log.info("updateTransfer: actorId={}, transferId={}", actorId, input.transferId());
 
         var transfer = transferRepo.findById(input.transferId())
-                .orElseThrow(() -> new RuntimeException("Transfer not found: " + input.transferId()));
+                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + input.transferId()));
 
         assertOwner(transfer, actorId);
 
@@ -213,10 +214,10 @@ public class TransferService {
         log.info("acceptTransfer: actorId={}, transferId={}, ruleType check", actorId, transferId);
 
         var transfer = transferRepo.findById(transferId)
-                .orElseThrow(() -> new RuntimeException("Transfer not found: " + transferId));
+                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + transferId));
 
         if (transfer.getStatus() != TransferStatus.PENDING) {
-            throw new RuntimeException("Transfer is not open for acceptance (status=" + transfer.getStatus() + ")");
+            throw new BusinessValidationException("Transfer is not open for acceptance (status=" + transfer.getStatus() + ")");
         }
 
         if (transfer.getRuleType() == TransferRuleType.AUTO
@@ -227,7 +228,7 @@ public class TransferService {
 
         if (transfer.getRuleType() == TransferRuleType.CONFIRM) {
             if (transfer.getCreatorId().equals(actorId)) {
-                throw new RuntimeException("Transfer owner cannot request their own transfer");
+                throw new BusinessValidationException("Transfer owner cannot request their own transfer");
             }
 
             // Validate actor is a WORKER or DRIVER
@@ -251,7 +252,7 @@ public class TransferService {
             return new TransferAcceptResult(transferResp, List.of());
         }
 
-        throw new RuntimeException("Unknown transfer rule type: " + transfer.getRuleType());
+        throw new BusinessValidationException("Unknown transfer rule type: " + transfer.getRuleType());
     }
 
     @Transactional
@@ -259,20 +260,20 @@ public class TransferService {
         log.info("confirmTransfer: actorId={}, transferId={}", actorId, transferId);
 
         var transfer = transferRepo.findById(transferId)
-                .orElseThrow(() -> new RuntimeException("Transfer not found: " + transferId));
+                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + transferId));
 
         assertOwner(transfer, actorId);
 
         if (transfer.getRuleType() != TransferRuleType.CONFIRM) {
-            throw new RuntimeException("Only CONFIRM transfers can be confirmed");
+            throw new BusinessValidationException("Only CONFIRM transfers can be confirmed");
         }
         if (transfer.getStatus() != TransferStatus.REQUESTED) {
-            throw new RuntimeException("Transfer is not in REQUESTED status (status=" + transfer.getStatus() + ")");
+            throw new BusinessValidationException("Transfer is not in REQUESTED status (status=" + transfer.getStatus() + ")");
         }
 
         var requestorId = transfer.getRequestorId();
         if (requestorId == null) {
-            throw new RuntimeException("Transfer has no requestor to accept packages");
+            throw new BusinessValidationException("Transfer has no requestor to accept packages");
         }
 
         // ★ Auto-accept all packages in the transfer — requestor becomes custodian
@@ -296,15 +297,15 @@ public class TransferService {
         log.info("rejectTransfer: actorId={}, transferId={}", actorId, transferId);
 
         var transfer = transferRepo.findById(transferId)
-                .orElseThrow(() -> new RuntimeException("Transfer not found: " + transferId));
+                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + transferId));
 
         assertOwner(transfer, actorId);
 
         if (transfer.getRuleType() != TransferRuleType.CONFIRM) {
-            throw new RuntimeException("Only CONFIRM transfers can be rejected");
+            throw new BusinessValidationException("Only CONFIRM transfers can be rejected");
         }
         if (transfer.getStatus() != TransferStatus.REQUESTED) {
-            throw new RuntimeException("Transfer is not in REQUESTED status (status=" + transfer.getStatus() + ")");
+            throw new BusinessValidationException("Transfer is not in REQUESTED status (status=" + transfer.getStatus() + ")");
         }
 
         // Reset back to PENDING so someone else can request
@@ -327,15 +328,15 @@ public class TransferService {
         log.info("cancelTransfer: actorId={}, transferId={}", actorId, transferId);
 
         var transfer = transferRepo.findById(transferId)
-                .orElseThrow(() -> new RuntimeException("Transfer not found: " + transferId));
+                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + transferId));
 
         assertOwner(transfer, actorId);
 
         if (transfer.getStatus() == TransferStatus.DONE) {
-            throw new RuntimeException("Cannot cancel a completed transfer");
+            throw new BusinessValidationException("Cannot cancel a completed transfer");
         }
         if (transfer.getStatus() == TransferStatus.CANCELED) {
-            throw new RuntimeException("Transfer is already cancelled");
+            throw new BusinessValidationException("Transfer is already cancelled");
         }
 
         var previousStatus = transfer.getStatus();
@@ -358,7 +359,7 @@ public class TransferService {
     @Transactional(readOnly = true)
     public TransferResponse getTransferById(UUID id) {
         var transfer = transferRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Transfer not found: " + id));
+                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + id));
         var packages = transferPackageRepo.findByTransferId(transfer.getId());
         return toResponse(transfer, packages, null);
     }
@@ -390,7 +391,7 @@ public class TransferService {
     @Transactional(readOnly = true)
     public TransferEntity getTransferEntityById(UUID id) {
         return transferRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Transfer not found: " + id));
+                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + id));
     }
 
     /**
@@ -400,7 +401,7 @@ public class TransferService {
     @Transactional
     public TransferEntity getTransferEntityWithLock(UUID id) {
         return transferRepo.findByIdForUpdate(id)
-                .orElseThrow(() -> new RuntimeException("Transfer not found: " + id));
+                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + id));
     }
 
     @Transactional
@@ -484,7 +485,7 @@ public class TransferService {
             }
 
             if (!oldTransfer.getCreatorId().equals(actorId)) {
-                throw new RuntimeException(
+                throw new BusinessValidationException(
                         "Package " + packageId + " is already in an open transfer " + oldTransfer.getId()
                                 + " owned by another user. Only the creator of the old transfer can move it.");
             }
@@ -506,7 +507,7 @@ public class TransferService {
 
     private void assertOwner(TransferEntity transfer, Long actorId) {
         if (!transfer.getCreatorId().equals(actorId)) {
-            throw new RuntimeException("Only the transfer owner can perform this action");
+            throw new BusinessValidationException("Only the transfer owner can perform this action");
         }
     }
 
