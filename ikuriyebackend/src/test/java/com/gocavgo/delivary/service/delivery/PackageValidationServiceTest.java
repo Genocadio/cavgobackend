@@ -66,9 +66,30 @@ class PackageValidationServiceTest {
     }
 
     @Test
+    void validateTransitionAllowsOriginOfficeToInTransit() {
+        // Drivers who accepted a transfer at the origin office can drive directly
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.ORIGIN_OFFICE, PackageStatus.IN_TRANSIT, DeliveryType.FIXED_ROUTE));
+    }
+
+    @Test
+    void validateTransitionAllowsAcceptedToAssignedDriver() {
+        // Driver-created FIXED_ROUTE packages start at ACCEPTED and can be assigned
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.ACCEPTED, PackageStatus.ASSIGNED_DRIVER, DeliveryType.FIXED_ROUTE));
+    }
+
+    @Test
+    void validateTransitionAllowsAcceptedToInTransit() {
+        // Driver-created FIXED_ROUTE packages can go directly to IN_TRANSIT (driver picks up)
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.ACCEPTED, PackageStatus.IN_TRANSIT, DeliveryType.FIXED_ROUTE));
+    }
+
+    @Test
     void validateTransitionRejectsInvalidMove() {
         var ex = assertThrows(RuntimeException.class, () ->
-                validationService.validateTransition(PackageStatus.ORIGIN_OFFICE, PackageStatus.IN_TRANSIT, DeliveryType.FIXED_ROUTE));
-        assertEquals("Invalid status transition: ORIGIN_OFFICE -> IN_TRANSIT", ex.getMessage());
+                validationService.validateTransition(PackageStatus.IN_TRANSIT, PackageStatus.ASSIGNED_DRIVER, DeliveryType.FIXED_ROUTE));
+        assertEquals("Invalid status transition: IN_TRANSIT -> ASSIGNED_DRIVER", ex.getMessage());
     }
 }

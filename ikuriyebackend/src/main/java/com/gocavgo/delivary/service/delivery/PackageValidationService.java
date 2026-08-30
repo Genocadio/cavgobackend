@@ -34,17 +34,19 @@ public class PackageValidationService {
             PackageStatus.CANCELLED, Set.of()
     );
 
-    private static final Map<PackageStatus, Set<PackageStatus>> ROUTE_TRANSITIONS = Map.of(
-            PackageStatus.CREATED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.CANCELLED),
-            PackageStatus.ORIGIN_OFFICE, Set.of(PackageStatus.ASSIGNED_DRIVER, PackageStatus.CANCELLED),
-            PackageStatus.ASSIGNED_DRIVER, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED),
-            PackageStatus.IN_TRANSIT, Set.of(PackageStatus.DESTINATION_OFFICE, PackageStatus.CANCELLED),
-            PackageStatus.DESTINATION_OFFICE, Set.of(PackageStatus.READY_FOR_COLLECTION, PackageStatus.CANCELLED),
-            PackageStatus.READY_FOR_COLLECTION, Set.of(PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED),
-            PackageStatus.PENDING_CONFIRMATION, Set.of(PackageStatus.DELIVERED, PackageStatus.CANCELLED),
-            PackageStatus.DELIVERED, Set.of(PackageStatus.COMPLETED, PackageStatus.CANCELLED),
-            PackageStatus.COMPLETED, Set.of(),
-            PackageStatus.CANCELLED, Set.of()
+    @SuppressWarnings("unchecked")
+    private static final Map<PackageStatus, Set<PackageStatus>> ROUTE_TRANSITIONS = Map.ofEntries(
+            Map.entry(PackageStatus.CREATED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.ACCEPTED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.ORIGIN_OFFICE, Set.of(PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.ASSIGNED_DRIVER, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.IN_TRANSIT, Set.of(PackageStatus.DESTINATION_OFFICE, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.DESTINATION_OFFICE, Set.of(PackageStatus.READY_FOR_COLLECTION, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.READY_FOR_COLLECTION, Set.of(PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.PENDING_CONFIRMATION, Set.of(PackageStatus.DELIVERED, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.DELIVERED, Set.of(PackageStatus.COMPLETED, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.COMPLETED, Set.of()),
+            Map.entry(PackageStatus.CANCELLED, Set.of())
     );
 
     private static final Set<Role> CREATOR_ROLES = Set.of(Role.CUSTOMER, Role.WORKER, Role.DRIVER);
