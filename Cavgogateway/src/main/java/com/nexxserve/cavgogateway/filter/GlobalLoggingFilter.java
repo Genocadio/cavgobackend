@@ -30,13 +30,14 @@ public class GlobalLoggingFilter implements GlobalFilter, Ordered {
         String requestId = UUID.randomUUID().toString();
         ServerHttpRequest request = exchange.getRequest();
 
-        // Check if this is an SSE request
+        // Check if this is an SSE or file-upload request
         boolean isSSERequest = isServerSentEventRequest(request);
+        boolean isMultipartUpload = isMultipartUpload(request);
 
         // Log request details
         logRequest(requestId, request, isSSERequest);
 
-        // Decorate request to log body if present and not SSE
+        // Decorate request to log body if present and not SSE / file upload
         ServerHttpRequestDecorator requestDecorator = new ServerHttpRequestDecorator(request) {
             @Override
             public Flux<DataBuffer> getBody() {
@@ -45,6 +46,11 @@ public class GlobalLoggingFilter implements GlobalFilter, Ordered {
                     return super.getBody().doOnNext(dataBuffer -> {
                         logger.info("🔵 [SSE-REQUEST-{}] Body present (SSE - not logging content)", requestId);
                     });
+                } else if (isMultipartUpload) {
+                    // For file uploads, stream body through without reading.
+                    // Reading multipart binary data into a String triggers the
+                    // codec max-in-memory-size limit and causes HTTP 413 errors.
+                    return super.getBody();
                 } else {
                     return super.getBody().doOnNext(dataBuffer -> {
                         byte[] bytes = new byte[dataBuffer.readableByteCount()];
@@ -112,10 +118,14 @@ public class GlobalLoggingFilter implements GlobalFilter, Ordered {
         boolean acceptsSSE = acceptHeader != null && acceptHeader.contains("text/event-stream");
 
         // Check if it's a POST to subscribe endpoint (your use case)
-        boolean isSubscribePost = "POST".equals(request.getMethod().name()) &&
-                path.contains("/subscribe");
+        boolean isSubscribePost = "POST".equals(request.getMethod().name()) && path.contains("/subscribe");
 
         return isEventPath || acceptsSSE || isSubscribePost;
+    }
+
+    private boolean isMultipartUpload(ServerHttpRequest request) {
+        String contentType = request.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE);
+        return contentType != null && contentType.toLowerCase().startsWith("multipart/");
     }
 
     private void logRequest(String requestId, ServerHttpRequest request, boolean isSSE) {

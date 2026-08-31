@@ -6,6 +6,8 @@ cors:
 spring:
   application:
     name: cavgogateway
+  codec:
+    max-in-memory-size: 100MB
   cloud:
     gateway:
       # Add request/response logging filter globally
