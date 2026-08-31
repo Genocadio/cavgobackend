@@ -73,10 +73,10 @@ public class FileUploadController {
             }
         }
 
-        // Validate file size (50MB max)
-        if (file.getSize() > 50 * 1024 * 1024) {
+        // Validate file size (100MB max)
+        if (file.getSize() > 100 * 1024 * 1024) {
             return ResponseEntity.badRequest().body(Map.of(
-                    "error", "File too large. Maximum size is 50MB."
+                    "error", "File too large. Maximum size is 100MB."
             ));
         }
 
