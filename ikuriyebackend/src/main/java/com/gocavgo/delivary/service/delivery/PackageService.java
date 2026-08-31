@@ -239,9 +239,9 @@ public class PackageService {
     }
 
     /**
-     * Core logic: accept a single package — update status (CREATED → ACCEPTED;
-     * in-flight packages keep their status and swap custodian), add custodian,
-     * record custody and event.
+     * Core logic: accept a single package — update status (CREATED → ACCEPTED for
+     * OPEN_ROUTE, CREATED → ORIGIN_OFFICE for FIXED_ROUTE; in-flight packages
+     * keep their status and swap custodian), add custodian, record custody and event.
      */
     private AcceptOfferResponse acceptSinglePackage(UUID packageId, Long actorId, CustodianRole custodianRole) {
         var pkg = packageRepo.findById(packageId)
@@ -255,9 +255,14 @@ public class PackageService {
         }
 
         var previousStatus = pkg.getStatus();
+        PackageStatus newStatus = null;
         if (previousStatus == PackageStatus.CREATED) {
-            validationService.validateTransition(pkg.getStatus(), PackageStatus.ACCEPTED, pkg.getDeliveryType());
-            pkg.setStatus(PackageStatus.ACCEPTED);
+            // FIXED_ROUTE packages go to ORIGIN_OFFICE; OPEN_ROUTE goes to ACCEPTED
+            newStatus = pkg.getDeliveryType() == DeliveryType.FIXED_ROUTE
+                    ? PackageStatus.ORIGIN_OFFICE
+                    : PackageStatus.ACCEPTED;
+            validationService.validateTransition(pkg.getStatus(), newStatus, pkg.getDeliveryType());
+            pkg.setStatus(newStatus);
         }
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);
@@ -272,8 +277,9 @@ public class PackageService {
 
         saveCustodian(pkg.getId(), actorId, custodianRole);
 
-        // Notify: package accepted + custodian assigned
-        noticeService.notifyPackageEvent(pkg, NoticeEventMapper.fromPackageStatus(PackageStatus.ACCEPTED), actorId, previousStatus);
+        // Notify: package status changed + custodian assigned
+        var notifyStatus = newStatus != null ? newStatus : PackageStatus.ACCEPTED;
+        noticeService.notifyPackageEvent(pkg, NoticeEventMapper.fromPackageStatus(notifyStatus), actorId, previousStatus);
         noticeService.notifyPackageEvent(pkg, NoticeEventType.PACKAGE_CUSTODIAN_ASSIGNED, actorId, previousStatus);
 
         var currentCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId());
@@ -282,7 +288,7 @@ public class PackageService {
                 .orElse("SENDER");
         saveCustody(pkg.getId(), fromEntity, custodianRole.name(),
                 "Accepted by " + custodianRole.name().toLowerCase());
-        saveEvent(pkg.getId(), PackageEventType.ACCEPTED, actorId, "Package accepted");
+        saveEvent(pkg.getId(), mapStatusToEvent(notifyStatus), actorId, "Package accepted");
 
         return new AcceptOfferResponse(toResponse(pkg, true));
     }
