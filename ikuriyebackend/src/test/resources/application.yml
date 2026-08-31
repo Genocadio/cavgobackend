@@ -1,4 +1,6 @@
 spring:
+  profiles:
+    active: test
   datasource:
     url: jdbc:h2:mem:testdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
     username: sa
@@ -21,7 +23,7 @@ spring:
 
 nexxauth:
   base-url: https://auth.test/master
-  organisation-id: 7
+  # Organisation is resolved from X-Client-Id — no numeric org id needed.
   # Test-only RSA public key (base64 DER SPKI) — generated locally, used to
   # construct the verifier bean; never verify real tokens with it.
   public-key: MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyM1Oh6/wloFbreLmmelyAYF6f34cBWgHp4b1+Ki69ui/RgVSrIPjliVgafw7fIV/HyjTruTtLtOPTYO0ueaWYHwRciMzUkn2rVINNWXtoFkmtgDkWaMmi1MSvmFFetympaqjnfHugZ1nkJ8Znl1PbRt8LsLlv7dR66Nj00U1fPCeupjUqXGOMAL6yjQVkyiGSoTzUg3aGSnVNWRnmYIC2ACs3cU15GnuThc+YIESJ5y/cXA4Xka3IMx76zkY384/3XEnbDzmAn6f2nKMLUOvEDY1GmTnO7AqdcO+ybrWgfxlHLyhlmoEMx5krq00HoExPcWALdwvrwx0+vhUDhiKtwIDAQAB

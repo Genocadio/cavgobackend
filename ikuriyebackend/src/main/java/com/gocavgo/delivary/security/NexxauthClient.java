@@ -52,15 +52,11 @@ public class NexxauthClient {
 
     public NexxauthClient(
             @Value("${nexxauth.base-url}") String baseUrl,
-            @Value("${nexxauth.organisation-id}") Long organisationId,
             @Value("${nexxauth.client-id}") String clientId,
             @Value("${nexxauth.client-token}") String clientToken
     ) {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalStateException("nexxauth.base-url is not configured (NEXXAUTH_BASE_URL)");
-        }
-        if (organisationId == null) {
-            throw new IllegalStateException("nexxauth.organisation-id is not configured (NEXXAUTH_ORGANISATION_ID)");
         }
         if (clientId == null || clientId.isBlank()) {
             throw new IllegalStateException("nexxauth.client-id is not configured (NEXXAUTH_CLIENT_ID)");
@@ -68,10 +64,10 @@ public class NexxauthClient {
         if (clientToken == null || clientToken.isBlank()) {
             throw new IllegalStateException("nexxauth.client-token is not configured (NEXXAUTH_CLIENT_TOKEN)");
         }
-        // base-url already includes the platform segment (origin + platform
-        // slug); organisations are addressed by their numeric id, never a slug.
-        this.orgBaseUrl = baseUrl.replaceAll("/+$", "")
-                + "/organisations/" + organisationId;
+        // Organisation is resolved from the X-Client-Id header — no numeric
+        // org id is needed in the URL. The SERVER client's own credentials
+        // scope every request to the correct organisation.
+        this.orgBaseUrl = baseUrl.replaceAll("/+$", "") + "/organisations";
         this.clientId = clientId;
         this.clientToken = clientToken;
         log.info("Nexxauth SERVER client initialised — org endpoint: {}", this.orgBaseUrl);
@@ -138,9 +134,9 @@ public class NexxauthClient {
         try {
             var builder = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .header("Authorization", "Bearer " + clientToken)
                     .header("X-Client-Id", clientId)
-                    .header("Content-Type", "application/json");
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + clientToken);
 
             if (body != null) {
                 builder.method(method, HttpRequest.BodyPublishers.ofString(body.toString()));

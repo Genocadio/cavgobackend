@@ -48,7 +48,7 @@ public class NexxauthJwtVerifier {
             log.info("Nexxauth org public key loaded from configuration");
         } catch (Exception e) {
             throw new IllegalStateException(
-                    "Invalid nexxauth.public-key — expected the base64 DER SPKI publicKey value from GET /organisations/{organisationId}/keys",
+                    "Invalid nexxauth.public-key — expected the base64 DER SPKI publicKey value from GET /organisations/keys",
                     e);
         }
     }

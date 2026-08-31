@@ -114,6 +114,8 @@ type User {
     role: Role!
     "Account status"
     status: UserStatus!
+    "Opaque hash from the Nexxauth JWT — changes on every non-password user mutation. Used by the backend to detect stale local data without hitting Nexxauth on every request."
+    dataHash: String
     "ISO-8601 timestamp of creation"
     createdAt: String!
     "ISO-8601 timestamp of last update"

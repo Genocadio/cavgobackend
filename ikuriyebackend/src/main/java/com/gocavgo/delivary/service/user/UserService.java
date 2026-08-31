@@ -57,29 +57,45 @@ public class UserService {
     private final PackageMediaJpaRepository mediaRepo;
 
     /**
-     * Mirrors the authenticated user (identified by their Nexxauth org-user id)
-     * from Nexxauth into the local DB. Creates the row when missing, updates
-     * profile fields + status when changed. The role is NOT stored locally —
-     * it is sourced from the JWT token and returned in the response directly
-     * from Nexxauth.
+     * Ensures the local user mirror is up-to-date with Nexxauth. Uses the
+     * {@code dataHash} from the JWT token to detect stale data without hitting
+     * Nexxauth on every request:
+     * <ul>
+     *   <li>If the user doesn't exist locally → fetch from Nexxauth and create.</li>
+     *   <li>If the stored {@code dataHash} is null or differs from the token's
+     *       hash → fetch from Nexxauth and update.</li>
+     *   <li>If the hash matches → return the cached local user (no Nexxauth call).</li>
+     * </ul>
+     * The role is derived from the token's {@code roles} claim (not fetched from
+     * Nexxauth) for the common case; only when the user is newly created or
+     * updated does the role come from the Nexxauth response.
      */
     @Transactional
-    public UserResponse syncUser(Long nexxauthUserId) {
-        log.info("syncUser: starting for nexxauthUserId={}", nexxauthUserId);
+    public UserResponse syncUser(Long nexxauthUserId, String tokenDataHash) {
+        var existing = userRepository.findById(nexxauthUserId).orElse(null);
+
+        // Fast path: user exists and hash matches — no Nexxauth call needed.
+        if (existing != null && tokenDataHash != null && tokenDataHash.equals(existing.getDataHash())) {
+            log.debug("syncUser: hash match for userId={}, using cached data", nexxauthUserId);
+            return toUserResponse(existing, resolveRoleFromToken(nexxauthUserId));
+        }
+
+        // Slow path: user missing or hash mismatch — fetch from Nexxauth.
+        log.info("syncUser: {} for userId={} (tokenHash={}, localHash={})",
+                existing == null ? "creating new user" : "hash mismatch — updating",
+                nexxauthUserId, tokenDataHash, existing != null ? existing.getDataHash() : "null");
+
         var nexxauthUser = nexxauthClient.getUser(nexxauthUserId);
         log.info("syncUser: Nexxauth returned user={} (enabled={}, roles={})",
                 nexxauthUserId, nexxauthUser.enabled(), nexxauthUser.roles());
 
-        var existing = userRepository.findById(nexxauthUserId);
-
-        // Derive the primary role from Nexxauth for the response (not stored locally).
         var role = NexxauthRoles.fromNexxauthNames(nexxauthUser.roles()).stream()
                 .reduce(Role.CUSTOMER, (a, b) ->
                         precedence(b) > precedence(a) ? b : a);
         var status = nexxauthUser.enabled() ? UserStatus.ACTIVE : UserStatus.DISABLED;
 
-        if (existing.isPresent()) {
-            var user = existing.get();
+        if (existing != null) {
+            var user = existing;
             boolean changed = false;
 
             if (nexxauthUser.email() != null && !nexxauthUser.email().equals(user.getEmail())) {
@@ -107,18 +123,31 @@ public class UserService {
                 user.setStatus(status);
                 changed = true;
             }
+            // Always update the dataHash from the token.
+            if (tokenDataHash != null && !tokenDataHash.equals(user.getDataHash())) {
+                user.setDataHash(tokenDataHash);
+                changed = true;
+            }
 
             if (changed) {
                 log.info("syncUser: saving updated user id={}", user.getId());
                 return toUserResponse(userRepository.save(user), role);
             }
-            log.info("syncUser: no changes detected for user id={}", user.getId());
             return toUserResponse(user, role);
         }
 
         log.info("syncUser: creating new local user id={}", nexxauthUserId);
         var user = toEntity(nexxauthUser);
+        user.setDataHash(tokenDataHash);
         return toUserResponse(userRepository.save(user), role);
+    }
+
+    /**
+     * Legacy overload for backward compatibility — always fetches from Nexxauth.
+     */
+    @Transactional
+    public UserResponse syncUser(Long nexxauthUserId) {
+        return syncUser(nexxauthUserId, null);
     }
 
     @Transactional(readOnly = true)
@@ -315,11 +344,40 @@ public class UserService {
                         base.firstName(), base.lastName(), base.username(),
                         avatarUrl,
                         base.role(), base.status(),
+                        user.getDataHash(),
                         base.createdAt(), base.updatedAt()
                 );
             }
         }
-        return base;
+        return new UserResponse(
+                base.id(), base.email(), base.phone(),
+                base.firstName(), base.lastName(), base.username(),
+                base.avatarUrl(),
+                base.role(), base.status(),
+                user.getDataHash(),
+                base.createdAt(), base.updatedAt()
+        );
+    }
+
+    /**
+     * Resolves the user's role from the JWT token's roles claim (stored in the
+     * security context by the filter). This avoids a Nexxauth API call on every
+     * request — roles are already in the token.
+     */
+    private Role resolveRoleFromToken(Long userId) {
+        var authentication = org.springframework.security.core.context.SecurityContextHolder
+                .getContext().getAuthentication();
+        if (authentication != null && authentication.getAuthorities() != null) {
+            return authentication.getAuthorities().stream()
+                    .map(a -> a.getAuthority())
+                    .filter(a -> a.startsWith("ROLE_"))
+                    .map(a -> a.substring(5))
+                    .map(NexxauthRoles::fromNexxauthName)
+                    .filter(r -> r != null)
+                    .reduce((a, b) -> precedence(b) > precedence(a) ? b : a)
+                    .orElse(Role.CUSTOMER);
+        }
+        return Role.CUSTOMER;
     }
 
     /**

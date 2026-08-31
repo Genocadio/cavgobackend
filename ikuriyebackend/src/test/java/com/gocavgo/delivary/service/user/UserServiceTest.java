@@ -51,7 +51,7 @@ class UserServiceTest {
             var role = invocation.getArgument(1, com.gocavgo.delivary.enums.user.Role.class);
             return new UserResponse(u.getId(), u.getEmail(), u.getPhone(), u.getFirstName(),
                     u.getLastName(), u.getUsername(), null, role, u.getStatus(),
-                    u.getCreatedAt(), u.getUpdatedAt());
+                    u.getDataHash(), u.getCreatedAt(), u.getUpdatedAt());
         });
 
         userService = new UserService(userRepository, workerProfileRepository,

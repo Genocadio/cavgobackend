@@ -29,7 +29,6 @@ spring:
 nexxauth:
   public-key: ${NEXXAUTH_PUBLIC_KEY:}
   base-url: ${NEXXAUTH_BASE_URL:}
-  organisation-id: ${NEXXAUTH_ORGANISATION_ID:}
   client-id: ${NEXXAUTH_CLIENT_ID:}
   client-token: ${NEXXAUTH_CLIENT_TOKEN:}
 

@@ -56,6 +56,15 @@ public class UserEntity {
     @Column(name = "avatar_storage_mode", length = 16)
     private String avatarStorageMode;
 
+    /**
+     * Opaque hash from the Nexxauth JWT {@code dataHash} claim. Changes on every
+     * non-password user mutation in Nexxauth. The backend compares this to the
+     * token's hash on each request to detect stale local data — only fetching
+     * from Nexxauth when the hash is missing or different.
+     */
+    @Column(name = "data_hash", length = 64)
+    private String dataHash;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private UserStatus status;

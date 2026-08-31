@@ -47,7 +47,6 @@ spring:
 # organisation API.
 nexxauth:
   base-url: ${NEXXAUTH_BASE_URL:https://auth.med.rw/master}
-  organisation-id: ${NEXXAUTH_ORGANISATION_ID:}
   public-key: ${NEXXAUTH_PUBLIC_KEY:}
   client-id: ${NEXXAUTH_CLIENT_ID:}
   client-token: ${NEXXAUTH_CLIENT_TOKEN:}

@@ -17,11 +17,9 @@ import java.util.List;
  * Validates all required Nexxauth configuration at startup by:
  * <ol>
  *   <li>Checking that all required environment variables are set</li>
- *   <li>Making a live API call to {@code GET /organisations/{id}/keys} (public)
- *       — validates base-url and organisation-id</li>
- *   <li>Making a live API call to {@code GET /organisations/{id}/roles}
+ *   <li>Making a live API call to {@code GET /organisations/roles}
  *       (SERVER client auth) — validates client-id, client-token, and that the
- *       client belongs to the configured organisation</li>
+ *       client belongs to the configured organisation (resolved from X-Client-Id)</li>
  * </ol>
  * If any check fails the application refuses to start.
  */
@@ -35,9 +33,6 @@ public class NexxauthConfigValidator implements InitializingBean {
 
     @Value("${nexxauth.base-url:}")
     private String baseUrl;
-
-    @Value("${nexxauth.organisation-id:}")
-    private String organisationId;
 
     @Value("${nexxauth.public-key:}")
     private String publicKey;
@@ -57,7 +52,6 @@ public class NexxauthConfigValidator implements InitializingBean {
         List<String> missing = new ArrayList<>();
 
         logProperty("base-url", baseUrl, false, missing);
-        logProperty("organisation-id", organisationId, false, missing);
         logProperty("public-key", publicKey, true, missing);
         logProperty("client-id", clientId, false, missing);
         logProperty("client-token", clientToken, true, missing);
@@ -75,31 +69,10 @@ public class NexxauthConfigValidator implements InitializingBean {
                     + "Missing properties: " + String.join(", ", missing));
         }
 
-        String orgBaseUrl = baseUrl.replaceAll("/+$", "") + "/organisations/" + organisationId;
+        // Organisation is resolved from X-Client-Id — no numeric org id needed.
+        String orgBaseUrl = baseUrl.replaceAll("/+$", "") + "/organisations";
 
-        // ── Check 1: public keys endpoint (validates base-url + org-id) ──────
-        log.info("  Checking org keys endpoint (public)...");
-        try {
-            HttpRequest keysRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(orgBaseUrl + "/keys"))
-                    .header("Accept", "application/json")
-                    .GET()
-                    .build();
-            HttpResponse<String> keysResponse = httpClient.send(keysRequest, HttpResponse.BodyHandlers.ofString());
-            if (keysResponse.statusCode() == 200) {
-                log.info("  [OK]      Organisation {} exists and keys endpoint reachable", organisationId);
-            } else {
-                fail("Organisation keys endpoint returned HTTP " + keysResponse.statusCode(),
-                        "Check NEXXAUTH_ORGANISATION_ID (" + organisationId + ") — the org may not exist or the base URL may be wrong");
-            }
-        } catch (IllegalStateException e) {
-            throw e;
-        } catch (Exception e) {
-            fail("Cannot reach Nexxauth at " + orgBaseUrl + "/keys: " + e.getMessage(),
-                    "Check NEXXAUTH_BASE_URL (" + baseUrl + ") — is the server reachable?");
-        }
-
-        // ── Check 2: authenticated roles endpoint (validates client credentials + org access) ──
+        // ── Check 1: authenticated roles endpoint (validates client credentials + org access) ──
         log.info("  Checking SERVER client credentials (roles endpoint)...");
         try {
             HttpRequest rolesRequest = HttpRequest.newBuilder()
@@ -116,8 +89,8 @@ public class NexxauthConfigValidator implements InitializingBean {
                 fail("SERVER client authentication failed (HTTP 401): invalid client-id or client-token",
                         "Check NEXXAUTH_CLIENT_ID and NEXXAUTH_CLIENT_TOKEN — the token may have been rotated");
             } else if (rolesResponse.statusCode() == 403) {
-                fail("SERVER client has no access to organisation " + organisationId + " (HTTP 403)",
-                        "Check NEXXAUTH_ORGANISATION_ID (" + organisationId + ") — this client belongs to a different organisation");
+                fail("SERVER client has no access to its organisation (HTTP 403)",
+                        "Check NEXXAUTH_CLIENT_ID — this client may belong to a different organisation");
             } else {
                 fail("Roles endpoint returned HTTP " + rolesResponse.statusCode(),
                         "Response: " + rolesResponse.body());

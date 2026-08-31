@@ -15,6 +15,7 @@ public record UserResponse(
         String avatarUrl,
         Role role,
         UserStatus status,
+        String dataHash,
         Instant createdAt,
         Instant updatedAt
 ) {

@@ -25,7 +25,7 @@ import java.util.List;
  * configured at deploy time via {@code nexxauth.public-key}
  * ({@code NEXXAUTH_PUBLIC_KEY}) — the {@code publicKey} value (base64 DER SPKI,
  * no PEM headers) served by the Nexxauth org API at
- * {@code GET /organisations/{organisationId}/keys}. No runtime fetch is made.
+ * {@code GET /organisations/keys}. No runtime fetch is made.
  *
  * <p>Verification requires: the RS256 signature must be valid against the
  * configured key, {@code iss == "nexxauth"} and {@code type == "org-access"}.
@@ -57,7 +57,7 @@ public class NexxauthJwtVerifier {
             log.info("Nexxauth org public key loaded from configuration");
         } catch (Exception e) {
             throw new IllegalStateException(
-                    "Invalid nexxauth.public-key — expected the base64 DER SPKI `publicKey` value from GET /organisations/{organisationId}/keys",
+                    "Invalid nexxauth.public-key — expected the base64 DER SPKI `publicKey` value from GET /organisations/keys",
                     e);
         }
     }
@@ -87,12 +87,14 @@ public class NexxauthJwtVerifier {
             Long orgId = claims.get("orgId", Long.class);
             String orgSlug = claims.get("orgSlug", String.class);
             List<String> roles = claims.get("roles", List.class);
+            String dataHash = claims.get("dataHash", String.class);
 
             return new NexxauthClaims(
                     userId,
                     orgId,
                     orgSlug,
                     roles == null ? List.of() : List.copyOf(roles),
+                    dataHash,
                     claims.getIssuedAt().toInstant(),
                     claims.getExpiration().toInstant()
             );
@@ -114,12 +116,16 @@ public class NexxauthJwtVerifier {
     /**
      * Claims extracted from a verified org-access token. {@code sub} is the
      * Nexxauth org-user id — the same value stored in the local {@code users.id}.
+     * {@code dataHash} is an opaque UUID that changes on every non-password
+     * user mutation — the backend compares it to the stored hash to detect
+     * stale user data without hitting Nexxauth on every request.
      */
     public record NexxauthClaims(
             Long userId,
             Long orgId,
             String orgSlug,
             List<String> roles,
+            String dataHash,
             Instant issuedAt,
             Instant expiresAt
     ) {

@@ -48,6 +48,8 @@ public class UserResolver {
     @QueryMapping
     @PreAuthorize("isAuthenticated()")
     public UserResponse myProfile() {
+        // The auth filter already ran inline sync (hash-based) before this
+        // resolver executes — just look up the local user.
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         var userId = Long.parseLong(authentication.getName());
         return userService.getUserById(userId);
@@ -56,15 +58,16 @@ public class UserResolver {
     @MutationMapping
     @PreAuthorize("isAuthenticated()")
     public UserResponse syncUser() {
+        // Explicit sync call — forces a re-fetch from Nexxauth regardless of hash.
+        // Used by clients that suspect stale data (e.g. after role change).
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
-        log.info("syncUser called with userId={}", userId);
+        var dataHash = (String) request.getAttribute("nexxauthDataHash");
         if (userId == null) {
             throw new IllegalStateException("Missing user id on authenticated request");
         }
-        var response = userService.syncUser(userId);
-        log.info("syncUser returning userId={}", response.id());
-        return response;
+        // Pass null as tokenDataHash to force a re-fetch from Nexxauth.
+        return userService.syncUser(userId, null);
     }
 
     @MutationMapping
