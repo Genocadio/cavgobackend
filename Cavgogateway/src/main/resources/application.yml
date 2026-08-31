@@ -96,6 +96,19 @@ spring:
                     name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
                     strategy: RETAIN_FIRST
 
+            # REST API route for ikuriyebackend — matches requests arriving
+            # via nginx /gocavgo/ikuriye/api/** → gateway /ikuriye/api/**
+            - id: ikuriyebackend-api
+              uri: lb://ikuriyebackend
+              predicates:
+                - Path=/ikuriye/api/**
+              filters:
+                - StripPrefix=1
+                - name: DedupeResponseHeader
+                  args:
+                    name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                    strategy: RETAIN_FIRST
+
             - id: ikuriyebackend
               uri: lb://ikuriyebackend
               predicates:
