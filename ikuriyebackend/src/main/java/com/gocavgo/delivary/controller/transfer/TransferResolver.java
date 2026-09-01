@@ -47,6 +47,14 @@ public class TransferResolver {
 
     @QueryMapping
     @PreAuthorize("isAuthenticated()")
+    public List<TransferResponse> transfersForMe() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        var userId = Long.parseLong(authentication.getName());
+        return transferService.getTransfersForMatchedUser(userId);
+    }
+
+    @QueryMapping
+    @PreAuthorize("isAuthenticated()")
     public List<TransferResponse> transfersByStatus(@Argument TransferStatus status) {
         return transferService.getTransfersByStatus(status);
     }

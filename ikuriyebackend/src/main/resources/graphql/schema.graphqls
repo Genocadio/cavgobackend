@@ -738,6 +738,8 @@ type Query {
     transfer(id: ID!): Transfer!
     "Get all transfers created by the authenticated user. Requires authentication."
     myTransfers: [Transfer!]!
+    "Get transfers targeted at the authenticated user (via matchUserId or matchCompanyId). Shows PENDING transfers where the current user is the intended acceptor."
+    transfersForMe: [Transfer!]!
     "Get transfers by status. Requires authentication."
     transfersByStatus(status: TransferStatus!): [Transfer!]!
     "Get the authenticated user's notice feed, newest first. Requires authentication."

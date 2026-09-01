@@ -46,6 +46,7 @@ public class NoticeService {
     private final PackagePersonJpaRepository personRepo;
     private final PackageCustodianJpaRepository custodianRepo;
     private final TransferPackageJpaRepository transferPackageRepo;
+    private final com.gocavgo.delivary.repository.delivery.PackageJpaRepository packageRepo;
     private final NoticePublisher noticePublisher;
 
     // ── Title / message templates ───────────────────────────────────────
@@ -66,7 +67,7 @@ public class NoticeService {
             Map.entry(NoticeEventType.PACKAGE_CUSTODIAN_ASSIGNED,  new String[]{"Custodian assigned",        "A new custodian has been assigned to package %s."}),
             Map.entry(NoticeEventType.PACKAGE_CUSTODIAN_REMOVED,   new String[]{"Custodian removed",         "You are no longer a custodian of package %s."}),
             Map.entry(NoticeEventType.PACKAGE_CUSTODY_TRANSFERRED, new String[]{"Custody transferred",       "Custody of package %s has been transferred."}),
-            Map.entry(NoticeEventType.TRANSFER_PENDING,            new String[]{"Transfer created",          "A transfer has been created for package %s."}),
+            Map.entry(NoticeEventType.TRANSFER_PENDING,            new String[]{"Package transferred to you",  "A package has been transferred to you for acceptance."}),
             Map.entry(NoticeEventType.TRANSFER_REQUESTED,          new String[]{"Transfer requested",        "A transfer has been requested."}),
             Map.entry(NoticeEventType.TRANSFER_DONE,               new String[]{"Transfer completed",        "Transfer has been completed."}),
             Map.entry(NoticeEventType.TRANSFER_CANCELED,           new String[]{"Transfer cancelled",        "Transfer has been cancelled."}),
@@ -107,7 +108,14 @@ public class NoticeService {
             return;
         }
 
-        var payload = buildTransferPayload(transfer, eventType, actorId, previousStatus);
+        // For TRANSFER_PENDING, include package tracking codes in the payload
+        // so the Android notification can show which packages were transferred.
+        String trackingCodes = null;
+        if (eventType == NoticeEventType.TRANSFER_PENDING) {
+            trackingCodes = resolveTransferTrackingCodes(transfer.getId());
+        }
+
+        var payload = buildTransferPayload(transfer, eventType, actorId, previousStatus, trackingCodes);
         var notice = saveNotice(NoticeResourceType.TRANSFER, transfer.getId(), eventType, actorId, payload, null);
         saveViewers(notice.getId(), recipients);
         log.debug("notifyTransferEvent: notice={} for transfer={}, {} recipient(s)", notice.getId(), transfer.getId(), recipients.size());
@@ -372,9 +380,10 @@ public class NoticeService {
     }
 
     private String buildTransferPayload(TransferEntity transfer, NoticeEventType eventType,
-                                        Long actorId, TransferStatus previousStatus) {
+                                        Long actorId, TransferStatus previousStatus,
+                                        String trackingCodes) {
         try {
-            return JSON.writeValueAsString(payloadMap(
+            var map = payloadMap(
                     "resourceType", "TRANSFER",
                     "resourceId", transfer.getId().toString(),
                     "previousStatus", previousStatus != null ? previousStatus.name() : null,
@@ -382,11 +391,32 @@ public class NoticeService {
                     "ruleType", transfer.getRuleType().name(),
                     "actorId", actorId != null ? actorId.toString() : null,
                     "changedAt", Instant.now().toString()
-            ));
+            );
+            if (trackingCodes != null) {
+                map.put("trackingCodes", trackingCodes);
+            }
+            return JSON.writeValueAsString(map);
         } catch (JsonProcessingException e) {
             log.error("Failed to build transfer notice payload", e);
             return "{}";
         }
+    }
+
+    /**
+     * Resolves a comma-separated list of tracking codes for packages in a transfer.
+     * Used to enrich TRANSFER_PENDING notifications so the recipient knows which
+     * packages were assigned to them.
+     */
+    private String resolveTransferTrackingCodes(UUID transferId) {
+        var packageIds = transferPackageRepo.findByTransferId(transferId);
+        var codes = packageIds.stream()
+                .map(tp -> packageRepo.findById(tp.getPackageId()))
+                .filter(java.util.Optional::isPresent)
+                .map(java.util.Optional::get)
+                .map(com.gocavgo.delivary.entity.delivery.PackageEntity::getTrackingCode)
+                .filter(code -> code != null && !code.isBlank())
+                .toList();
+        return codes.isEmpty() ? null : String.join(", ", codes);
     }
 
     private String buildPackageAddedPayload(TransferEntity transfer, PackageEntity pkg, Long actorId) {

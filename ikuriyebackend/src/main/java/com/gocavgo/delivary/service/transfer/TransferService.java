@@ -384,6 +384,20 @@ public class TransferService {
                 .toList();
     }
 
+    /**
+     * Returns PENDING transfers targeted at the given user via matchUserId.
+     * Used by drivers to see packages transferred to them by workers.
+     */
+    @Transactional(readOnly = true)
+    public List<TransferResponse> getTransfersForMatchedUser(Long userId) {
+        return transferRepo.findByMatchUserIdAndStatus(userId, TransferStatus.PENDING).stream()
+                .map(t -> {
+                    var pkgs = transferPackageRepo.findByTransferId(t.getId());
+                    return toResponse(t, pkgs, null);
+                })
+                .toList();
+    }
+
     // ──────────────────────────────────────────────
     // Public helpers (used by PackageService)
     // ──────────────────────────────────────────────
