@@ -48,6 +48,9 @@ public class StorageService {
     @Value("${supabase.service-key:}")
     private String supabaseServiceKey;
 
+    @Value("${backend.base-url:https://api.med.rw/gocavgo/ikuriye}")
+    private String backendBaseUrl;
+
     @Value("${storage.local.base-path:./storage}")
     private String localStorageBasePath;
 
@@ -154,8 +157,8 @@ public class StorageService {
      * Build the REST URL for a locally stored file.
      */
     public String buildLocalFileUrl(String bucket, String storagePath) {
-        // The URL pattern matches the local file serving endpoint
-        return "/api/files/local/" + bucket + "/" + storagePath;
+        // Prepend the backend base URL so clients get a full absolute URL
+        return backendBaseUrl.replaceAll("/+$", "") + "/api/files/local/" + bucket + "/" + storagePath;
     }
 
     /**

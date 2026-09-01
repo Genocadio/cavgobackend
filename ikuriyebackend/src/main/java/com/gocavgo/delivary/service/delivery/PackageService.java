@@ -100,6 +100,8 @@ public class PackageService {
     private final TransferPackageJpaRepository transferPackageRepo;
     private final DeliveryMapper deliveryMapper;
     private final StorageService storageService;
+    private final com.gocavgo.delivary.repository.user.DriverProfileJpaRepository driverProfileRepo;
+    private final com.gocavgo.delivary.repository.user.WorkerProfileJpaRepository workerProfileRepo;
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -231,9 +233,9 @@ public class PackageService {
     private void validateAllPackagesAcceptable(List<TransferPackageEntity> transferPackages, Long actorId) {
         for (var tp : transferPackages) {
             var pkg = packageRepo.findById(tp.getPackageId())
-                    .orElseThrow(() -> new RuntimeException("Package not found: " + tp.getPackageId()));
+                    .orElseThrow(() -> new com.gocavgo.delivary.exception.BusinessValidationException("Package not found: " + tp.getPackageId()));
             if (pkg.getStatus() == PackageStatus.COMPLETED || pkg.getStatus() == PackageStatus.CANCELLED) {
-                throw new RuntimeException("Cannot accept a package with status: " + pkg.getStatus());
+                throw new com.gocavgo.delivary.exception.BusinessValidationException("Cannot accept a package with status: " + pkg.getStatus());
             }
         }
     }
@@ -360,26 +362,31 @@ public class PackageService {
      * Accepts all packages in a transfer as part of the CONFIRM flow.
      * Called by TransferService.confirmTransfer() when the owner confirms.
      * The requestor (who previously called requestTransfer) becomes the custodian.
+     * <p>
+     * The requestor's role is resolved from the database (worker/driver profile)
+     * rather than the JWT, because the caller is the transfer owner, not the
+     * requestor. CUSTOMER role is allowed here — they become a RECEIVER custodian.
      */
     @Transactional
     public List<PackageResponse> acceptPackagesForTransferConfirmation(Long requestorId, UUID transferId) {
         log.info("acceptPackagesForTransferConfirmation: requestorId={}, transferId={}", requestorId, transferId);
 
-        // Determine role from the JWT token
-        var requestorRole = SecurityUtils.getCurrentUserRole();
-        validationService.validateAcceptor(requestorId, requestorRole);
+        // The requestor must exist and be ACTIVE
+        var requestor = userRepository.findById(requestorId)
+                .orElseThrow(() -> new com.gocavgo.delivary.exception.BusinessValidationException("Requestor not found: " + requestorId));
+        if (requestor.getStatus() != com.gocavgo.delivary.enums.user.UserStatus.ACTIVE) {
+            throw new com.gocavgo.delivary.exception.BusinessValidationException("Requestor is not ACTIVE");
+        }
 
-        // Validate that the acceptor's role matches the transfer's acceptorType
-        // We need to load the transfer to check acceptorType
-        var transferEntity = transferService.getTransferEntityById(transferId);
-        validationService.validateAcceptorType(transferEntity.getAcceptorType(), requestorRole, transferId);
-
-        var custodianRole = requestorRole == Role.DRIVER ? CustodianRole.DRIVER : CustodianRole.WORKER;
+        // Resolve the requestor's role from their profile to determine custodian role.
+        // The requestor was already validated when they called acceptTransfer (CONFIRM mode),
+        // so we only need to determine their custodian role here.
+        var custodianRole = resolveRequestorCustodianRole(requestorId);
 
         // Get all packages in the transfer
         var transferPackages = transferPackageRepo.findByTransferId(transferId);
         if (transferPackages.isEmpty()) {
-            throw new RuntimeException("Transfer has no packages");
+            throw new com.gocavgo.delivary.exception.BusinessValidationException("Transfer has no packages");
         }
 
         // ★ Pre-validate ALL packages before accepting any (fail-fast)
@@ -394,6 +401,24 @@ public class PackageService {
         }
 
         return results;
+    }
+
+    /**
+     * Resolves a user's custodian role from their profile.
+     * Checks driver profile → DRIVER, worker profile → WORKER, otherwise → RECEIVER.
+     * Used by CONFIRM transfer confirmation where the requestor is not the JWT caller.
+     */
+    private CustodianRole resolveRequestorCustodianRole(Long userId) {
+        // Check driver profile first
+        if (driverProfileRepo.findByUserId(userId).isPresent()) {
+            return CustodianRole.DRIVER;
+        }
+        // Check worker profile
+        if (workerProfileRepo.findByUserId(userId).isPresent()) {
+            return CustodianRole.WORKER;
+        }
+        // No profile → CUSTOMER receiving their own package
+        return CustodianRole.RECEIVER;
     }
 
     /**
@@ -983,14 +1008,12 @@ public class PackageService {
         var pageable = resolvePageRequest(order, page, size);
         var paged = packageRepo.findByStatus(status, pageable);
 
-        // Exclude packages in PENDING/REQUESTED transfers — UNLESS the transfer
-        // targets the current user (via matchUserId, acceptorType, or matchCompanyId).
-        var pendingTransfers = java.util.stream.Stream.of(
-                        transferRepo.findByStatus(TransferStatus.PENDING),
-                        transferRepo.findByStatus(TransferStatus.REQUESTED)
-                )
-                .flatMap(java.util.Collection::stream)
-                .toList();
+        // Exclude packages in PENDING transfers — UNLESS the transfer targets
+        // the current user (via matchUserId, acceptorType, or matchCompanyId).
+        // REQUESTED transfers are excluded entirely: the requesting worker already
+        // sees the package in their "Transfers" tab, and other workers should not
+        // see it as an available offer since someone already claimed it.
+        var pendingTransfers = transferRepo.findByStatus(TransferStatus.PENDING);
 
         var unavailablePackageIds = pendingTransfers.stream()
                 .filter(t -> !transferTargetsUser(t, currentUserId, currentRole, currentCompanyId))

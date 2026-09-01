@@ -71,6 +71,11 @@ supabase:
   url: ${SUPABASE_URL:}
   service-key: ${SUPABASE_SERVICE_KEY:}
 
+# Backend base URL — prepended to local file URLs so clients get full
+# absolute paths (e.g. https://api.med.rw/gocavgo/ikuriye/api/files/local/...).
+backend:
+  base-url: ${BACKEND_BASE_URL:https://api.med.rw/gocavgo/ikuriye}
+
 # Local file storage — used when Supabase is not configured or unavailable.
 # Files are stored under this path, served via /api/files/local/{bucket}/...
 storage:

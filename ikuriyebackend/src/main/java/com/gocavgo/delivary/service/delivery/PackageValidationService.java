@@ -4,6 +4,7 @@ import com.gocavgo.delivary.enums.transfer.TransferAcceptorType;
 import com.gocavgo.delivary.enums.user.DriverStatus;
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
+import com.gocavgo.delivary.exception.BusinessValidationException;
 import com.gocavgo.delivary.repository.user.DriverProfileRepository;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.enums.delivery.DeliveryType;
@@ -55,23 +56,23 @@ public class PackageValidationService {
 
     public void validateCreator(Long userId, Role role) {
         var user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("Creator not found: " + userId));
+                .orElseThrow(() -> new BusinessValidationException("Creator not found: " + userId));
         if (user.getStatus() != UserStatus.ACTIVE) {
-            throw new RuntimeException("Creator is not ACTIVE");
+            throw new BusinessValidationException("Creator is not ACTIVE");
         }
         if (!CREATOR_ROLES.contains(role)) {
-            throw new RuntimeException("User role cannot create packages: " + role);
+            throw new BusinessValidationException("User role cannot create packages: " + role);
         }
     }
 
     public void validateAcceptor(Long userId, Role role) {
         var user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("Acceptor not found: " + userId));
+                .orElseThrow(() -> new BusinessValidationException("Acceptor not found: " + userId));
         if (user.getStatus() != UserStatus.ACTIVE) {
-            throw new RuntimeException("Acceptor is not ACTIVE");
+            throw new BusinessValidationException("Acceptor is not ACTIVE");
         }
         if (!ACCEPTOR_ROLES.contains(role)) {
-            throw new RuntimeException("User role cannot accept packages: " + role);
+            throw new BusinessValidationException("User role cannot accept packages: " + role);
         }
     }
 
@@ -82,20 +83,20 @@ public class PackageValidationService {
 
     public void validateDriver(Long driverId) {
         var user = userRepository.findById(driverId)
-                .orElseThrow(() -> new RuntimeException("Driver not found: " + driverId));
+                .orElseThrow(() -> new BusinessValidationException("Driver not found: " + driverId));
         if (user.getStatus() != UserStatus.ACTIVE) {
-            throw new RuntimeException("Driver is not ACTIVE");
+            throw new BusinessValidationException("Driver is not ACTIVE");
         }
         var driverProfile = driverProfileRepository.findByUserId(driverId)
-                .orElseThrow(() -> new RuntimeException("Driver profile not found"));
+                .orElseThrow(() -> new BusinessValidationException("Driver profile not found"));
         if (driverProfile.getStatus() != DriverStatus.ONLINE) {
-            throw new RuntimeException("Driver is not ONLINE: " + driverProfile.getStatus());
+            throw new BusinessValidationException("Driver is not ONLINE: " + driverProfile.getStatus());
         }
     }
 
     public void validateAssigner(Long userId, Role role) {
         if (!ASSIGNER_ROLES.contains(role)) {
-            throw new RuntimeException("User role cannot assign drivers: " + role);
+            throw new BusinessValidationException("User role cannot assign drivers: " + role);
         }
     }
 
@@ -103,7 +104,7 @@ public class PackageValidationService {
         var transitions = deliveryType == DeliveryType.FIXED_ROUTE ? ROUTE_TRANSITIONS : OPEN_TRANSITIONS;
         var allowed = transitions.get(current);
         if (allowed == null || !allowed.contains(next)) {
-            throw new RuntimeException("Invalid status transition: " + current + " -> " + next);
+            throw new BusinessValidationException("Invalid status transition: " + current + " -> " + next);
         }
     }
 
@@ -118,10 +119,10 @@ public class PackageValidationService {
     public void validateAcceptorType(TransferAcceptorType acceptorType, Role actorRole, UUID transferId) {
         var ctx = transferId != null ? "Transfer " + transferId : "This transfer";
         if (acceptorType == TransferAcceptorType.WORKER && actorRole != Role.WORKER) {
-            throw new RuntimeException(ctx + " requires WORKER role, but actor has " + actorRole);
+            throw new BusinessValidationException(ctx + " requires WORKER role, but actor has " + actorRole);
         }
         if (acceptorType == TransferAcceptorType.DRIVER && actorRole != Role.DRIVER) {
-            throw new RuntimeException(ctx + " requires DRIVER role, but actor has " + actorRole);
+            throw new BusinessValidationException(ctx + " requires DRIVER role, but actor has " + actorRole);
         }
         // BOTH allows both WORKER and DRIVER — no validation needed
     }

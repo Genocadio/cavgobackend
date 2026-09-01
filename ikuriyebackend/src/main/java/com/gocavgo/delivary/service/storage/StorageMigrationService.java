@@ -80,6 +80,11 @@ public class StorageMigrationService {
                 boolean success = storageService.migrateLocalToSupabase(media.getBucket(), media.getStoragePath());
                 if (success) {
                     media.setStorageMode("supabase");
+                    // Update the stored url to point to the Supabase signed URL
+                    String supabaseUrl = storageService.getFileUrl(media.getBucket(), media.getStoragePath(), false);
+                    if (supabaseUrl != null) {
+                        media.setUrl(supabaseUrl);
+                    }
                     mediaRepo.save(media);
                     migrated++;
                 } else {
