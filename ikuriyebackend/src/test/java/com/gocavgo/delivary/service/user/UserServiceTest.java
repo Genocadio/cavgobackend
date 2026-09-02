@@ -17,12 +17,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import org.mockito.ArgumentCaptor;
 import static org.mockito.Mockito.verify;
@@ -32,6 +35,7 @@ class UserServiceTest {
 
     private UserRepository userRepository;
     private WorkerProfileRepository workerProfileRepository;
+    private NexxauthClient nexxauthClient;
     private UserService userService;
 
     private final Long userId = 42L;
@@ -42,7 +46,7 @@ class UserServiceTest {
         workerProfileRepository = mock(WorkerProfileRepository.class);
         var driverProfileRepository = mock(DriverProfileRepository.class);
         var userMapper = mock(UserMapper.class);
-        var nexxauthClient = mock(NexxauthClient.class);
+        nexxauthClient = mock(NexxauthClient.class);
         var storageService = mock(StorageService.class);
         var mediaRepo = mock(PackageMediaJpaRepository.class);
 
@@ -101,5 +105,67 @@ class UserServiceTest {
         userService.assignRole(input);
 
         verify(workerProfileRepository).deleteById(profile.getId());
+    }
+
+    // ── searchUsers role filtering ──────────────────────────────────────────
+
+    private UserEntity userEntity(Long id, String email) {
+        return UserEntity.builder()
+                .id(id)
+                .email(email)
+                .status(UserStatus.ACTIVE)
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
+                .build();
+    }
+
+    private NexxauthClient.OrgUser orgUser(Long id, String... roles) {
+        return new NexxauthClient.OrgUser(id, "First", "Last", id + "@test.com",
+                null, null, true, List.of(roles), List.of());
+    }
+
+    @Test
+    void searchUsersWithRoleFilterReturnsOnlyMatchingRole() {
+        var driver = userEntity(1L, "driver@test.com");
+        var worker = userEntity(2L, "worker@test.com");
+        when(userRepository.searchUsers(null)).thenReturn(List.of(driver, worker));
+        when(nexxauthClient.getUser(1L)).thenReturn(orgUser(1L, "DRIVER"));
+        when(nexxauthClient.getUser(2L)).thenReturn(orgUser(2L, "WORKER"));
+
+        var results = userService.searchUsers(null, Role.DRIVER, null);
+
+        assertEquals(1, results.size());
+        assertEquals(Role.DRIVER, results.get(0).role());
+        assertEquals(1L, results.get(0).id());
+    }
+
+    @Test
+    void searchUsersWithNullRoleReturnsAllUsers() {
+        var driver = userEntity(1L, "driver@test.com");
+        var worker = userEntity(2L, "worker@test.com");
+        var customer = userEntity(3L, "customer@test.com");
+        when(userRepository.searchUsers(null)).thenReturn(List.of(driver, worker, customer));
+        when(nexxauthClient.getUser(1L)).thenReturn(orgUser(1L, "DRIVER"));
+        when(nexxauthClient.getUser(2L)).thenReturn(orgUser(2L, "WORKER"));
+        when(nexxauthClient.getUser(3L)).thenReturn(orgUser(3L, "CUSTOMER"));
+
+        var results = userService.searchUsers(null, null, null);
+
+        assertEquals(3, results.size());
+    }
+
+    @Test
+    void searchUsersWithQueryAndRoleFiltersBoth() {
+        var driver1 = userEntity(1L, "alice@test.com");
+        var driver2 = userEntity(2L, "bob@test.com");
+        var worker = userEntity(3L, "alice-worker@test.com");
+        when(userRepository.searchUsers("alice")).thenReturn(List.of(driver1, worker));
+        when(nexxauthClient.getUser(1L)).thenReturn(orgUser(1L, "DRIVER"));
+        when(nexxauthClient.getUser(3L)).thenReturn(orgUser(3L, "WORKER"));
+
+        var results = userService.searchUsers("alice", Role.DRIVER, null);
+
+        assertEquals(1, results.size());
+        assertEquals(1L, results.get(0).id());
     }
 }

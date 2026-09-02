@@ -170,8 +170,6 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public List<UserResponse> searchUsers(String query, Role role, UUID companyId) {
-        // Roles are no longer stored locally — the role filter parameter is accepted
-        // for API compatibility but ignored. Roles are sourced from Nexxauth.
         List<com.gocavgo.delivary.entity.user.UserEntity> users;
         if (companyId != null) {
             var userIds = new LinkedHashSet<Long>();
@@ -186,8 +184,11 @@ public class UserService {
         } else {
             users = userRepository.searchUsers(query);
         }
+        // Resolve role from Nexxauth for each user, then filter by the requested role.
+        // This ensures callers (e.g. driver picker) only see users of the requested type.
         return users.stream()
                 .map(user -> toUserResponse(user, resolveRoleFromNexxauth(user.getId())))
+                .filter(userResponse -> role == null || userResponse.role() == role)
                 .toList();
     }
 
