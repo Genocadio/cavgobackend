@@ -172,7 +172,7 @@ public class UserService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<UserResponse> searchUsers(String query, Role role, UUID companyId) {
         List<com.gocavgo.delivary.entity.user.UserEntity> users;
         if (companyId != null) {
