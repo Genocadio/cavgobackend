@@ -2,8 +2,12 @@ package com.gocavgo.delivary.service.user;
 
 import com.gocavgo.delivary.dto.user.input.AssignRoleInput;
 import com.gocavgo.delivary.dto.user.output.UserResponse;
+import com.gocavgo.delivary.entity.user.DriverProfileEntity;
 import com.gocavgo.delivary.entity.user.UserEntity;
 import com.gocavgo.delivary.entity.user.WorkerProfileEntity;
+import com.gocavgo.delivary.enums.user.DriverStatus;
+import com.gocavgo.delivary.enums.user.DriverType;
+import com.gocavgo.delivary.enums.user.EmploymentType;
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
 import com.gocavgo.delivary.mapper.user.UserMapper;
@@ -187,7 +191,21 @@ public class UserService {
         // Resolve role from Nexxauth for each user, then filter by the requested role.
         // This ensures callers (e.g. driver picker) only see users of the requested type.
         return users.stream()
-                .map(user -> toUserResponse(user, resolveRoleFromNexxauth(user.getId())))
+                .map(user -> {
+                    var resolvedRole = resolveRoleFromNexxauth(user.getId());
+                    // Auto-create missing driver profiles so the driver picker and
+                    // validateDriver() always find a profile row for DRIVER-role users.
+                    if (resolvedRole == Role.DRIVER) {
+                        driverProfileRepository.findByUserId(user.getId())
+                                .ifPresentOrElse(
+                                        p -> {}, // profile exists — nothing to do
+                                        () -> {
+                                            log.info("searchUsers: backfilling driver profile for userId={}", user.getId());
+                                            upsertDriverProfile(user);
+                                        });
+                    }
+                    return toUserResponse(user, resolvedRole);
+                })
                 .filter(userResponse -> role == null || userResponse.role() == role)
                 .toList();
     }
@@ -228,13 +246,35 @@ public class UserService {
 
         if (input.role() == Role.WORKER) {
             upsertWorkerProfile(saved);
-        } else {
-            // Leaving the WORKER role — drop the profile.
+            // Leaving DRIVER role — drop the driver profile.
+            driverProfileRepository.findByUserId(saved.getId())
+                    .ifPresent(profile -> {
+                        log.info("assignRole: removing driver profile id={} for user={} (new role={})",
+                                profile.getId(), saved.getId(), input.role());
+                        driverProfileRepository.deleteById(profile.getId());
+                    });
+        } else if (input.role() == Role.DRIVER) {
+            upsertDriverProfile(saved);
+            // Leaving WORKER role — drop the worker profile.
             workerProfileRepository.findByUserId(saved.getId())
                     .ifPresent(profile -> {
                         log.info("assignRole: removing worker profile id={} for user={} (new role={})",
                                 profile.getId(), saved.getId(), input.role());
                         workerProfileRepository.deleteById(profile.getId());
+                    });
+        } else {
+            // Leaving both WORKER and DRIVER roles — drop any profiles.
+            workerProfileRepository.findByUserId(saved.getId())
+                    .ifPresent(profile -> {
+                        log.info("assignRole: removing worker profile id={} for user={} (new role={})",
+                                profile.getId(), saved.getId(), input.role());
+                        workerProfileRepository.deleteById(profile.getId());
+                    });
+            driverProfileRepository.findByUserId(saved.getId())
+                    .ifPresent(profile -> {
+                        log.info("assignRole: removing driver profile id={} for user={} (new role={})",
+                                profile.getId(), saved.getId(), input.role());
+                        driverProfileRepository.deleteById(profile.getId());
                     });
         }
 
@@ -304,6 +344,26 @@ public class UserService {
                 .createdAt(Instant.now())
                 .updatedAt(Instant.now())
                 .build();
+    }
+
+    private void upsertDriverProfile(UserEntity user) {
+        var existing = driverProfileRepository.findByUserId(user.getId());
+        if (existing.isPresent()) {
+            var profile = existing.get();
+            driverProfileRepository.save(profile);
+            log.info("upsertDriverProfile: updated driver profile id={} for user={}",
+                    profile.getId(), user.getId());
+            return;
+        }
+        var profile = driverProfileRepository.save(DriverProfileEntity.builder()
+                .user(user)
+                .employmentType(EmploymentType.COMPANY)
+                .driverType(DriverType.OPEN)
+                .status(DriverStatus.OFFLINE)
+                .createdAt(Instant.now())
+                .build());
+        log.info("upsertDriverProfile: created driver profile id={} for user={}",
+                profile.getId(), user.getId());
     }
 
     private void upsertWorkerProfile(UserEntity user) {

@@ -2,8 +2,12 @@ package com.gocavgo.delivary.service.user;
 
 import com.gocavgo.delivary.dto.user.input.AssignRoleInput;
 import com.gocavgo.delivary.dto.user.output.UserResponse;
+import com.gocavgo.delivary.entity.user.DriverProfileEntity;
 import com.gocavgo.delivary.entity.user.UserEntity;
 import com.gocavgo.delivary.entity.user.WorkerProfileEntity;
+import com.gocavgo.delivary.enums.user.DriverStatus;
+import com.gocavgo.delivary.enums.user.DriverType;
+import com.gocavgo.delivary.enums.user.EmploymentType;
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
 import com.gocavgo.delivary.mapper.user.UserMapper;
@@ -35,6 +39,7 @@ class UserServiceTest {
 
     private UserRepository userRepository;
     private WorkerProfileRepository workerProfileRepository;
+    private DriverProfileRepository driverProfileRepository;
     private NexxauthClient nexxauthClient;
     private UserService userService;
 
@@ -44,7 +49,7 @@ class UserServiceTest {
     void setUp() {
         userRepository = mock(UserRepository.class);
         workerProfileRepository = mock(WorkerProfileRepository.class);
-        var driverProfileRepository = mock(DriverProfileRepository.class);
+        driverProfileRepository = mock(DriverProfileRepository.class);
         var userMapper = mock(UserMapper.class);
         nexxauthClient = mock(NexxauthClient.class);
         var storageService = mock(StorageService.class);
@@ -99,12 +104,55 @@ class UserServiceTest {
                 .build();
         when(userRepository.findById(userId)).thenReturn(Optional.of(workerUser()));
         when(workerProfileRepository.findByUserId(userId)).thenReturn(Optional.of(profile));
+        when(driverProfileRepository.findByUserId(userId)).thenReturn(Optional.empty());
         when(userRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         var input = new AssignRoleInput(userId, Role.CUSTOMER, null);
         userService.assignRole(input);
 
         verify(workerProfileRepository).deleteById(profile.getId());
+    }
+
+    // ── Driver profile tests ─────────────────────────────────────────────
+
+    @Test
+    void assignDriverRoleCreatesProfileWhenNoneExists() {
+        when(userRepository.findById(userId)).thenReturn(Optional.of(workerUser()));
+        when(driverProfileRepository.findByUserId(userId)).thenReturn(Optional.empty());
+        when(driverProfileRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(workerProfileRepository.findByUserId(userId)).thenReturn(Optional.empty());
+        when(userRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var input = new AssignRoleInput(userId, Role.DRIVER, null);
+        userService.assignRole(input);
+
+        var captor = ArgumentCaptor.forClass(DriverProfileEntity.class);
+        verify(driverProfileRepository).save(captor.capture());
+        var captured = captor.getValue();
+        assertEquals(userId, captured.getUser().getId());
+        assertEquals(EmploymentType.COMPANY, captured.getEmploymentType());
+        assertEquals(DriverType.OPEN, captured.getDriverType());
+        assertEquals(DriverStatus.OFFLINE, captured.getStatus());
+    }
+
+    @Test
+    void leavingDriverRoleDeletesProfile() {
+        var profile = DriverProfileEntity.builder()
+                .id(UUID.randomUUID())
+                .user(workerUser())
+                .employmentType(EmploymentType.COMPANY)
+                .driverType(DriverType.OPEN)
+                .status(DriverStatus.OFFLINE)
+                .createdAt(Instant.now())
+                .build();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(workerUser()));
+        when(driverProfileRepository.findByUserId(userId)).thenReturn(Optional.of(profile));
+        when(userRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var input = new AssignRoleInput(userId, Role.CUSTOMER, null);
+        userService.assignRole(input);
+
+        verify(driverProfileRepository).deleteById(profile.getId());
     }
 
     // ── searchUsers role filtering ──────────────────────────────────────────
@@ -131,6 +179,8 @@ class UserServiceTest {
         when(userRepository.searchUsers(null)).thenReturn(List.of(driver, worker));
         when(nexxauthClient.getUser(1L)).thenReturn(orgUser(1L, "DRIVER"));
         when(nexxauthClient.getUser(2L)).thenReturn(orgUser(2L, "WORKER"));
+        when(driverProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
+        when(driverProfileRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         var results = userService.searchUsers(null, Role.DRIVER, null);
 
@@ -148,6 +198,8 @@ class UserServiceTest {
         when(nexxauthClient.getUser(1L)).thenReturn(orgUser(1L, "DRIVER"));
         when(nexxauthClient.getUser(2L)).thenReturn(orgUser(2L, "WORKER"));
         when(nexxauthClient.getUser(3L)).thenReturn(orgUser(3L, "CUSTOMER"));
+        when(driverProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
+        when(driverProfileRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         var results = userService.searchUsers(null, null, null);
 
@@ -162,6 +214,8 @@ class UserServiceTest {
         when(userRepository.searchUsers("alice")).thenReturn(List.of(driver1, worker));
         when(nexxauthClient.getUser(1L)).thenReturn(orgUser(1L, "DRIVER"));
         when(nexxauthClient.getUser(3L)).thenReturn(orgUser(3L, "WORKER"));
+        when(driverProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
+        when(driverProfileRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         var results = userService.searchUsers("alice", Role.DRIVER, null);
 
