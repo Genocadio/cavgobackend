@@ -195,16 +195,30 @@ public class UserService {
                     var resolvedRole = resolveRoleFromNexxauth(user.getId());
                     // Auto-create missing driver profiles so the driver picker and
                     // validateDriver() always find a profile row for DRIVER-role users.
+                    String driverStatus = null;
                     if (resolvedRole == Role.DRIVER) {
-                        driverProfileRepository.findByUserId(user.getId())
-                                .ifPresentOrElse(
-                                        p -> {}, // profile exists — nothing to do
-                                        () -> {
-                                            log.info("searchUsers: backfilling driver profile for userId={}", user.getId());
-                                            upsertDriverProfile(user);
-                                        });
+                        var profile = driverProfileRepository.findByUserId(user.getId());
+                        if (profile.isPresent()) {
+                            driverStatus = profile.get().getStatus().name();
+                        } else {
+                            log.info("searchUsers: backfilling driver profile for userId={}", user.getId());
+                            var newProfile = upsertDriverProfile(user);
+                            if (newProfile != null) {
+                                driverStatus = newProfile.getStatus().name();
+                            }
+                        }
                     }
-                    return toUserResponse(user, resolvedRole);
+                    var resp = toUserResponse(user, resolvedRole);
+                    if (driverStatus != null) {
+                        resp = new UserResponse(
+                                resp.id(), resp.email(), resp.phone(),
+                                resp.firstName(), resp.lastName(), resp.username(),
+                                resp.avatarUrl(), resp.role(), resp.status(),
+                                resp.dataHash(), resp.createdAt(), resp.updatedAt(),
+                                driverStatus
+                        );
+                    }
+                    return resp;
                 })
                 .filter(userResponse -> role == null || userResponse.role() == role)
                 .toList();
@@ -346,24 +360,25 @@ public class UserService {
                 .build();
     }
 
-    private void upsertDriverProfile(UserEntity user) {
+    private DriverProfileEntity upsertDriverProfile(UserEntity user) {
         var existing = driverProfileRepository.findByUserId(user.getId());
         if (existing.isPresent()) {
             var profile = existing.get();
             driverProfileRepository.save(profile);
             log.info("upsertDriverProfile: updated driver profile id={} for user={}",
                     profile.getId(), user.getId());
-            return;
+            return profile;
         }
         var profile = driverProfileRepository.save(DriverProfileEntity.builder()
                 .user(user)
                 .employmentType(EmploymentType.COMPANY)
                 .driverType(DriverType.OPEN)
-                .status(DriverStatus.OFFLINE)
+                .status(DriverStatus.ONLINE)
                 .createdAt(Instant.now())
                 .build());
         log.info("upsertDriverProfile: created driver profile id={} for user={}",
                 profile.getId(), user.getId());
+        return profile;
     }
 
     private void upsertWorkerProfile(UserEntity user) {
@@ -406,7 +421,7 @@ public class UserService {
                         avatarUrl,
                         base.role(), base.status(),
                         user.getDataHash(),
-                        base.createdAt(), base.updatedAt()
+                        base.createdAt(), base.updatedAt(), null
                 );
             }
         }
@@ -416,7 +431,7 @@ public class UserService {
                 base.avatarUrl(),
                 base.role(), base.status(),
                 user.getDataHash(),
-                base.createdAt(), base.updatedAt()
+                base.createdAt(), base.updatedAt(), null
         );
     }
 

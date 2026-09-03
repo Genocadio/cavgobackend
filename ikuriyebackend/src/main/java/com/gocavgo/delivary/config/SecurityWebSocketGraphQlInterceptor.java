@@ -1,5 +1,6 @@
 package com.gocavgo.delivary.config;
 
+import com.gocavgo.delivary.repository.user.DriverProfileRepository;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.security.NexxauthJwtVerifier;
 import com.gocavgo.delivary.security.NexxauthRoles;
@@ -33,6 +34,7 @@ public class SecurityWebSocketGraphQlInterceptor implements WebSocketGraphQlInte
 
     private final NexxauthJwtVerifier jwtVerifier;
     private final UserRepository userRepository;
+    private final DriverProfileRepository driverProfileRepository;
 
     @Override
     public Mono<Object> handleConnectionInitialization(WebSocketSessionInfo session, Map<String, Object> connectionInitPayload) {
@@ -71,6 +73,11 @@ public class SecurityWebSocketGraphQlInterceptor implements WebSocketGraphQlInte
                 session.getAttributes().put(SecurityContext.class.getName(), securityContext);
                 session.getAttributes().put("AUTHENTICATION", authentication);
 
+                // Touch driver heartbeat — sets last_seen_at + ONLINE on connection_init
+                if (authorities.stream().anyMatch(a -> a.getAuthority().equals("ROLE_DRIVER"))) {
+                    driverProfileRepository.touchLastSeen(claims.userId());
+                }
+
                 log.info("WebSocket connection_init authenticated for userId={}, roles={}", claims.userId(), authorities);
             } catch (Exception e) {
                 log.warn("WebSocket connection_init authentication failed: {}", e.getMessage());
@@ -93,6 +100,8 @@ public class SecurityWebSocketGraphQlInterceptor implements WebSocketGraphQlInte
         }
 
         if (context != null && context.getAuthentication() != null) {
+            // Touch driver heartbeat on every WebSocket GraphQL operation
+            touchDriverIfPresent(context.getAuthentication());
             SecurityContext finalContext = context;
             return chain.next(request)
                     .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(Mono.just(finalContext)));
@@ -101,11 +110,24 @@ public class SecurityWebSocketGraphQlInterceptor implements WebSocketGraphQlInte
         // 2. Check if SecurityContextHolder was set by HTTP filter (during HTTP upgrade or POST)
         Authentication httpAuth = SecurityContextHolder.getContext().getAuthentication();
         if (httpAuth != null && httpAuth.isAuthenticated()) {
+            touchDriverIfPresent(httpAuth);
             var httpContext = new SecurityContextImpl(httpAuth);
             return chain.next(request)
                     .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(Mono.just(httpContext)));
         }
 
         return chain.next(request);
+    }
+
+    private void touchDriverIfPresent(Authentication auth) {
+        if (auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_DRIVER"))) {
+            try {
+                Long userId = Long.parseLong(auth.getName());
+                driverProfileRepository.touchLastSeen(userId);
+            } catch (Exception e) {
+                log.debug("Could not touch driver profile: {}", e.getMessage());
+            }
+        }
     }
 }

@@ -87,11 +87,8 @@ public class PackageValidationService {
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new BusinessValidationException("Driver is not ACTIVE");
         }
-        var driverProfile = driverProfileRepository.findByUserId(driverId)
+        driverProfileRepository.findByUserId(driverId)
                 .orElseThrow(() -> new BusinessValidationException("Driver profile not found"));
-        if (driverProfile.getStatus() != DriverStatus.ONLINE) {
-            throw new BusinessValidationException("Driver is not ONLINE: " + driverProfile.getStatus());
-        }
     }
 
     public void validateAssigner(Long userId, Role role) {

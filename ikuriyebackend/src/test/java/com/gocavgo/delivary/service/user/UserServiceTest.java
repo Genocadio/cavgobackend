@@ -60,7 +60,7 @@ class UserServiceTest {
             var role = invocation.getArgument(1, com.gocavgo.delivary.enums.user.Role.class);
             return new UserResponse(u.getId(), u.getEmail(), u.getPhone(), u.getFirstName(),
                     u.getLastName(), u.getUsername(), null, role, u.getStatus(),
-                    u.getDataHash(), u.getCreatedAt(), u.getUpdatedAt());
+                    u.getDataHash(), u.getCreatedAt(), u.getUpdatedAt(), null);
         });
 
         userService = new UserService(userRepository, workerProfileRepository,
@@ -132,7 +132,7 @@ class UserServiceTest {
         assertEquals(userId, captured.getUser().getId());
         assertEquals(EmploymentType.COMPANY, captured.getEmploymentType());
         assertEquals(DriverType.OPEN, captured.getDriverType());
-        assertEquals(DriverStatus.OFFLINE, captured.getStatus());
+        assertEquals(DriverStatus.ONLINE, captured.getStatus());
     }
 
     @Test

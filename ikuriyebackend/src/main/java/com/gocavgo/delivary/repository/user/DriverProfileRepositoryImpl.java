@@ -3,6 +3,7 @@ package com.gocavgo.delivary.repository.user;
 import com.gocavgo.delivary.entity.user.DriverProfileEntity;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -39,5 +40,15 @@ public class DriverProfileRepositoryImpl implements DriverProfileRepository {
     @Override
     public void deleteById(UUID id) {
         jpaRepository.deleteById(id);
+    }
+
+    @Override
+    public void touchLastSeen(Long userId) {
+        jpaRepository.touchLastSeen(userId, Instant.now());
+    }
+
+    @Override
+    public int markStaleDriversOffline(Instant threshold) {
+        return jpaRepository.markStaleDriversOffline(threshold);
     }
 }

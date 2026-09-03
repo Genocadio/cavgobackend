@@ -1,6 +1,7 @@
 package com.gocavgo.delivary.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gocavgo.delivary.repository.user.DriverProfileRepository;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.service.user.UserService;
 import jakarta.servlet.FilterChain;
@@ -43,6 +44,7 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
     private final NexxauthJwtVerifier jwtVerifier;
     private final UserRepository userRepository;
     private final UserService userService;
+    private final DriverProfileRepository driverProfileRepository;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -129,6 +131,15 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
                 claims.userId().toString(), token, authorities
         );
         SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        // Touch driver profile heartbeat — sets last_seen_at + ONLINE
+        if (authorities.stream().anyMatch(a -> a.getAuthority().equals("ROLE_DRIVER"))) {
+            try {
+                driverProfileRepository.touchLastSeen(claims.userId());
+            } catch (Exception e) {
+                log.debug("Could not touch driver profile for userId={}: {}", claims.userId(), e.getMessage());
+            }
+        }
 
         log.debug("Nexxauth token verified for userId={}, roles={}, synced={}",
                 claims.userId(), authorities, needsSync);

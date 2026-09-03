@@ -120,6 +120,8 @@ type User {
     createdAt: String!
     "ISO-8601 timestamp of last update"
     updatedAt: String!
+    "Driver online/offline status — only populated for DRIVER-role users"
+    driverStatus: String
 }
 
 "Type of media link."

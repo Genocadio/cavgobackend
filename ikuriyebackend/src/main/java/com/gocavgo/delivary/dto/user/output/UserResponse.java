@@ -17,6 +17,7 @@ public record UserResponse(
         UserStatus status,
         String dataHash,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String driverStatus
 ) {
 }
