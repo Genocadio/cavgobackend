@@ -292,6 +292,12 @@ type PackageCreation {
     transfer: Transfer
 }
 
+"Event emitted when a transfer is created (e.g. worker sends packages to a driver)."
+type TransferEvent {
+    "The newly created transfer"
+    transfer: Transfer!
+}
+
 "Return type for acceptTransfer mutation. Contains the updated package."
 type AcceptOffer {
     "The updated delivery package"
@@ -799,6 +805,13 @@ type Subscription {
     Only authenticated users with DRIVER or WORKER roles receive events.
     """
     newPackageTransfer: PackageCreation!
+
+    """
+    Real-time notification when a transfer is created targeting this user.
+    Fires for manually-created transfers (e.g. worker sending packages to a driver).
+    Filtered by acceptorType, matchUserId, and matchCompanyId.
+    """
+    transferCreated: TransferEvent!
 
     """
     Real-time notice feed. Emits a Notice whenever one is created for the

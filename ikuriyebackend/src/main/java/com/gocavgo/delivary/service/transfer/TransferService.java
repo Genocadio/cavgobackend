@@ -11,7 +11,9 @@ import com.gocavgo.delivary.dto.transfer.input.CreateTransferInput;
 import com.gocavgo.delivary.dto.transfer.input.RegenerateTransferCodeInput;
 import com.gocavgo.delivary.dto.transfer.input.UpdateTransferInput;
 import com.gocavgo.delivary.dto.delivery.output.TransferAcceptResult;
+import com.gocavgo.delivary.dto.transfer.output.TransferEvent;
 import com.gocavgo.delivary.dto.transfer.output.TransferResponse;
+import com.gocavgo.delivary.service.subscription.TransferCreatedPublisher;
 import com.gocavgo.delivary.entity.transfer.TransferEntity;
 import com.gocavgo.delivary.service.delivery.PackageValidationService;
 import com.gocavgo.delivary.mapper.transfer.TransferMapper;
@@ -49,6 +51,7 @@ public class TransferService {
     private final TransferMapper transferMapper;
     private final NoticeService noticeService;
     private final PackageJpaRepository packageRepo;
+    private final TransferCreatedPublisher transferCreatedPublisher;
 
     @Autowired @Lazy
     private com.gocavgo.delivary.service.delivery.PackageService packageService;
@@ -108,9 +111,14 @@ public class TransferService {
         }
         transferPackageRepo.saveAll(pkgEntities);
 
-        log.info("createTransfer: done id={}, ruleType={}", entity.getId(), input.ruleType());
-        return toResponse(entity, pkgEntities,
+        var response = toResponse(entity, pkgEntities,
                 input.ruleType() == TransferRuleType.SECURE ? rawCode : null);
+        log.info("createTransfer: done id={}, ruleType={}", entity.getId(), input.ruleType());
+
+        // Publish to real-time subscription for target acceptor
+        transferCreatedPublisher.publish(new TransferEvent(response));
+
+        return response;
     }
 
     @Transactional
