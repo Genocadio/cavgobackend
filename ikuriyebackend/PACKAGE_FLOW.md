@@ -98,6 +98,9 @@ CREATED ──► ACCEPTED ──► PICKED_UP ──► IN_TRANSIT ──► PE
 ### FIXED_ROUTE — State Machine
 
 ```
+                                              ┌──────────────────────────────────────────┐
+                                              │ (driver delivers directly to receiver)    │
+                                              ▼                                          │
 CREATED ──► ORIGIN_OFFICE ──► ASSIGNED_DRIVER ──► IN_TRANSIT ──► DESTINATION_OFFICE ──► READY_FOR_COLLECTION ──► PENDING_CONFIRMATION ──► DELIVERED ──► COMPLETED
    │               │                  │                │                   │                       │                       │             │            │
    └───────────────┴──────────────────┴────────────────┴───────────────────┴───────────────────────┴───────────────────────┴─────────────┴────────────┴──► CANCELLED
@@ -533,7 +536,7 @@ sequenceDiagram
 | 2b (alt) | Driver | `regenerateDeliveryCode(packageId)` | `PENDING_CONFIRMATION` (unchanged) | — |
 
 **Constraints:**
-- `initiateDelivery` requires the current custodian (active WORKER/DRIVER). Valid only from `IN_TRANSIT` (OPEN) or `READY_FOR_COLLECTION` (FIXED_ROUTE).
+- `initiateDelivery` requires the current custodian (active WORKER/DRIVER). Valid only from `IN_TRANSIT` (OPEN/FIXED_ROUTE) or `READY_FOR_COLLECTION` (FIXED_ROUTE).
 - `confirmDelivery` requires authentication and the caller must be the **sender**, **receiver**, or **current custodian**. The code must match, be unused, and be unexpired.
 - `regenerateDeliveryCode` only while status is `PENDING_CONFIRMATION`; the previous code is invalidated.
 - `updatePackageStatus` cannot set `PENDING_CONFIRMATION` or `DELIVERED` directly — those statuses require the dedicated mutations.
@@ -723,7 +726,7 @@ The `package_custody` table logs every transfer in append-only order. The `fromE
 | `CREATED` | `ORIGIN_OFFICE`, `CANCELLED` |
 | `ORIGIN_OFFICE` | `ASSIGNED_DRIVER`, `CANCELLED` |
 | `ASSIGNED_DRIVER` | `IN_TRANSIT`, `CANCELLED` |
-| `IN_TRANSIT` | `DESTINATION_OFFICE`, `CANCELLED` |
+| `IN_TRANSIT` | `PENDING_CONFIRMATION` *(via `initiateDelivery` — direct to receiver)*, `DESTINATION_OFFICE`, `CANCELLED` |
 | `DESTINATION_OFFICE` | `READY_FOR_COLLECTION`, `CANCELLED` |
 | `READY_FOR_COLLECTION` | `PENDING_CONFIRMATION` *(via `initiateDelivery`)*, `CANCELLED` |
 | `PENDING_CONFIRMATION` | `DELIVERED` *(via `confirmDelivery` with delivery code)*, `CANCELLED` |

@@ -26,7 +26,7 @@ enum UserStatus {
 enum DeliveryType {
     "Open delivery — flexible status transitions (CREATED → ACCEPTED → PICKED_UP → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED → COMPLETED)"
     OPEN
-    "Fixed-route delivery — follows office-to-office flow (CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → DESTINATION_OFFICE → READY_FOR_COLLECTION → PENDING_CONFIRMATION → DELIVERED → COMPLETED)"
+    "Fixed-route delivery — follows office-to-office flow (CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → DESTINATION_OFFICE → READY_FOR_COLLECTION → PENDING_CONFIRMATION → DELIVERED → COMPLETED). Drivers may also deliver directly from IN_TRANSIT via initiateDelivery."
     FIXED_ROUTE
 }
 

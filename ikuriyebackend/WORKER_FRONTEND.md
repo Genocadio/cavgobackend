@@ -53,7 +53,7 @@ This document is the contract between the **CavGo backend** (`com.gocavgo.deliva
 | Create a package | `createPackage` | Sender auto-filled for CUSTOMER; **WORKER must supply sender** (registered `userId` or anonymous name+phone) |
 | Assign a driver | `assignDriver` | Assigner must be current custodian or office staff; driver must be `ONLINE` |
 | Advance status | `updatePackageStatus` | Per state machine; actor must be current custodian or office staff |
-| Initiate delivery | `initiateDelivery` | From `IN_TRANSIT` (OPEN) / `READY_FOR_COLLECTION` (FIXED_ROUTE) → `PENDING_CONFIRMATION`; generates 6-digit delivery code |
+| Initiate delivery | `initiateDelivery` | From `IN_TRANSIT` (OPEN/FIXED_ROUTE) / `READY_FOR_COLLECTION` (FIXED_ROUTE) → `PENDING_CONFIRMATION`; generates 6-digit delivery code |
 | Confirm delivery | `confirmDelivery` | From `PENDING_CONFIRMATION`; needs delivery code → `DELIVERED` |
 | Regenerate delivery code | `regenerateDeliveryCode` | While `PENDING_CONFIRMATION` |
 | Track packages | `packageByTrackingCode` | Public, no auth |
@@ -232,7 +232,8 @@ SortOrder: ASC, DESC
 
 **OPEN:** `CREATED → ACCEPTED → PICKED_UP → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED → COMPLETED` (cancel anytime before terminal)
 
-**FIXED_ROUTE:** `CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → DESTINATION_OFFICE → READY_FOR_COLLECTION → PENDING_CONFIRMATION → DELIVERED → COMPLETED`
+**FIXED_ROUTE (via office):** `CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → DESTINATION_OFFICE → READY_FOR_COLLECTION → PENDING_CONFIRMATION → DELIVERED → COMPLETED`
+**FIXED_ROUTE (direct delivery):** `CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED → COMPLETED`
 
 ---
 

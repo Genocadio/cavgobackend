@@ -41,7 +41,7 @@ public class PackageValidationService {
             Map.entry(PackageStatus.ACCEPTED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.ORIGIN_OFFICE, Set.of(PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.ASSIGNED_DRIVER, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
-            Map.entry(PackageStatus.IN_TRANSIT, Set.of(PackageStatus.DESTINATION_OFFICE, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.IN_TRANSIT, Set.of(PackageStatus.DESTINATION_OFFICE, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.DESTINATION_OFFICE, Set.of(PackageStatus.READY_FOR_COLLECTION, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.READY_FOR_COLLECTION, Set.of(PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.PENDING_CONFIRMATION, Set.of(PackageStatus.DELIVERED, PackageStatus.CANCELLED)),

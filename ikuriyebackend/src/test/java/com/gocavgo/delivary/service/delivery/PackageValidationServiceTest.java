@@ -92,4 +92,10 @@ class PackageValidationServiceTest {
                 validationService.validateTransition(PackageStatus.IN_TRANSIT, PackageStatus.ASSIGNED_DRIVER, DeliveryType.FIXED_ROUTE));
         assertEquals("Invalid status transition: IN_TRANSIT -> ASSIGNED_DRIVER", ex.getMessage());
     }
+
+    @Test
+    void validateTransitionAllowsFixedRouteInTransitToPendingConfirmation() {
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.IN_TRANSIT, PackageStatus.PENDING_CONFIRMATION, DeliveryType.FIXED_ROUTE));
+    }
 }
