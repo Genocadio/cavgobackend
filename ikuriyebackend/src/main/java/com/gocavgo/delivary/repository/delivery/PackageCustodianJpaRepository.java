@@ -18,4 +18,19 @@ public interface PackageCustodianJpaRepository extends JpaRepository<PackageCust
     Optional<PackageCustodianEntity> findTopByPackageIdOrderByAssignedAtDesc(UUID packageId);
     List<PackageCustodianEntity> findByUserIdAndRole(Long userId, CustodianRole role);
     void deleteByPackageId(UUID packageId);
+
+    /**
+     * Returns package IDs where the given user is the *current* (most recent)
+     * custodian.  Only one custodian row per package is the latest; if a user
+     * was replaced by someone else this query will NOT return that package.
+     */
+    @org.springframework.data.jpa.repository.Query(
+        value = "SELECT DISTINCT pc.package_id FROM package_custodians pc " +
+                "INNER JOIN ( " +
+                "  SELECT package_id, MAX(assigned_at) AS max_at " +
+                "  FROM package_custodians GROUP BY package_id " +
+                ") latest ON pc.package_id = latest.package_id AND pc.assigned_at = latest.max_at " +
+                "WHERE pc.user_id = :userId",
+        nativeQuery = true)
+    List<UUID> findCurrentCustodianPackageIdsByUserId(@org.springframework.data.jpa.repository.Param("userId") Long userId);
 }

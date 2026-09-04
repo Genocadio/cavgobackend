@@ -915,16 +915,15 @@ public class PackageService {
                         .forEach(packageIds::add);
             }
         } else if (role == Role.DRIVER) {
-            custodianRepo.findByUserId(userId).stream()
-                    .map(PackageCustodianEntity::getPackageId)
-                    .forEach(packageIds::add);
+            // Only show packages where this driver is the CURRENT (most recent) custodian.
+            // Historical custodian records are excluded so drivers never see packages
+            // that have been handed off to someone else.
+            packageIds.addAll(custodianRepo.findCurrentCustodianPackageIdsByUserId(userId));
         } else {
-            packageRepo.findByStatus(PackageStatus.CREATED, Sort.unsorted()).stream()
-                    .map(PackageEntity::getId)
-                    .forEach(packageIds::add);
-            custodianRepo.findByUserId(userId).stream()
-                    .map(PackageCustodianEntity::getPackageId)
-                    .forEach(packageIds::add);
+            // WORKER / ADMIN / SUPER_ADMIN — only show packages where the user is
+            // the current custodian.  We no longer include all CREATED packages
+            // globally; those belong in the availablePackages query instead.
+            packageIds.addAll(custodianRepo.findCurrentCustodianPackageIdsByUserId(userId));
         }
 
         // Also include packages from REQUESTED transfers where this user is
