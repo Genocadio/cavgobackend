@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 
@@ -25,6 +26,7 @@ public class OfflineDriverScheduler {
     private final DriverProfileRepository driverProfileRepository;
 
     @Scheduled(fixedRate = 5 * 60 * 1000) // every 5 minutes
+    @Transactional
     public void markStaleDriversOffline() {
         Instant threshold = Instant.now().minusMillis(STALE_THRESHOLD_MS);
         int count = driverProfileRepository.markStaleDriversOffline(threshold);

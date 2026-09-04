@@ -2,6 +2,7 @@ package com.gocavgo.delivary.repository.user;
 
 import com.gocavgo.delivary.entity.user.DriverProfileEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -43,11 +44,13 @@ public class DriverProfileRepositoryImpl implements DriverProfileRepository {
     }
 
     @Override
+    @Transactional
     public void touchLastSeen(Long userId) {
         jpaRepository.touchLastSeen(userId, Instant.now());
     }
 
     @Override
+    @Transactional
     public int markStaleDriversOffline(Instant threshold) {
         return jpaRepository.markStaleDriversOffline(threshold);
     }
