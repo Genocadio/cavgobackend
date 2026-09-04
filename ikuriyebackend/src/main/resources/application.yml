@@ -56,6 +56,12 @@ nexxauth:
   client-id: ${NEXXAUTH_CLIENT_ID:}
   client-token: ${NEXXAUTH_CLIENT_TOKEN:}
 
+# Cavgo Main — internal sync endpoint. When a WORKER or DRIVER authenticates
+# through ikuriyebackend, a fire-and-forget request is sent to cavgomain to
+// ensure it mirrors the same user. Optional: if not set, sync is skipped.
+cavgomain:
+  base-url: ${CAVGOMAIN_BASE_URL:}
+
 eureka:
   client:
     register-with-eureka: true

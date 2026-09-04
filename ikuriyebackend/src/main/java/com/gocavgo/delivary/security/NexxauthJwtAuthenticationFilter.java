@@ -1,6 +1,7 @@
 package com.gocavgo.delivary.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gocavgo.delivary.config.CavgomainSyncClient;
 import com.gocavgo.delivary.repository.user.DriverProfileRepository;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.service.user.UserService;
@@ -45,6 +46,7 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
     private final UserRepository userRepository;
     private final UserService userService;
     private final DriverProfileRepository driverProfileRepository;
+    private final CavgomainSyncClient cavgoSyncClient;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -139,6 +141,15 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
             } catch (Exception e) {
                 log.debug("Could not touch driver profile for userId={}: {}", claims.userId(), e.getMessage());
             }
+        }
+
+        // ── Cavgo Main sync (fire-and-forget) ───────────────────────────────
+        // When a WORKER or DRIVER authenticates through ikuriyebackend, trigger
+        // an async sync to cavgomain so it mirrors the same user. Non-blocking.
+        boolean isWorkerOrDriver = authorities.stream().anyMatch(a ->
+                a.getAuthority().equals("ROLE_WORKER") || a.getAuthority().equals("ROLE_DRIVER"));
+        if (isWorkerOrDriver && cavgoSyncClient.isEnabled()) {
+            cavgoSyncClient.syncUser(claims.userId());
         }
 
         log.debug("Nexxauth token verified for userId={}, roles={}, synced={}",

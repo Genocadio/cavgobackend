@@ -40,6 +40,35 @@ public class UserService {
      */
     @Transactional
     public CompanyUserResponseDto syncUser(Long nexxauthUserId) {
+        return syncUser(nexxauthUserId, null);
+    }
+
+    /**
+     * Ensures the local user mirror is up-to-date with Nexxauth. Uses the
+     * {@code dataHash} from the JWT token to detect stale data without hitting
+     * Nexxauth on every request:
+     * <ul>
+     *   <li>If the user doesn't exist locally → fetch from Nexxauth and create.</li>
+     *   <li>If the stored {@code dataHash} is null or differs from the token's
+     *       hash → fetch from Nexxauth and update.</li>
+     *   <li>If the hash matches → return the cached local user (no Nexxauth call).</li>
+     * </ul>
+     * This avoids a Nexxauth API call (network I/O + latency) in the common case;
+     * only when the user is newly created or their profile changed in Nexxauth
+     * (which updates the dataHash) does a sync occur.
+     */
+    @Transactional
+    public CompanyUserResponseDto syncUser(Long nexxauthUserId, String dataHash) {
+        // Fast path: if the user exists locally and the dataHash matches, skip the
+        // Nexxauth API call entirely.
+        if (dataHash != null) {
+            var existing = companyUserRepository.findById(nexxauthUserId).orElse(null);
+            if (existing != null && dataHash.equals(existing.getDataHash())) {
+                log.debug("syncUser: dataHash matches for userId={}, skipping Nexxauth call", nexxauthUserId);
+                return CompanyUserResponseDto.fromEntity(existing);
+            }
+        }
+
         log.info("syncUser: starting for nexxauthUserId={}", nexxauthUserId);
         var nexxauthUser = nexxauthClient.getUser(nexxauthUserId);
         log.info("syncUser: Nexxauth returned user={} (enabled={}, roles={})",
@@ -85,7 +114,13 @@ public class UserService {
                 changed = true;
             }
 
-            if (changed) {
+            // Always update the dataHash if provided, even if no other fields changed
+        if (dataHash != null && !dataHash.equals(user.getDataHash())) {
+            user.setDataHash(dataHash);
+            changed = true;
+        }
+
+        if (changed) {
                 log.info("syncUser: saving updated user id={}", user.getId());
                 return CompanyUserResponseDto.fromEntity(companyUserRepository.save(user));
             }
@@ -103,6 +138,7 @@ public class UserService {
         user.setPhone(nexxauthUser.phone());
         user.setStatus(status);
         user.setRole(role);
+        if (dataHash != null) user.setDataHash(dataHash);
 
         // If no company is provided, we can't create a CompanyUser without a company.
         // In that case, try to find a default company or leave it null.

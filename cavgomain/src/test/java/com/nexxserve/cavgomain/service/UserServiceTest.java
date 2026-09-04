@@ -46,7 +46,7 @@ class UserServiceTest {
     void syncUser_createsNewUser_whenNotExists() {
         var nexxauthUser = mockNexxauthUser(100L, true, List.of("admin", "driver"));
         when(nexxauthClient.getUser(100L)).thenReturn(nexxauthUser);
-        when(companyUserRepository.findById(100L)).thenReturn(Optional.empty());
+        when(companyUserRepository.findById(100L)).thenReturn(Optional.empty()).thenReturn(Optional.empty());
 
         Company company = new Company();
         company.setId(1L);
@@ -91,6 +91,7 @@ class UserServiceTest {
         existing.setStatus(UserStatus.ACTIVE);
         existing.setCreatedAt(LocalDateTime.now());
         existing.setUpdatedAt(LocalDateTime.now());
+        // Return existing with no dataHash so inline sync triggers
         when(companyUserRepository.findById(100L)).thenReturn(Optional.of(existing));
         when(companyUserRepository.save(any(CompanyUser.class))).thenAnswer(inv -> {
             CompanyUser u = inv.getArgument(0);
@@ -124,8 +125,10 @@ class UserServiceTest {
         existing.setPhone("+1234567890");
         existing.setRole(CompanyUserRole.DRIVER);
         existing.setStatus(UserStatus.ACTIVE);
+        existing.setDataHash("test-hash-123");
         existing.setCreatedAt(LocalDateTime.now());
         existing.setUpdatedAt(LocalDateTime.now());
+        // Return with matching dataHash so inline sync skips the Nexxauth call
         when(companyUserRepository.findById(100L)).thenReturn(Optional.of(existing));
 
         var result = userService.syncUser(100L);
@@ -152,6 +155,7 @@ class UserServiceTest {
         existing.setStatus(UserStatus.ACTIVE);
         existing.setCreatedAt(LocalDateTime.now());
         existing.setUpdatedAt(LocalDateTime.now());
+        // Return with no dataHash so inline sync triggers
         when(companyUserRepository.findById(100L)).thenReturn(Optional.of(existing));
         when(companyUserRepository.save(any(CompanyUser.class))).thenAnswer(inv -> {
             CompanyUser u = inv.getArgument(0);
@@ -171,7 +175,7 @@ class UserServiceTest {
                 "janesmith", true, List.of("unknown_role"), List.of()
         );
         when(nexxauthClient.getUser(100L)).thenReturn(nexxauthUser);
-        when(companyUserRepository.findById(100L)).thenReturn(Optional.empty());
+        when(companyUserRepository.findById(100L)).thenReturn(Optional.empty()).thenReturn(Optional.empty());
 
         Company company = new Company();
         company.setId(1L);
@@ -189,6 +193,66 @@ class UserServiceTest {
         var result = userService.syncUser(100L);
 
         assertEquals(CompanyUserRole.DRIVER, result.getRole());
+    }
+
+    @Test
+    void syncUser_dataHashMismatch_triggersNexxauthCall() {
+        var nexxauthUser = mockNexxauthUser(100L, true, List.of("driver"));
+        when(nexxauthClient.getUser(100L)).thenReturn(nexxauthUser);
+
+        Company company = new Company();
+        company.setId(1L);
+        company.setCompanyName("Test Co");
+
+        CompanyUser existing = new CompanyUser();
+        existing.setId(100L);
+        existing.setCompany(company);
+        existing.setFirstName("John");
+        existing.setLastName("Doe");
+        existing.setRole(CompanyUserRole.DRIVER);
+        existing.setStatus(UserStatus.ACTIVE);
+        existing.setDataHash("old-hash");
+        existing.setCreatedAt(LocalDateTime.now());
+        existing.setUpdatedAt(LocalDateTime.now());
+        when(companyUserRepository.findById(100L)).thenReturn(Optional.of(existing));
+        when(companyUserRepository.save(any(CompanyUser.class))).thenAnswer(inv -> {
+            CompanyUser u = inv.getArgument(0);
+            u.setUpdatedAt(LocalDateTime.now());
+            return u;
+        });
+
+        // Pass a different dataHash — should trigger sync
+        var result = userService.syncUser(100L, "new-hash-456");
+
+        // Nexxauth should have been called because hash mismatch
+        verify(nexxauthClient).getUser(100L);
+        // User should be synced with updated fields
+        assertEquals("John", result.getFirstName());
+    }
+
+    @Test
+    void syncUser_dataHashMatches_skipsNexxauthCall() {
+        Company company = new Company();
+        company.setId(1L);
+        company.setCompanyName("Test Co");
+
+        CompanyUser existing = new CompanyUser();
+        existing.setId(100L);
+        existing.setCompany(company);
+        existing.setFirstName("John");
+        existing.setLastName("Doe");
+        existing.setRole(CompanyUserRole.DRIVER);
+        existing.setStatus(UserStatus.ACTIVE);
+        existing.setDataHash("same-hash");
+        existing.setCreatedAt(LocalDateTime.now());
+        existing.setUpdatedAt(LocalDateTime.now());
+        when(companyUserRepository.findById(100L)).thenReturn(Optional.of(existing));
+
+        // Pass the same dataHash — should skip Nexxauth call entirely
+        var result = userService.syncUser(100L, "same-hash");
+
+        verify(nexxauthClient, never()).getUser(any());
+        assertEquals("John", result.getFirstName());
     }
 
     @Test

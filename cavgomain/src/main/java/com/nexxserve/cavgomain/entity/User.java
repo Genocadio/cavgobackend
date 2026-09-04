@@ -40,6 +40,14 @@ public abstract class User extends BaseEntity {
     @Column(name = "status")
     private UserStatus status = UserStatus.ACTIVE;
 
+    /**
+     * Opaque hash from the Nexxauth JWT — changes on every non-password user
+     * mutation. Used by the backend to detect stale local data without hitting
+     * Nexxauth on every request.
+     */
+    @Column(name = "data_hash")
+    private String dataHash;
+
     @Column(name = "date_of_birth")
     private java.time.LocalDate dateOfBirth;
 

@@ -78,12 +78,14 @@ public class NexxauthJwtVerifier {
             Long orgId = claims.get("orgId", Long.class);
             String orgSlug = claims.get("orgSlug", String.class);
             List<String> roles = claims.get("roles", List.class);
+            String dataHash = claims.get("dataHash", String.class);
 
             return new NexxauthClaims(
                     userId,
                     orgId,
                     orgSlug,
                     roles == null ? List.of() : List.copyOf(roles),
+                    dataHash,
                     claims.getIssuedAt().toInstant(),
                     claims.getExpiration().toInstant()
             );
@@ -110,6 +112,7 @@ public class NexxauthJwtVerifier {
             Long orgId,
             String orgSlug,
             List<String> roles,
+            String dataHash,
             Instant issuedAt,
             Instant expiresAt
     ) {

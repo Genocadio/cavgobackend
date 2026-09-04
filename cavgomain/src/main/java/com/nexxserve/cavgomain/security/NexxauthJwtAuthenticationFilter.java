@@ -3,6 +3,7 @@ package com.nexxserve.cavgomain.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nexxserve.cavgomain.enums.UserStatus;
 import com.nexxserve.cavgomain.repository.UserRepository;
+import com.nexxserve.cavgomain.service.UserService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -41,6 +42,7 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final NexxauthJwtVerifier jwtVerifier;
     private final UserRepository userRepository;
+    private final UserService userService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -65,16 +67,50 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
 
         request.setAttribute("nexxauthUserId", claims.userId());
         request.setAttribute("nexxauthClaims", claims);
+        request.setAttribute("nexxauthDataHash", claims.dataHash());
+        request.setAttribute("nexxauthRoles", claims.roles());
 
         // Skip re-authentication if a valid security context already exists
+        // (e.g. forwarded requests within the same thread).
         if (SecurityContextHolder.getContext().getAuthentication() != null
                 && SecurityContextHolder.getContext().getAuthentication().isAuthenticated()) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // A local DISABLED row blocks the request even with a valid token
+        // ── DataHash-based inline sync ───────────────────────────────────────
+        // On every authenticated request, check whether the user exists locally
+        // and whether the JWT's dataHash matches the stored one. If not, sync
+        // from Nexxauth BEFORE the request proceeds so that resolvers always
+        // operate on up-to-date user data (roles, profile, status).
         var localUser = userRepository.findById(claims.userId()).orElse(null);
+        boolean needsSync = localUser == null
+                || claims.dataHash() == null
+                || !claims.dataHash().equals(localUser.getDataHash());
+
+        if (needsSync) {
+            String reason = localUser == null ? "user not found locally"
+                    : claims.dataHash() == null ? "token has no dataHash"
+                    : "hash mismatch";
+            log.info("Inline sync: userId={} ({})", claims.userId(), reason);
+            try {
+                userService.syncUser(claims.userId(), claims.dataHash());
+                // Re-read after sync to pick up the potentially updated status.
+                localUser = userRepository.findById(claims.userId()).orElse(null);
+            } catch (Exception e) {
+                log.error("Inline sync failed for userId={}: {}", claims.userId(), e.getMessage());
+                if (localUser == null) {
+                    // User doesn't exist and we can't provision them — block.
+                    writeUnauthorized(response, "SYNC_FAILED",
+                            "Could not provision user profile: " + e.getMessage());
+                    return;
+                }
+                // User exists but sync failed — proceed with stale data rather
+                // than blocking all requests when Nexxauth is temporarily down.
+            }
+        }
+
+        // A local DISABLED row blocks the request even with a valid token.
         if (localUser != null && localUser.getStatus() == UserStatus.INACTIVE) {
             log.warn("Nexxauth token presented for disabled userId={}", claims.userId());
             writeUnauthorized(response, JwtAuthenticationException.Reason.USER_DISABLED.name(), "User account is disabled");
@@ -93,7 +129,8 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
         );
         SecurityContextHolder.getContext().setAuthentication(authentication);
 
-        log.info("Nexxauth token verified for userId={}, roles={}", claims.userId(), authorities);
+        log.debug("Nexxauth token verified for userId={}, roles={}, synced={}",
+                claims.userId(), authorities, needsSync);
         filterChain.doFilter(request, response);
     }
 
