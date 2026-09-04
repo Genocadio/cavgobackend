@@ -3,6 +3,7 @@ package com.gocavgo.delivary.repository.delivery;
 import com.gocavgo.delivary.enums.delivery.CustodianRole;
 import com.gocavgo.delivary.entity.delivery.PackageCustodianEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -32,5 +33,5 @@ public interface PackageCustodianJpaRepository extends JpaRepository<PackageCust
                 ") latest ON pc.package_id = latest.package_id AND pc.assigned_at = latest.max_at " +
                 "WHERE pc.user_id = :userId",
         nativeQuery = true)
-    List<UUID> findCurrentCustodianPackageIdsByUserId(@org.springframework.data.jpa.repository.Param("userId") Long userId);
+    List<UUID> findCurrentCustodianPackageIdsByUserId(@Param("userId") Long userId);
 }
