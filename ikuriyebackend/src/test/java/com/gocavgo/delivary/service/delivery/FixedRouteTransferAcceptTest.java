@@ -212,8 +212,8 @@ class FixedRouteTransferAcceptTest {
     }
 
     @Test
-    void openRouteAccept_stillGoesToAccepted() {
-        // Verify the existing OPEN_ROUTE behavior is not broken by the fix
+    void openRouteDriverAccept_goesToPickedUp() {
+        // Driver meets sender directly → package goes straight to PICKED_UP
         var customerId = createUser("or-customer@test.com", Role.CUSTOMER);
         var driverId = createUser("or-driver@test.com", Role.DRIVER);
 
@@ -236,10 +236,41 @@ class FixedRouteTransferAcceptTest {
         var result = packageService.acceptPackageByTransfer(driverId, transferId, null);
         var accepted = result.acceptedPackages().get(0).deliveryPackage();
 
-        // OPEN_ROUTE → ACCEPTED (unchanged behavior)
-        assertThat(accepted.status()).isEqualTo(PackageStatus.ACCEPTED);
+        // OPEN_ROUTE + DRIVER acceptor → PICKED_UP (driver met sender directly)
+        assertThat(accepted.status()).isEqualTo(PackageStatus.PICKED_UP);
         assertThat(lastCustodian(accepted).userId()).isEqualTo(driverId);
         assertThat(lastCustodian(accepted).role()).isEqualTo(CustodianRole.DRIVER);
+    }
+
+    @Test
+    void openRouteWorkerAccept_stillGoesToAccepted() {
+        // Worker accepts from sender → package is at office (ACCEPTED)
+        var customerId = createUser("or-customer2@test.com", Role.CUSTOMER);
+        var workerId = createUser("or-worker@test.com", Role.WORKER);
+
+        var input = new CreatePackageInput(
+                DeliveryType.OPEN,
+                new CreatePackageInput.PersonInput(PersonRole.SENDER, customerId, "Alice", "+123"),
+                new CreatePackageInput.PersonInput(PersonRole.RECEIVER, null, "Bob", "+456"),
+                new CreatePackageInput.LocationInput(LocationType.ORIGIN, 0.0, 0.0, "Origin", null, null),
+                new CreatePackageInput.LocationInput(LocationType.DESTINATION, 0.0, 0.0, "Destination", null, null),
+                null,
+                TransferRuleType.AUTO,
+                null,
+                null
+        );
+        var creation = packageService.createPackage(customerId, Role.CUSTOMER, null, input);
+        var pkgId = creation.deliveryPackage().id();
+        var transferId = creation.transfer().id();
+
+        authenticateAs(workerId, Role.WORKER);
+        var result = packageService.acceptPackageByTransfer(workerId, transferId, null);
+        var accepted = result.acceptedPackages().get(0).deliveryPackage();
+
+        // OPEN_ROUTE + WORKER acceptor → ACCEPTED (at office)
+        assertThat(accepted.status()).isEqualTo(PackageStatus.ACCEPTED);
+        assertThat(lastCustodian(accepted).userId()).isEqualTo(workerId);
+        assertThat(lastCustodian(accepted).role()).isEqualTo(CustodianRole.WORKER);
     }
 
     @Test

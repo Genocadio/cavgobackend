@@ -66,6 +66,20 @@ class PackageValidationServiceTest {
     }
 
     @Test
+    void validateTransitionAllowsCreatedToPickedUpForOpenDelivery() {
+        // Driver meets sender directly → package goes straight to PICKED_UP
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.CREATED, PackageStatus.PICKED_UP, DeliveryType.OPEN));
+    }
+
+    @Test
+    void validateTransitionAllowsCreatedToPickedUpForFixedRoute() {
+        // Driver meets sender directly → package goes straight to PICKED_UP
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.CREATED, PackageStatus.PICKED_UP, DeliveryType.FIXED_ROUTE));
+    }
+
+    @Test
     void validateTransitionAllowsOriginOfficeToInTransit() {
         // Drivers who accepted a transfer at the origin office can drive directly
         assertDoesNotThrow(() ->

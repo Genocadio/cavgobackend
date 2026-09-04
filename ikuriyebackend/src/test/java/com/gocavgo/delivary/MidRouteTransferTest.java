@@ -143,16 +143,16 @@ class MidRouteTransferTest {
         assertThat(created.transfers()).hasSize(1);
         var firstTransferId = created.transfers().get(0).id();
 
-        // 2. Driver 1 accepts the original transfer → ACCEPTED, custodian = driver 1
+        // 2. Driver 1 accepts the original transfer → PICKED_UP (driver met sender directly),
+        //    custodian = driver 1
         authenticateAs(driver1Id, Role.DRIVER);
         var firstAccept = packageService.acceptPackageByTransfer(driver1Id, firstTransferId, null);
         var accepted = firstAccept.acceptedPackages().get(0).deliveryPackage();
-        assertThat(accepted.status()).isEqualTo(PackageStatus.ACCEPTED);
+        assertThat(accepted.status()).isEqualTo(PackageStatus.PICKED_UP);
         assertThat(lastCustodian(accepted).userId()).isEqualTo(driver1Id);
 
-        // 3. Driver 1 picks up and goes in transit (identity proves custody — no token)
+        // 3. Driver 1 goes in transit (identity proves custody — no token)
         authenticateAs(driver1Id, Role.DRIVER);
-        packageService.updateStatus(new UpdatePackageStatusInput(accepted.id(), driver1Id, PackageStatus.PICKED_UP, null));
         var inTransit = packageService.updateStatus(
                 new UpdatePackageStatusInput(accepted.id(), driver1Id, PackageStatus.IN_TRANSIT, null));
         assertThat(inTransit.status()).isEqualTo(PackageStatus.IN_TRANSIT);
@@ -211,7 +211,7 @@ class MidRouteTransferTest {
 
         // Driver 2 (NOT the custodian) tries to advance the package → rejected
         assertThatThrownBy(() -> packageService.updateStatus(
-                new UpdatePackageStatusInput(created.id(), driver2Id, PackageStatus.PICKED_UP, null)))
+                new UpdatePackageStatusInput(created.id(), driver2Id, PackageStatus.IN_TRANSIT, null)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("current custodian");
     }

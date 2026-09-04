@@ -112,7 +112,7 @@ A Customer is a **sender or receiver** of packages. They do not handle packages 
 | Event | Why the Customer should care | Frontend action |
 |---|---|---|
 | `PACKAGE_CREATED` | Their package was successfully created. | Show confirmation, display tracking code. |
-| `PACKAGE_ACCEPTED` | A worker/driver has picked up their package. | Update package status badge → "Accepted". |
+| `PACKAGE_ACCEPTED` | A worker has accepted the package at the office. | Update package status badge → "Accepted". |
 | `PACKAGE_PICKED_UP` | Package has been physically picked up. | Update status badge → "Picked up". |
 | `PACKAGE_IN_TRANSIT` | Package is moving toward the destination. | Update status badge → "In transit". Show on map. |
 | `PACKAGE_ORIGIN_OFFICE` | Package arrived at the origin office (FIXED_ROUTE). | Update status badge → "At origin office". |
@@ -259,7 +259,7 @@ A Driver transports packages between locations. They receive packages from worke
 
 | Event | Why the Driver should care | Frontend action |
 |---|---|---|
-| `PACKAGE_ACCEPTED` | A package was accepted (e.g. they auto-accepted via transfer). | Show in "My packages" list. |
+| `PACKAGE_ACCEPTED` | A worker accepted a package at the office. | Show in available packages list. |
 | `PACKAGE_CUSTODIAN_ASSIGNED` | They were assigned as a driver by a worker. | ⚠️ **Notification** — a new package is waiting for them. Show route/collection info. |
 | `PACKAGE_PICKED_UP` | They picked up a package (status transition). | Update status badge → "Picked up". |
 | `PACKAGE_IN_TRANSIT` | They marked the package as in transit. | Update status, show navigation/ETA. |

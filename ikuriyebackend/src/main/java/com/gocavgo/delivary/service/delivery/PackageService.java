@@ -259,10 +259,17 @@ public class PackageService {
         var previousStatus = pkg.getStatus();
         PackageStatus newStatus = null;
         if (previousStatus == PackageStatus.CREATED) {
-            // FIXED_ROUTE packages go to ORIGIN_OFFICE; OPEN_ROUTE goes to ACCEPTED
-            newStatus = pkg.getDeliveryType() == DeliveryType.FIXED_ROUTE
-                    ? PackageStatus.ORIGIN_OFFICE
-                    : PackageStatus.ACCEPTED;
+            // FIXED_ROUTE packages go to ORIGIN_OFFICE;
+            // OPEN_ROUTE with a DRIVER acceptor goes straight to PICKED_UP
+            //   (driver met the sender directly → package is in driver's custody);
+            // OPEN_ROUTE with a WORKER acceptor goes to ACCEPTED (at office).
+            if (pkg.getDeliveryType() == DeliveryType.FIXED_ROUTE) {
+                newStatus = PackageStatus.ORIGIN_OFFICE;
+            } else if (custodianRole == CustodianRole.DRIVER) {
+                newStatus = PackageStatus.PICKED_UP;
+            } else {
+                newStatus = PackageStatus.ACCEPTED;
+            }
             validationService.validateTransition(pkg.getStatus(), newStatus, pkg.getDeliveryType());
             pkg.setStatus(newStatus);
         }

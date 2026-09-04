@@ -190,7 +190,8 @@ class ConfirmTransferCustomerRequestorTest {
         assertThat(confirmedTransfer.status()).isEqualTo(TransferStatus.DONE);
 
         var pkg = packageService.getPackageById(created.id());
-        assertThat(pkg.status()).isIn(PackageStatus.ACCEPTED, PackageStatus.ORIGIN_OFFICE);
+        // Driver acceptor from sender directly → PICKED_UP (not ACCEPTED)
+        assertThat(pkg.status()).isEqualTo(PackageStatus.PICKED_UP);
         assertThat(lastCustodian(pkg).userId()).isEqualTo(driverRequestorId);
         assertThat(lastCustodian(pkg).role()).isEqualTo(CustodianRole.DRIVER);
     }

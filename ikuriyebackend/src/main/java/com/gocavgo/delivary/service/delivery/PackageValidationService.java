@@ -25,7 +25,7 @@ public class PackageValidationService {
     private final DriverProfileRepository driverProfileRepository;
 
     private static final Map<PackageStatus, Set<PackageStatus>> OPEN_TRANSITIONS = Map.of(
-            PackageStatus.CREATED, Set.of(PackageStatus.ACCEPTED, PackageStatus.CANCELLED),
+            PackageStatus.CREATED, Set.of(PackageStatus.ACCEPTED, PackageStatus.PICKED_UP, PackageStatus.CANCELLED),
             PackageStatus.ACCEPTED, Set.of(PackageStatus.PICKED_UP, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED),
             PackageStatus.PICKED_UP, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED),
             PackageStatus.IN_TRANSIT, Set.of(PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED),
@@ -37,7 +37,7 @@ public class PackageValidationService {
 
     @SuppressWarnings("unchecked")
     private static final Map<PackageStatus, Set<PackageStatus>> ROUTE_TRANSITIONS = Map.ofEntries(
-            Map.entry(PackageStatus.CREATED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.CREATED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.PICKED_UP, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.ACCEPTED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.ORIGIN_OFFICE, Set.of(PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.ASSIGNED_DRIVER, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),

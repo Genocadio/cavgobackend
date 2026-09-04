@@ -90,10 +90,20 @@ package_events             — append-only audit timeline of every action
 ### OPEN — State Machine
 
 ```
-CREATED ──► ACCEPTED ──► PICKED_UP ──► IN_TRANSIT ──► PENDING_CONFIRMATION ──► DELIVERED ──► COMPLETED
-   │            │              │              │                │              │              │
-   └────────────┴──────────────┴──────────────┴────────────────┴──────────────┴──────────────┴──► CANCELLED
+                   ┌─────────────────────────────────────────────────────────────────┐
+                   │                                                                 │
+                   │  Worker accepts from sender                                     │
+                   ▼                                                                 │
+              ACCEPTED ─────────────────────────────────────────────────────────────┐ │
+                   │                                                                 │ │
+CREATED ──►       │  Driver accepts from sender directly                            │ │
+   │              ▼                                                                 │ │
+   └──────► PICKED_UP ──► IN_TRANSIT ──► PENDING_CONFIRMATION ──► DELIVERED ──► COMPLETED
+              │              │                │              │              │
+              └──────────────┴────────────────┴──────────────┴──────────────┴──► CANCELLED
 ```
+
+**Key:** When a **driver** accepts from a sender directly, the package goes straight to `PICKED_UP` (driver already has the package). When a **worker** accepts, it goes to `ACCEPTED` (at office, needs driver assignment).
 
 ### FIXED_ROUTE — State Machine
 
@@ -167,10 +177,10 @@ sequenceDiagram
     A->>S: acceptTransfer(transferId, transferCode=null for AUTO)
     Note over S: For SECURE: transferCode is verified against stored hash.
     Note over S: All packages pre-validated before any mutation (fail-fast).
-    Note over S: Role resolved: DRIVER → DRIVER custodian, WORKER → WORKER custodian.
-    Note over S: Each package: status→ACCEPTED, custody recorded.
+    Note over S: Role resolved: DRIVER → PICKED_UP (driver met sender directly),
+    Note over S:   WORKER → ACCEPTED (at office).
     Note over S: Transfer status → DONE.
-    S-->>A: { transfer(status=DONE), acceptedPackages: [{ package(status=ACCEPTED) }, ...] }
+    S-->>A: { transfer(status=DONE), acceptedPackages: [{ package(status=PICKED_UP or ACCEPTED) }, ...] }
 ```
 
 ### Step-by-step
@@ -178,8 +188,9 @@ sequenceDiagram
 | Step | Who | Action | Transfer Status | Package Status | Custodian |
 |---|---|---|---|---|---|
 | 1 | Customer | `createPackage(transferRuleType=AUTO)` | `PENDING` | `CREATED` | _(none)_ |
-| 2 | Driver/Worker | `acceptTransfer(transferId)` | `DONE` | `ACCEPTED` | DRIVER or WORKER |
-| 3 | Driver | Continue normal flow (`PICKED_UP` → ... → `COMPLETED`) | — | onwards | DRIVER |
+| 2 | Driver | `acceptTransfer(transferId)` | `DONE` | `PICKED_UP` | DRIVER |
+| 2 | Worker | `acceptTransfer(transferId)` | `DONE` | `ACCEPTED` | WORKER |
+| 3 | Driver | Continue normal flow (`IN_TRANSIT` → ... → `COMPLETED`) | — | onwards | DRIVER |
 
 ---
 
@@ -247,13 +258,9 @@ sequenceDiagram
     Note over S: No custodian row yet. Package enters the pool.
 
     D->>S: acceptTransfer(transferId)
-    S-->>D: { package(status=ACCEPTED) }
+    S-->>D: { package(status=PICKED_UP) }
+    Note over S: Driver met sender directly → package is in driver's custody.
     Note over S: Custodian: DRIVER. Custody: SENDER → DRIVER
-
-    D->>S: updateStatus(PICKED_UP)
-    S-->>D: package(status=PICKED_UP)
-    Note over S: Driver is the current custodian — identity proves the pickup.
-    Note over S: Custody: DRIVER → DRIVER (physical pickup confirmed)
 
     D->>S: updateStatus(IN_TRANSIT)
     S-->>D: package(status=IN_TRANSIT)
@@ -276,16 +283,13 @@ sequenceDiagram
 | Step | Who | Action | Status after | Custodian after | Code |
 |---|---|---|---|---|---|
 | 1 | Customer | `createPackage` | `CREATED` | _(none)_ | — |
-| 2 | Driver | **`acceptTransfer`** | `ACCEPTED` | DRIVER | — |
-| 3 | Driver | `updateStatus(PICKED_UP)` | `PICKED_UP` | DRIVER | — |
-| 4 | Driver | `updateStatus(IN_TRANSIT)` | `IN_TRANSIT` | DRIVER | — |
-| 5 | Driver | `initiateDelivery` | `PENDING_CONFIRMATION` | DRIVER | Delivery code generated + published |
-| 6 | Sender/Receiver | `confirmDelivery` + delivery code | `DELIVERED` | _(no new custodian)_ | Delivery code consumed |
-| 7 | Driver | `updateStatus(COMPLETED)` | `COMPLETED` | _(no change)_ | — |
+| 2 | Driver | **`acceptTransfer`** | `PICKED_UP` | DRIVER | — |
+| 3 | Driver | `updateStatus(IN_TRANSIT)` | `IN_TRANSIT` | DRIVER | — |
+| 4 | Driver | `initiateDelivery` | `PENDING_CONFIRMATION` | DRIVER | Delivery code generated + published |
+| 5 | Sender/Receiver | `confirmDelivery` + delivery code | `DELIVERED` | _(no new custodian)_ | Delivery code consumed |
+| 6 | Driver | `updateStatus(COMPLETED)` | `COMPLETED` | _(no change)_ | — |
 
-> **Note on acceptance:** The old `acceptPackage(packageId, actorId)` mutation has been replaced by `acceptTransfer(transferId, transferCode)`. Packages are now accepted through transfers. See [Flow F](#6-flow-f--package-created-with-transfer-auto--secure) for AUTO/SECURE and [Flow G](#7-flow-g--package-created-with-transfer-confirm) for CONFIRM flows.
-
-**Who can mark the package picked up?** The driver who accepted it — custody is proven by the custodian records (the driver is the current custodian after `acceptTransfer`). No token is needed.
+> **Note on acceptance:** When a driver accepts from a sender directly (OPEN delivery), the package goes straight to `PICKED_UP` because the driver already has the package. The driver does not need to manually mark it as picked up. See [Flow F](#6-flow-f--package-created-with-transfer-auto--secure) for AUTO/SECURE and [Flow G](#7-flow-g--package-created-with-transfer-confirm) for CONFIRM flows.
 
 **Who has the delivery code?**
 The driver initiates delivery (`initiateDelivery`), and the code is published to the sender/receiver only through their notice feed. Any of the sender or receiver can submit it in `confirmDelivery`.
@@ -710,7 +714,7 @@ The `package_custody` table logs every transfer in append-only order. The `fromE
 
 | Current status | Allowed next statuses |
 |---|---|
-| `CREATED` | `ACCEPTED`, `CANCELLED` |
+| `CREATED` | `ACCEPTED` *(worker accepts)*, `PICKED_UP` *(driver accepts from sender directly)*, `CANCELLED` |
 | `ACCEPTED` | `PICKED_UP`, `CANCELLED` |
 | `PICKED_UP` | `IN_TRANSIT`, `CANCELLED` |
 | `IN_TRANSIT` | `PENDING_CONFIRMATION` *(via `initiateDelivery`)*, `CANCELLED` |
@@ -723,7 +727,7 @@ The `package_custody` table logs every transfer in append-only order. The `fromE
 
 | Current status | Allowed next statuses |
 |---|---|
-| `CREATED` | `ORIGIN_OFFICE`, `CANCELLED` |
+| `CREATED` | `ORIGIN_OFFICE`, `PICKED_UP` *(driver accepts from sender directly)*, `CANCELLED` |
 | `ORIGIN_OFFICE` | `ASSIGNED_DRIVER`, `CANCELLED` |
 | `ASSIGNED_DRIVER` | `IN_TRANSIT`, `CANCELLED` |
 | `IN_TRANSIT` | `PENDING_CONFIRMATION` *(via `initiateDelivery` — direct to receiver)*, `DESTINATION_OFFICE`, `CANCELLED` |
