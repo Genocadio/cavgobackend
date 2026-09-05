@@ -257,21 +257,45 @@ public class PackageService {
         }
 
         var previousStatus = pkg.getStatus();
+        var priorCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId());
         PackageStatus newStatus = null;
         if (previousStatus == PackageStatus.CREATED) {
-            // FIXED_ROUTE packages go to ORIGIN_OFFICE;
-            // OPEN_ROUTE with a DRIVER acceptor goes straight to PICKED_UP
-            //   (driver met the sender directly → package is in driver's custody);
-            // OPEN_ROUTE with a WORKER acceptor goes to ACCEPTED (at office).
-            if (pkg.getDeliveryType() == DeliveryType.FIXED_ROUTE) {
-                newStatus = PackageStatus.ORIGIN_OFFICE;
-            } else if (custodianRole == CustodianRole.DRIVER) {
+            // A DRIVER accepting from the sender directly already holds the package
+            // (any delivery type) → PICKED_UP, so they can deliver or transfer onward
+            // without a redundant office "pick up" step.
+            // A WORKER accepting at the office: FIXED_ROUTE → ORIGIN_OFFICE,
+            // OPEN_ROUTE → ACCEPTED (at office, to be handed to a driver).
+            if (custodianRole == CustodianRole.DRIVER) {
                 newStatus = PackageStatus.PICKED_UP;
+            } else if (pkg.getDeliveryType() == DeliveryType.FIXED_ROUTE) {
+                newStatus = PackageStatus.ORIGIN_OFFICE;
             } else {
                 newStatus = PackageStatus.ACCEPTED;
             }
             validationService.validateTransition(pkg.getStatus(), newStatus, pkg.getDeliveryType());
             pkg.setStatus(newStatus);
+        } else if (custodianRole == CustodianRole.WORKER
+                && pkg.getDeliveryType() == DeliveryType.FIXED_ROUTE
+                && priorCustodian.map(c -> c.getRole() == CustodianRole.DRIVER).orElse(false)
+                && (previousStatus == PackageStatus.PICKED_UP || previousStatus == PackageStatus.IN_TRANSIT)) {
+            // A DRIVER transferred an in-flight FIXED_ROUTE package to the office and
+            // the office accepted it: the package has now physically arrived at that
+            // office → DESTINATION_OFFICE. The accepting worker is recorded under an
+            // OFFICE custody row (same convention as marking arrival via updateStatus),
+            // so any office staff can run the delivery leg.
+            newStatus = PackageStatus.DESTINATION_OFFICE;
+            validationService.validateTransition(previousStatus, newStatus, pkg.getDeliveryType());
+            pkg.setStatus(newStatus);
+            // Custody role OFFICE (not WORKER) — mirrors updateCustodianForStatus's
+            // DESTINATION_OFFICE handling so all office staff can see the package.
+            custodianRole = CustodianRole.OFFICE;
+        } else if (custodianRole == CustodianRole.WORKER
+                && pkg.getDeliveryType() == DeliveryType.FIXED_ROUTE
+                && (previousStatus == PackageStatus.DESTINATION_OFFICE || previousStatus == PackageStatus.READY_FOR_COLLECTION)) {
+            // Package is already office-held (e.g. handed between office staff) — record
+            // the acceptor under an OFFICE row too, not a private WORKER row, so every
+            // office worker keeps seeing and acting on it.
+            custodianRole = CustodianRole.OFFICE;
         }
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);
@@ -443,7 +467,9 @@ public class PackageService {
      * Initiates delivery for a package: transitions it to PENDING_CONFIRMATION,
      * generates a one-time delivery code, and publishes that code to the
      * package's people (sender/receiver) and custodians via their notice feed.
-     * Only the current custodian (an active WORKER/DRIVER) can initiate.
+     * Only the current custodian (an active WORKER/DRIVER) or trusted office
+     * staff can initiate — the office must be able to run the delivery leg for
+     * packages it received from a driver (custody row is role OFFICE).
      */
     @Transactional
     public DeliveryCodeResult initiateDelivery(Long actorId, UUID packageId) {
@@ -452,7 +478,7 @@ public class PackageService {
 
         var role = SecurityUtils.getCurrentUserRole();
         validationService.validateAcceptor(actorId, role);
-        validateCurrentCustodian(pkg.getId(), actorId);
+        validateDeliveryActor(pkg, actorId);
         validationService.validateTransition(pkg.getStatus(), PackageStatus.PENDING_CONFIRMATION, pkg.getDeliveryType());
 
         var previousStatus = pkg.getStatus();
@@ -507,7 +533,7 @@ public class PackageService {
 
         var role = SecurityUtils.getCurrentUserRole();
         validationService.validateAcceptor(actorId, role);
-        validateCurrentCustodian(pkg.getId(), actorId);
+        validateDeliveryActor(pkg, actorId);
 
         var previousStatus = pkg.getStatus();
         var rawCode = generateDeliveryCode();
@@ -826,8 +852,33 @@ public class PackageService {
     }
 
     /**
-     * Delivery can be confirmed by the sender, the receiver, or the current
-     * custodian (e.g. the driver who initiated the delivery).
+     * Delivery initiation (and code regeneration) may be performed by the
+     * current custodian OR by trusted office staff (WORKER/ADMIN/SUPER_ADMIN)
+     * acting on the office's behalf. This mirrors the staff bypass already used
+     * by {@code updateStatus} / {@code assignDriver}: packages handed to an
+     * office are held under an OFFICE-role custody row that belongs to the
+     * driver who dropped them off, so the office worker must be able to run
+     * the delivery leg without being the recorded user.
+     */
+    private void validateDeliveryActor(PackageEntity pkg, Long actorId) {
+        var isCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId())
+                .map(c -> c.getUserId().equals(actorId))
+                .orElse(false);
+        if (isCustodian) return;
+
+        // Role is verified from the JWT token, not the database.
+        var role = SecurityUtils.getCurrentUserRole();
+        if (role == Role.WORKER || role == Role.ADMIN || role == Role.SUPER_ADMIN) return;
+
+        throw new RuntimeException("Only the current custodian or office staff can initiate delivery");
+    }
+
+    /**
+     * Delivery can be confirmed by the sender, the receiver, the current
+     * custodian (e.g. the driver who initiated), or trusted office staff
+     * (WORKER/ADMIN/SUPER_ADMIN) acting on the office's behalf — needed when
+     * the package was delivered to an anonymous walk-in receiver at the office
+     * and the office runs the confirmation with the code shown to the receiver.
      */
     private void validateConfirmingActor(PackageEntity pkg, Long actorId) {
         var isCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId())
@@ -838,6 +889,10 @@ public class PackageService {
         var isPerson = personRepo.findByPackageId(pkg.getId()).stream()
                 .anyMatch(p -> p.getUserId() != null && p.getUserId().equals(actorId));
         if (isPerson) return;
+
+        // Role is verified from the JWT token, not the database.
+        var role = SecurityUtils.getCurrentUserRole();
+        if (role == Role.WORKER || role == Role.ADMIN || role == Role.SUPER_ADMIN) return;
 
         throw new RuntimeException("Only the sender, receiver, or current custodian can confirm delivery");
     }
@@ -927,10 +982,14 @@ public class PackageService {
             // that have been handed off to someone else.
             packageIds.addAll(custodianRepo.findCurrentCustodianPackageIdsByUserId(userId));
         } else {
-            // WORKER / ADMIN / SUPER_ADMIN — only show packages where the user is
-            // the current custodian.  We no longer include all CREATED packages
-            // globally; those belong in the availablePackages query instead.
+            // WORKER / ADMIN / SUPER_ADMIN — show packages where the user is the
+            // current custodian, plus packages currently held by an OFFICE (a
+            // physical office is not a user; its custody row is role OFFICE). This
+            // lets the destination office see and deliver packages a driver dropped
+            // off. CREATED packages are NOT listed here — they belong in the
+            // availablePackages query instead.
             packageIds.addAll(custodianRepo.findCurrentCustodianPackageIdsByUserId(userId));
+            packageIds.addAll(custodianRepo.findCurrentCustodianPackageIdsByRole(CustodianRole.OFFICE));
         }
 
         // Also include packages from REQUESTED transfers where this user is

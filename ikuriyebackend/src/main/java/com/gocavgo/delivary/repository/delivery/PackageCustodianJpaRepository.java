@@ -26,12 +26,23 @@ public interface PackageCustodianJpaRepository extends JpaRepository<PackageCust
      * was replaced by someone else this query will NOT return that package.
      */
     @org.springframework.data.jpa.repository.Query(
-        value = "SELECT DISTINCT pc.package_id FROM package_custodians pc " +
-                "INNER JOIN ( " +
-                "  SELECT package_id, MAX(assigned_at) AS max_at " +
-                "  FROM package_custodians GROUP BY package_id " +
-                ") latest ON pc.package_id = latest.package_id AND pc.assigned_at = latest.max_at " +
-                "WHERE pc.user_id = :userId",
-        nativeQuery = true)
+        value = "SELECT pc.packageId FROM PackageCustodianEntity pc " +
+                "WHERE pc.userId = :userId AND NOT EXISTS ( " +
+                "  SELECT 1 FROM PackageCustodianEntity pc2 " +
+                "  WHERE pc2.packageId = pc.packageId AND pc2.assignedAt > pc.assignedAt " +
+                ")")
     List<UUID> findCurrentCustodianPackageIdsByUserId(@Param("userId") Long userId);
+
+    /**
+     * Returns package IDs whose *current* (most recent) custodian row has the
+     * given role — e.g. role OFFICE for packages physically held at an office
+     * (the row's userId is the worker/driver who recorded the handover).
+     */
+    @org.springframework.data.jpa.repository.Query(
+        value = "SELECT pc.packageId FROM PackageCustodianEntity pc " +
+                "WHERE pc.role = :role AND NOT EXISTS ( " +
+                "  SELECT 1 FROM PackageCustodianEntity pc2 " +
+                "  WHERE pc2.packageId = pc.packageId AND pc2.assignedAt > pc.assignedAt " +
+                ")")
+    List<UUID> findCurrentCustodianPackageIdsByRole(@Param("role") CustodianRole role);
 }

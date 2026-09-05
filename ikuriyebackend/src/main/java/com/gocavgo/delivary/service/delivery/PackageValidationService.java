@@ -27,10 +27,14 @@ public class PackageValidationService {
     private static final Map<PackageStatus, Set<PackageStatus>> OPEN_TRANSITIONS = Map.of(
             PackageStatus.CREATED, Set.of(PackageStatus.ACCEPTED, PackageStatus.PICKED_UP, PackageStatus.CANCELLED),
             PackageStatus.ACCEPTED, Set.of(PackageStatus.PICKED_UP, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED),
-            PackageStatus.PICKED_UP, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED),
+            // Driver holds the package (PICKED_UP) — may head in transit OR deliver
+            // straight to the receiver (initiateDelivery → PENDING_CONFIRMATION).
+            PackageStatus.PICKED_UP, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED),
             PackageStatus.IN_TRANSIT, Set.of(PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED),
             PackageStatus.PENDING_CONFIRMATION, Set.of(PackageStatus.DELIVERED, PackageStatus.CANCELLED),
-            PackageStatus.DELIVERED, Set.of(PackageStatus.COMPLETED, PackageStatus.CANCELLED),
+            // DELIVERED is terminal — confirmation IS the completion, no COMPLETED step.
+            // COMPLETED remains in the enum only for legacy rows.
+            PackageStatus.DELIVERED, Set.of(PackageStatus.CANCELLED),
             PackageStatus.COMPLETED, Set.of(),
             PackageStatus.CANCELLED, Set.of()
     );
@@ -40,12 +44,19 @@ public class PackageValidationService {
             Map.entry(PackageStatus.CREATED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.PICKED_UP, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.ACCEPTED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.ORIGIN_OFFICE, Set.of(PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
+            // Driver holds the package after accepting from the sender directly (PICKED_UP) —
+            // may head in transit, drop at the destination office, or deliver straight to
+            // the receiver (initiateDelivery → PENDING_CONFIRMATION).
+            Map.entry(PackageStatus.PICKED_UP, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.DESTINATION_OFFICE, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.ASSIGNED_DRIVER, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.IN_TRANSIT, Set.of(PackageStatus.DESTINATION_OFFICE, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
-            Map.entry(PackageStatus.DESTINATION_OFFICE, Set.of(PackageStatus.READY_FOR_COLLECTION, PackageStatus.CANCELLED)),
+            // Office that received the package from a driver can deliver straight from
+            // DESTINATION_OFFICE (or stage via READY_FOR_COLLECTION first).
+            Map.entry(PackageStatus.DESTINATION_OFFICE, Set.of(PackageStatus.READY_FOR_COLLECTION, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.READY_FOR_COLLECTION, Set.of(PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.PENDING_CONFIRMATION, Set.of(PackageStatus.DELIVERED, PackageStatus.CANCELLED)),
-            Map.entry(PackageStatus.DELIVERED, Set.of(PackageStatus.COMPLETED, PackageStatus.CANCELLED)),
+            // DELIVERED is terminal — confirmation IS the completion, no COMPLETED step.
+            Map.entry(PackageStatus.DELIVERED, Set.of(PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.COMPLETED, Set.of()),
             Map.entry(PackageStatus.CANCELLED, Set.of())
     );

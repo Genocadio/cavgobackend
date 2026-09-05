@@ -108,8 +108,51 @@ class PackageValidationServiceTest {
     }
 
     @Test
+    void validateTransitionAllowsPickedUpToPendingConfirmationForOpen() {
+        // A driver holding an OPEN package accepted from the sender can deliver straight away
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.PICKED_UP, PackageStatus.PENDING_CONFIRMATION, DeliveryType.OPEN));
+    }
+
+    @Test
+    void validateTransitionAllowsPickedUpToPendingConfirmationForFixedRoute() {
+        // A driver holding a FIXED_ROUTE package accepted from the sender can deliver straight away
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.PICKED_UP, PackageStatus.PENDING_CONFIRMATION, DeliveryType.FIXED_ROUTE));
+    }
+
+    @Test
+    void validateTransitionAllowsPickedUpToDestinationOfficeForFixedRoute() {
+        // A driver holding a FIXED_ROUTE package can drop it at the destination office
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.PICKED_UP, PackageStatus.DESTINATION_OFFICE, DeliveryType.FIXED_ROUTE));
+    }
+
+    @Test
     void validateTransitionAllowsFixedRouteInTransitToPendingConfirmation() {
         assertDoesNotThrow(() ->
                 validationService.validateTransition(PackageStatus.IN_TRANSIT, PackageStatus.PENDING_CONFIRMATION, DeliveryType.FIXED_ROUTE));
+    }
+
+    @Test
+    void validateTransitionAllowsDestinationOfficeToPendingConfirmation() {
+        // The office that received the package from a driver can deliver straight away
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.DESTINATION_OFFICE, PackageStatus.PENDING_CONFIRMATION, DeliveryType.FIXED_ROUTE));
+    }
+
+    @Test
+    void validateTransitionRejectsDeliveredToCompletedForOpen() {
+        // DELIVERED is terminal — confirmation IS the completion, no COMPLETED step
+        var ex = assertThrows(RuntimeException.class, () ->
+                validationService.validateTransition(PackageStatus.DELIVERED, PackageStatus.COMPLETED, DeliveryType.OPEN));
+        assertEquals("Invalid status transition: DELIVERED -> COMPLETED", ex.getMessage());
+    }
+
+    @Test
+    void validateTransitionRejectsDeliveredToCompletedForFixedRoute() {
+        var ex = assertThrows(RuntimeException.class, () ->
+                validationService.validateTransition(PackageStatus.DELIVERED, PackageStatus.COMPLETED, DeliveryType.FIXED_ROUTE));
+        assertEquals("Invalid status transition: DELIVERED -> COMPLETED", ex.getMessage());
     }
 }

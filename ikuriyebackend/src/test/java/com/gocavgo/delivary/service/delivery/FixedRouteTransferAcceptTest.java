@@ -212,6 +212,25 @@ class FixedRouteTransferAcceptTest {
     }
 
     @Test
+    void fixedRouteDriverAccept_goesToPickedUp() {
+        // Driver meets the sender directly on a FIXED_ROUTE package → the driver
+        // already holds it, so acceptance must land in PICKED_UP (not ORIGIN_OFFICE).
+        var customerId = createUser("frd-customer@test.com", Role.CUSTOMER);
+        var driverId = createUser("frd-driver@test.com", Role.DRIVER);
+
+        var created = createFixedRoutePackage(customerId, TransferRuleType.AUTO);
+        var transferId = created.transfers().get(0).id();
+
+        authenticateAs(driverId, Role.DRIVER);
+        var result = packageService.acceptPackageByTransfer(driverId, transferId, null);
+        var accepted = result.acceptedPackages().get(0).deliveryPackage();
+
+        assertThat(accepted.status()).isEqualTo(PackageStatus.PICKED_UP);
+        assertThat(lastCustodian(accepted).userId()).isEqualTo(driverId);
+        assertThat(lastCustodian(accepted).role()).isEqualTo(CustodianRole.DRIVER);
+    }
+
+    @Test
     void openRouteDriverAccept_goesToPickedUp() {
         // Driver meets sender directly → package goes straight to PICKED_UP
         var customerId = createUser("or-customer@test.com", Role.CUSTOMER);

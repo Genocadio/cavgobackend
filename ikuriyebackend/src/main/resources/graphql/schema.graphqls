@@ -24,9 +24,9 @@ enum UserStatus {
 
 "Delivery type for a package."
 enum DeliveryType {
-    "Open delivery — flexible status transitions (CREATED → ACCEPTED → PICKED_UP → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED → COMPLETED)"
+    "Open delivery — flexible status transitions (CREATED → ACCEPTED → PICKED_UP → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED). DELIVERED is terminal."
     OPEN
-    "Fixed-route delivery — follows office-to-office flow (CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → DESTINATION_OFFICE → READY_FOR_COLLECTION → PENDING_CONFIRMATION → DELIVERED → COMPLETED). Drivers may also deliver directly from IN_TRANSIT via initiateDelivery."
+    "Fixed-route delivery — follows office-to-office flow (CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → DESTINATION_OFFICE → READY_FOR_COLLECTION → PENDING_CONFIRMATION → DELIVERED). DELIVERED is terminal. Drivers may deliver directly from IN_TRANSIT; the office may initiate straight from DESTINATION_OFFICE."
     FIXED_ROUTE
 }
 

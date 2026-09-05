@@ -2,6 +2,19 @@
 
 This document covers every possible path a package can take through the CavGo delivery system, from creation to completion or cancellation. It covers both delivery types, all actor roles, registered and unregistered senders/receivers, and every custody transfer that occurs along the way.
 
+> **Recent behavior changes (aligns docs with code):**
+> - **`DELIVERED` is terminal.** Confirming the delivery *is* the completion — there is no separate
+>   `COMPLETED` step anymore and no `updatePackageStatus(COMPLETED)` call. `COMPLETED` survives in the
+>   enum only for legacy rows.
+> - **Driver accepting from the sender directly holds the package.** Accepting a `CREATED` package
+>   (OPEN **or** FIXED_ROUTE) as a DRIVER now lands in `PICKED_UP` (not `ORIGIN_OFFICE`) — the driver
+>   can go straight to delivering or transferring to an office.
+> - **Office-received packages are deliverable by office staff.** When a driver hands off at the
+>   destination office the custody row is role `OFFICE`; any WORKER/ADMIN/SUPER_ADMIN can see such
+>   packages (`myPackages`) and run `initiateDelivery` / `confirmDelivery` (staff bypass), and
+>   `initiateDelivery` is also valid straight from `DESTINATION_OFFICE`.
+> - Cancellation rules are unchanged (out of scope for now).
+
 ---
 
 ## Table of Contents
@@ -98,12 +111,12 @@ package_events             — append-only audit timeline of every action
                    │                                                                 │ │
 CREATED ──►       │  Driver accepts from sender directly                            │ │
    │              ▼                                                                 │ │
-   └──────► PICKED_UP ──► IN_TRANSIT ──► PENDING_CONFIRMATION ──► DELIVERED ──► COMPLETED
-              │              │                │              │              │
-              └──────────────┴────────────────┴──────────────┴──────────────┴──► CANCELLED
+   └──────► PICKED_UP ──► IN_TRANSIT ──► PENDING_CONFIRMATION ──► DELIVERED
+              │              │                │              │
+              └──────────────┴────────────────┴──────────────┴──► CANCELLED
 ```
 
-**Key:** When a **driver** accepts from a sender directly, the package goes straight to `PICKED_UP` (driver already has the package). When a **worker** accepts, it goes to `ACCEPTED` (at office, needs driver assignment).
+**Key:** When a **driver** accepts from a sender directly, the package goes straight to `PICKED_UP` (driver already has the package). When a **worker** accepts, it goes to `ACCEPTED` (at office, needs driver assignment). **`DELIVERED` is terminal** — confirmation is the final step.
 
 ### FIXED_ROUTE — State Machine
 
@@ -111,10 +124,14 @@ CREATED ──►       │  Driver accepts from sender directly                
                                               ┌──────────────────────────────────────────┐
                                               │ (driver delivers directly to receiver)    │
                                               ▼                                          │
-CREATED ──► ORIGIN_OFFICE ──► ASSIGNED_DRIVER ──► IN_TRANSIT ──► DESTINATION_OFFICE ──► READY_FOR_COLLECTION ──► PENDING_CONFIRMATION ──► DELIVERED ──► COMPLETED
-   │               │                  │                │                   │                       │                       │             │            │
-   └───────────────┴──────────────────┴────────────────┴───────────────────┴───────────────────────┴───────────────────────┴─────────────┴────────────┴──► CANCELLED
+CREATED ──► ORIGIN_OFFICE ──► ASSIGNED_DRIVER ──► IN_TRANSIT ──► DESTINATION_OFFICE ──► READY_FOR_COLLECTION ──► PENDING_CONFIRMATION ──► DELIVERED
+   │               │                  │                │                   │                       │                       │             │
+   │               └────► PICKED_UP ───┘                │                   │                       │                       │             │
+   │                (driver accepts from sender)        │                   │                       │                       │             │
+   └────────────────────────────────────────────────────┴───────────────────┴───────────────────────┴───────────────────────┴─────────────┴───────────────► CANCELLED
 ```
+
+**Key:** A **driver** accepting from the sender directly on a FIXED_ROUTE package goes to `PICKED_UP` — the driver already holds it, so they may deliver straight to the receiver (`initiateDelivery`) or continue through `IN_TRANSIT` / `DESTINATION_OFFICE`. A **worker** accepting brings it to `ORIGIN_OFFICE` for driver assignment. **`DELIVERED` is terminal** — confirmation is the final step.
 
 ---
 
@@ -190,7 +207,7 @@ sequenceDiagram
 | 1 | Customer | `createPackage(transferRuleType=AUTO)` | `PENDING` | `CREATED` | _(none)_ |
 | 2 | Driver | `acceptTransfer(transferId)` | `DONE` | `PICKED_UP` | DRIVER |
 | 2 | Worker | `acceptTransfer(transferId)` | `DONE` | `ACCEPTED` | WORKER |
-| 3 | Driver | Continue normal flow (`IN_TRANSIT` → ... → `COMPLETED`) | — | onwards | DRIVER |
+| 3 | Driver | Continue normal flow (`IN_TRANSIT` → ... → `DELIVERED`) | — | onwards | DRIVER |
 
 ---
 
@@ -273,8 +290,7 @@ sequenceDiagram
     S-->>R: package(status=DELIVERED)
     Note over S: Delivery code consumed. Custody: DRIVER → RECEIVER.
 
-    D->>S: updateStatus(COMPLETED)
-    S-->>D: package(status=COMPLETED)
+    Note over S: No COMPLETED step — DELIVERED is the final state.
     Note over S: Code-less final status. Package closed.
 ```
 
@@ -287,7 +303,7 @@ sequenceDiagram
 | 3 | Driver | `updateStatus(IN_TRANSIT)` | `IN_TRANSIT` | DRIVER | — |
 | 4 | Driver | `initiateDelivery` | `PENDING_CONFIRMATION` | DRIVER | Delivery code generated + published |
 | 5 | Sender/Receiver | `confirmDelivery` + delivery code | `DELIVERED` | _(no new custodian)_ | Delivery code consumed |
-| 6 | Driver | `updateStatus(COMPLETED)` | `COMPLETED` | _(no change)_ | — |
+
 
 > **Note on acceptance:** When a driver accepts from a sender directly (OPEN delivery), the package goes straight to `PICKED_UP` because the driver already has the package. The driver does not need to manually mark it as picked up. See [Flow F](#6-flow-f--package-created-with-transfer-auto--secure) for AUTO/SECURE and [Flow G](#7-flow-g--package-created-with-transfer-confirm) for CONFIRM flows.
 
@@ -329,8 +345,7 @@ sequenceDiagram
     S-->>D: { package(status=PENDING_CONFIRMATION), deliveryCode }
     R->>S: confirmDelivery(packageId, deliveryCode)
     S-->>R: package(status=DELIVERED)
-    D->>S: updateStatus(COMPLETED)
-    S-->>D: package(status=COMPLETED)
+    Note over S: No COMPLETED step — DELIVERED is the final state.
 ```
 
 ### Step-by-step
@@ -344,7 +359,7 @@ sequenceDiagram
 | 5 | Driver | `updateStatus(IN_TRANSIT)` | `IN_TRANSIT` | DRIVER |
 | 6 | Driver | `initiateDelivery` | `PENDING_CONFIRMATION` | DRIVER |
 | 7 | Sender/Receiver/Custodian | `confirmDelivery` + delivery code | `DELIVERED` | _(no new custodian)_ |
-| 8 | Driver | `updateStatus(COMPLETED)` | `COMPLETED` | _(no change)_ |
+
 
 ---
 
@@ -390,8 +405,7 @@ sequenceDiagram
     S-->>R: package(status=DELIVERED)
     Note over S: Delivery code consumed. Custody: OFFICE → RECEIVER.
 
-    W3->>S: updateStatus(COMPLETED)
-    S-->>W3: package(status=COMPLETED)
+    Note over S: No COMPLETED step — DELIVERED is the final state.
 ```
 
 ### Step-by-step
@@ -405,7 +419,7 @@ sequenceDiagram
 | 5 | Worker | `updateStatus(READY_FOR_COLLECTION)` | `READY_FOR_COLLECTION` | _(no change)_ |
 | 6 | Worker | `initiateDelivery` | `PENDING_CONFIRMATION` | _(no change)_ |
 | 7 | Receiver/Sender/Custodian | `confirmDelivery` + delivery code | `DELIVERED` | _(no change)_ |
-| 8 | Worker | `updateStatus(COMPLETED)` | `COMPLETED` | _(no change)_ |
+
 
 ---
 
@@ -439,8 +453,7 @@ sequenceDiagram
     S-->>R: package(status=DELIVERED)
     Note over S: Delivery code consumed. Custody: DRIVER → RECEIVER.
 
-    D->>S: updateStatus(COMPLETED)
-    S-->>D: package(status=COMPLETED)
+    Note over S: No COMPLETED step — DELIVERED is the final state.
     Note over S: Package closed.
 ```
 
@@ -453,7 +466,7 @@ sequenceDiagram
 | 3 | Driver | `updateStatus(IN_TRANSIT)` | `IN_TRANSIT` | DRIVER | — |
 | 4 | Driver | `initiateDelivery` | `PENDING_CONFIRMATION` | DRIVER | Delivery code generated + published |
 | 5 | Sender/Receiver/Custodian | `confirmDelivery` + delivery code | `DELIVERED` | _(no new custodian)_ | Delivery code consumed |
-| 6 | Driver | `updateStatus(COMPLETED)` | `COMPLETED` | _(no change)_ | — |
+
 
 **Key difference from Flow A:** In Flow A the driver calls `acceptTransfer` to accept the package. Here the driver is the creator, so the package is auto-accepted at `createPackage`. In both flows the delivery code is only generated later at `initiateDelivery`.
 
@@ -482,8 +495,7 @@ sequenceDiagram
 
     D2->>S: initiateDelivery(packageId)
     D2->>S: confirmDelivery(packageId, deliveryCode)   # or sender/receiver
-    D2->>S: updateStatus(COMPLETED)
-    S-->>D2: package(status=COMPLETED)
+    Note over S: No COMPLETED step — DELIVERED is the final state.
 ```
 
 ### Step-by-step
@@ -510,7 +522,8 @@ sequenceDiagram
     participant S as System
     participant R as Receiver / Sender / Custodian
 
-    Note over D,S: Package is IN_TRANSIT (OPEN) or READY_FOR_COLLECTION (FIXED_ROUTE)
+    Note over D,S: Package is IN_TRANSIT (OPEN/FIXED_ROUTE), or DESTINATION_OFFICE /
+    Note over D,S: READY_FOR_COLLECTION (FIXED_ROUTE — office runs the delivery leg)
 
     D->>S: initiateDelivery(packageId)
     S-->>D: { deliveryPackage(status=PENDING_CONFIRMATION), deliveryCode }
@@ -536,14 +549,13 @@ sequenceDiagram
 |---|---|---|---|---|
 | 1 | Driver | `initiateDelivery(packageId)` | `PENDING_CONFIRMATION` | current → current ("awaiting confirmation") |
 | 2 | Sender/Receiver/Custodian | `confirmDelivery(packageId, deliveryCode)` | `DELIVERED` | DRIVER → RECEIVER |
-| 3 | Driver/Worker | `updatePackageStatus(COMPLETED)` | `COMPLETED` | RECEIVER → COMPLETED |
 | 2b (alt) | Driver | `regenerateDeliveryCode(packageId)` | `PENDING_CONFIRMATION` (unchanged) | — |
 
 **Constraints:**
-- `initiateDelivery` requires the current custodian (active WORKER/DRIVER). Valid only from `IN_TRANSIT` (OPEN/FIXED_ROUTE) or `READY_FOR_COLLECTION` (FIXED_ROUTE).
-- `confirmDelivery` requires authentication and the caller must be the **sender**, **receiver**, or **current custodian**. The code must match, be unused, and be unexpired.
+- `initiateDelivery` requires the current custodian (active WORKER/DRIVER) **or** trusted office staff (WORKER/ADMIN/SUPER_ADMIN) acting for the office. Valid from `IN_TRANSIT` (OPEN/FIXED_ROUTE) or `DESTINATION_OFFICE` / `READY_FOR_COLLECTION` (FIXED_ROUTE).
+- `confirmDelivery` requires authentication and the caller must be the **sender**, **receiver**, **current custodian**, or trusted office staff. The code must match, be unused, and be unexpired.
 - `regenerateDeliveryCode` only while status is `PENDING_CONFIRMATION`; the previous code is invalidated.
-- `updatePackageStatus` cannot set `PENDING_CONFIRMATION` or `DELIVERED` directly — those statuses require the dedicated mutations.
+- `updatePackageStatus` cannot set `PENDING_CONFIRMATION` or `DELIVERED` directly — those statuses require the dedicated mutations. `COMPLETED` is no longer a valid target: **`DELIVERED` is terminal.**
 
 ---
 
@@ -627,10 +639,10 @@ A registered receiver can call `myPackages` — the system searches `package_peo
 | **Who receives it** | Published to the notice feed of the package's sender and receiver only (payload field `deliveryCode`) — custodians never receive the code |
 | **When consumed** | At `confirmDelivery` — marks the package `DELIVERED` |
 | **One-time use** | Yes |
-| **Expiry** | 7 days from generation — currently not enforced at the service layer |
+| **Expiry** | 7 days from generation (enforced in `verifyDeliveryCode`) |
 | **Purpose** | Confirms the receiver (or sender / initiating custodian) actually received the delivery |
 
-> **Note:** The old 6-digit **pickup code** (generated at accept time, required for `COMPLETED`) has been removed. Delivery confirmation now happens at the delivery leg via `initiateDelivery` → `confirmDelivery`. `COMPLETED` is a code-less final status update.
+> **Note:** The old 6-digit **pickup code** (generated at accept time, required for `COMPLETED`) has been removed, and the separate `COMPLETED` step is gone too. Delivery confirmation via `initiateDelivery` → `confirmDelivery` ends the package at `DELIVERED`.
 
 ### Transfer Code (SECURE transfers)
 
@@ -657,8 +669,7 @@ The `package_custody` table logs every transfer in append-only order. The `fromE
 | 1 | `SENDER` | `WORKER`/`DRIVER` | Transfer accepted (`acceptTransfer`) |
 | 2 | `WORKER`/`DRIVER` | `DRIVER` | Driver picks up (`PICKED_UP`) |
 | 3 | `DRIVER` | `DRIVER` | In transit (`IN_TRANSIT`) |
-| 4 | `DRIVER` | `RECEIVER` | Delivered (`DELIVERED`) |
-| 5 | `RECEIVER` | `COMPLETED` | Completed (`COMPLETED`) |
+| 4 | `DRIVER` | `RECEIVER` | Delivered (`DELIVERED` — terminal) |
 
 ### OPEN delivery — Customer creates, Driver accepts via transfer
 
@@ -667,8 +678,7 @@ The `package_custody` table logs every transfer in append-only order. The `fromE
 | 1 | `SENDER` | `DRIVER` | Transfer accepted (`acceptTransfer`) |
 | 2 | `DRIVER` | `DRIVER` | Picked up (`PICKED_UP`) |
 | 3 | `DRIVER` | `DRIVER` | In transit (`IN_TRANSIT`) |
-| 4 | `DRIVER` | `RECEIVER` | Delivered (`DELIVERED`) |
-| 5 | `RECEIVER` | `COMPLETED` | Completed (`COMPLETED`) |
+| 4 | `DRIVER` | `RECEIVER` | Delivered (`DELIVERED` — terminal) |
 
 ### CONFIRM transfer — Owner confirms, requestor becomes custodian
 
@@ -683,8 +693,7 @@ The `package_custody` table logs every transfer in append-only order. The `fromE
 | 1 | `SENDER` | `DRIVER` | At creation (auto-accepted) |
 | 2 | `DRIVER` | `DRIVER` | Picked up (`PICKED_UP`) |
 | 3 | `DRIVER` | `DRIVER` | In transit (`IN_TRANSIT`) |
-| 4 | `DRIVER` | `RECEIVER` | Delivered (`DELIVERED`) |
-| 5 | `RECEIVER` | `COMPLETED` | Completed (`COMPLETED`) |
+| 4 | `DRIVER` | `RECEIVER` | Delivered (`DELIVERED` — terminal) |
 
 ### FIXED_ROUTE — Worker creates, office-to-office
 
@@ -693,18 +702,27 @@ The `package_custody` table logs every transfer in append-only order. The `fromE
 | 1 | `WORKER` | `DRIVER` | Driver assigned (`assignDriver`) |
 | 2 | `DRIVER` | `DRIVER` | In transit (`IN_TRANSIT`) |
 | 3 | `DRIVER` | `OFFICE` | Arrived at destination office (`DESTINATION_OFFICE`) |
-| 4 | `OFFICE` | `OFFICE` | Ready for collection (`READY_FOR_COLLECTION`) |
-| 5 | `OFFICE` | `COMPLETED` | Completed (`COMPLETED`) |
+| 4 | `OFFICE` | `OFFICE` | Ready for collection (`READY_FOR_COLLECTION`, optional) |
+| 5 | `OFFICE` | `RECEIVER` | Delivered to receiver (`DELIVERED` — terminal, office runs `initiateDelivery` + `confirmDelivery`) |
+
+### FIXED_ROUTE — Driver transfers an in-flight package to the office
+
+When the driver creates a transfer and the **office (WORKER) accepts**, the package auto-advances to `DESTINATION_OFFICE` (the office now physically holds it):
+
+| # | fromEntity | toEntity | When |
+|---|---|---|---|
+| 1 | `DRIVER` | `OFFICE` | Office accepts driver's transfer (`PICKED_UP`/`IN_TRANSIT` → `DESTINATION_OFFICE`) |
+| 2 | `OFFICE` | `OFFICE` | Ready for collection (`READY_FOR_COLLECTION`, optional) |
+| 3 | `OFFICE` | `RECEIVER` | Delivered to receiver (`DELIVERED` — terminal, office runs `initiateDelivery` + `confirmDelivery`) |
 
 ### Driver-to-driver transfer (mid-delivery)
 
 | # | fromEntity | toEntity | When |
 |---|---|---|---|
 | ... | _(prior chain)_ | — | — |
-| n | `DRIVER` | `DRIVER` | Second driver assigned (`assignDriver`) |
+| n | `DRIVER` | `DRIVER` | Second driver accepts handoff — status kept, custody swaps |
 | n+1 | `DRIVER` | `DRIVER` | In transit continued (`IN_TRANSIT`) |
-| n+2 | `DRIVER` | `RECEIVER` | Delivered |
-| n+3 | `RECEIVER` | `COMPLETED` | Completed |
+| n+2 | `DRIVER` | `RECEIVER` | Delivered (`DELIVERED` — terminal) |
 
 ---
 
@@ -715,12 +733,12 @@ The `package_custody` table logs every transfer in append-only order. The `fromE
 | Current status | Allowed next statuses |
 |---|---|
 | `CREATED` | `ACCEPTED` *(worker accepts)*, `PICKED_UP` *(driver accepts from sender directly)*, `CANCELLED` |
-| `ACCEPTED` | `PICKED_UP`, `CANCELLED` |
-| `PICKED_UP` | `IN_TRANSIT`, `CANCELLED` |
+| `ACCEPTED` | `PICKED_UP`, `PENDING_CONFIRMATION` *(via `initiateDelivery`)*, `CANCELLED` |
+| `PICKED_UP` | `IN_TRANSIT`, `PENDING_CONFIRMATION` *(via `initiateDelivery` — driver holds it and can deliver straight away)*, `CANCELLED` |
 | `IN_TRANSIT` | `PENDING_CONFIRMATION` *(via `initiateDelivery`)*, `CANCELLED` |
 | `PENDING_CONFIRMATION` | `DELIVERED` *(via `confirmDelivery` with delivery code)*, `CANCELLED` |
-| `DELIVERED` | `COMPLETED`, `CANCELLED` |
-| `COMPLETED` | _(terminal)_ |
+| `DELIVERED` | _(terminal — delivery confirmation is the completion; legacy rows may still show `COMPLETED`)_ |
+| `COMPLETED` | _(terminal — legacy only)_ |
 | `CANCELLED` | _(terminal)_ |
 
 ### FIXED_ROUTE
@@ -728,14 +746,15 @@ The `package_custody` table logs every transfer in append-only order. The `fromE
 | Current status | Allowed next statuses |
 |---|---|
 | `CREATED` | `ORIGIN_OFFICE`, `PICKED_UP` *(driver accepts from sender directly)*, `CANCELLED` |
-| `ORIGIN_OFFICE` | `ASSIGNED_DRIVER`, `CANCELLED` |
+| `ORIGIN_OFFICE` | `ASSIGNED_DRIVER`, `IN_TRANSIT`, `CANCELLED` |
 | `ASSIGNED_DRIVER` | `IN_TRANSIT`, `CANCELLED` |
+| `PICKED_UP` | `IN_TRANSIT`, `DESTINATION_OFFICE`, `PENDING_CONFIRMATION` *(via `initiateDelivery` — driver holds it and can deliver straight away)*, `CANCELLED` |
 | `IN_TRANSIT` | `PENDING_CONFIRMATION` *(via `initiateDelivery` — direct to receiver)*, `DESTINATION_OFFICE`, `CANCELLED` |
-| `DESTINATION_OFFICE` | `READY_FOR_COLLECTION`, `CANCELLED` |
+| `DESTINATION_OFFICE` | `READY_FOR_COLLECTION`, `PENDING_CONFIRMATION` *(via `initiateDelivery` — office received it and can deliver straight away)*, `CANCELLED` |
 | `READY_FOR_COLLECTION` | `PENDING_CONFIRMATION` *(via `initiateDelivery`)*, `CANCELLED` |
 | `PENDING_CONFIRMATION` | `DELIVERED` *(via `confirmDelivery` with delivery code)*, `CANCELLED` |
-| `DELIVERED` | `COMPLETED`, `CANCELLED` |
-| `COMPLETED` | _(terminal)_ |
+| `DELIVERED` | _(terminal — delivery confirmation is the completion; legacy rows may still show `COMPLETED`)_ |
+| `COMPLETED` | _(terminal — legacy only)_ |
 | `CANCELLED` | _(terminal)_ |
 
 ### Transfer
@@ -837,7 +856,13 @@ mutation {
 ```
 
 **Requires:** `WORKER` or `DRIVER` role.
-**Valid from:** Transfer must be `PENDING`. Packages must not be `COMPLETED`/`CANCELLED` — `CREATED` packages advance to `ACCEPTED`, in-flight packages keep their status and swap custodian (mid-route handoffs).
+**Valid from:** Transfer must be `PENDING`. Packages must not be `COMPLETED`/`CANCELLED`.
+
+Status on accept:
+- `CREATED` packages advance (`PICKED_UP` for a DRIVER acceptor, `ORIGIN_OFFICE`/`ACCEPTED` for a WORKER — see state machines above).
+- In-flight `FIXED_ROUTE` packages held by a **driver** that a **worker** accepts (`PICKED_UP`/`IN_TRANSIT` → handoff to an office) advance to `DESTINATION_OFFICE` under an `OFFICE` custody row — the driver has dropped the package at the office, so it is now in the office's hands and can only be delivered from there.
+- Any other in-flight handoff (driver→driver, worker→worker, office-held → worker) keeps the current status and simply swaps custodian.
+
 **For SECURE:** `transferCode` must match the stored hash.
 
 ---

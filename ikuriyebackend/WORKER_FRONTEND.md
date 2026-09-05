@@ -80,7 +80,7 @@ A customer (or driver) created a package with a transfer. The worker accepts the
    - CONFIRM: transfer → REQUESTED (requestorId = worker); owner must confirmTransfer
 ```
 
-**Custody on accept:** `SENDER → WORKER`. Package status `CREATED → ACCEPTED` (in-flight packages keep their status and simply swap custodian).
+**Custody on accept:** `SENDER → WORKER`. Package status `CREATED → ACCEPTED` (in-flight packages keep their status and swap custodian — except a WORKER accepting an in-flight `FIXED_ROUTE` package held by a DRIVER, which lands at `DESTINATION_OFFICE` under an `OFFICE` custody row).
 
 ### Flow 2 — Create a package (registered or anonymous sender)
 
@@ -134,14 +134,13 @@ The package is in transit (OPEN) or ready at the destination office (FIXED_ROUTE
      (custodians never receive it); client reads it from the notice feed / Realtime
    → DEMO: the code is shown in the demo notice + on screen (demo simplification)
 2. Receiver presents the code → confirmDelivery(input: { packageId, deliveryCode })
-   → package → DELIVERED (custody → RECEIVER)
-3. updatePackageStatus(input: { packageId, status: COMPLETED, ... })
-   → package → COMPLETED (code-less final step)
+   → package → DELIVERED (custody → RECEIVER) — **DELIVERED is terminal, no COMPLETED step**
 ```
 
 **Constraints enforced by the backend (mirrored in demo):**
 - `PENDING_CONFIRMATION` / `DELIVERED` cannot be set via `updatePackageStatus` — dedicated mutations only.
 - Delivery code is single-use, expires after 7 days; regenerate via `regenerateDeliveryCode` while `PENDING_CONFIRMATION`.
+- The office (trusted staff) can run `initiateDelivery`/`confirmDelivery` for packages held at an office (role `OFFICE` custody).
 
 ---
 
@@ -230,11 +229,13 @@ SortOrder: ASC, DESC
 
 ### Status machines (validated by backend, mirrored in `frontend/src/lib/demo-api.ts`)
 
-**OPEN (worker accepts):** `CREATED → ACCEPTED → PICKED_UP → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED → COMPLETED` (cancel anytime before terminal)
-**OPEN (driver accepts from sender directly):** `CREATED → PICKED_UP → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED → COMPLETED`
+**OPEN (worker accepts):** `CREATED → ACCEPTED → PICKED_UP → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED` (cancel anytime before terminal)
+**OPEN (driver accepts from sender directly):** `CREATED → PICKED_UP → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED`
 
-**FIXED_ROUTE (via office):** `CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → DESTINATION_OFFICE → READY_FOR_COLLECTION → PENDING_CONFIRMATION → DELIVERED → COMPLETED`
-**FIXED_ROUTE (direct delivery):** `CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED → COMPLETED`
+**FIXED_ROUTE (via office):** `CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → DESTINATION_OFFICE → READY_FOR_COLLECTION → PENDING_CONFIRMATION → DELIVERED` (office may initiate straight from `DESTINATION_OFFICE`)
+**FIXED_ROUTE (direct delivery):** `CREATED → ORIGIN_OFFICE → ASSIGNED_DRIVER → IN_TRANSIT → PENDING_CONFIRMATION → DELIVERED`
+
+All machines: **`DELIVERED` is terminal** — `COMPLETED` remains only for legacy rows.
 
 ---
 
