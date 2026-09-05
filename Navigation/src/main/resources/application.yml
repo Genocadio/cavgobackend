@@ -61,3 +61,16 @@ navigation:
     periodic-save-interval-seconds: 10  # Save navigation state every 10 seconds
     snapshot-retention-days: 30  # Keep snapshots for 30 days
 
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: ${EUREKA_SERVER_URL:http://localhost:8761}/eureka/
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${random.uuid}
+
+server:
+  port: 6040
+

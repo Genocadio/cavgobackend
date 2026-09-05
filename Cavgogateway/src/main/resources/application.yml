@@ -24,10 +24,10 @@ spring:
             - id: cavgotrips-sse
               uri: lb://cavgotrips
               predicates:
-                - Path=/api/navig/events/**
+                - Path=/navig/events/**
                 - Header=Accept, text/event-stream
               filters:
-                - StripPrefix=2
+                - StripPrefix=1
                 - name: DedupeResponseHeader
                   args:
                     name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
@@ -40,9 +40,9 @@ spring:
             - id: cavgotrips-sse-fallback
               uri: lb://cavgotrips
               predicates:
-                - Path=/api/navig/events/**
+                - Path=/navig/events/**
               filters:
-                - StripPrefix=2
+                - StripPrefix=1
                 - name: DedupeResponseHeader
                   args:
                     name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
@@ -54,9 +54,8 @@ spring:
             - id: cavgomain
               uri: lb://cavgomain
               predicates:
-                - Path=/api/main/**
+                - Path=/main/**
               filters:
-                - StripPrefix=1
                 - name: DedupeResponseHeader
                   args:
                     name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
@@ -66,9 +65,22 @@ spring:
             - id: cavgotrips
               uri: lb://cavgotrips
               predicates:
-                - Path=/api/navig/**
+                - Path=/navig/**
               filters:
-                - StripPrefix=2
+                - StripPrefix=1
+                - name: DedupeResponseHeader
+                  args:
+                    name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                    strategy: RETAIN_FIRST
+
+            # Navigation service (Java) - route calculation, GPS updates, trip state, reset
+            # /api/maps/{rest} is rewritten to /api/{rest} to match Navigation's controllers
+            - id: navigation
+              uri: lb://Navigation
+              predicates:
+                - Path=/maps/**
+              filters:
+                - RewritePath=/maps/(?<segment>.*), /api/$\{segment}
                 - name: DedupeResponseHeader
                   args:
                     name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
@@ -77,9 +89,9 @@ spring:
             - id: cavgobooking
               uri: lb://cavgobooking
               predicates:
-                - Path=/api/book/**
+                - Path=/book/**
               filters:
-                - StripPrefix=2
+                - StripPrefix=1
                 - name: DedupeResponseHeader
                   args:
                     name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
@@ -88,9 +100,9 @@ spring:
             - id: ridehail
               uri: lb://ridehail
               predicates:
-                - Path=/api/ride/**
+                - Path=/ride/**
               filters:
-                - StripPrefix=2
+                - StripPrefix=1
                 - name: DedupeResponseHeader
                   args:
                     name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
@@ -109,16 +121,6 @@ spring:
                     name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
                     strategy: RETAIN_FIRST
 
-            - id: ikuriyebackend
-              uri: lb://ikuriyebackend
-              predicates:
-                - Path=/api/ikuriye/**
-              filters:
-                - StripPrefix=2
-                - name: DedupeResponseHeader
-                  args:
-                    name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
-                    strategy: RETAIN_FIRST
 
             # WebSocket route for ikuriyebackend subscriptions — MUST come before the HTTP route
             # so WebSocket upgrade requests are matched first and forwarded with ws:// scheme.
@@ -137,6 +139,20 @@ spring:
                 - Path=/ikuriye/graphql
               filters:
                 - StripPrefix=1
+                - name: DedupeResponseHeader
+                  args:
+                    name: Access-Control-Allow-Origin Access-Control-Allow-Credentials
+                    strategy: RETAIN_FIRST
+
+            # Generic ikuriyebackend route for direct clients (no /api namespace anymore)
+            # /ikuriye/{rest} is rewritten to /api/{rest}; the specific routes above
+            # (/ikuriye/api/**, /ikuriye/graphql) are matched first.
+            - id: ikuriyebackend
+              uri: lb://ikuriyebackend
+              predicates:
+                - Path=/ikuriye/**
+              filters:
+                - RewritePath=/ikuriye/(?<segment>.*), /api/$\{segment}
                 - name: DedupeResponseHeader
                   args:
                     name: Access-Control-Allow-Origin Access-Control-Allow-Credentials

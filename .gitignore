@@ -8,6 +8,10 @@
 postgres_data/
 postgres_data_prod/
 
+# Gateway runtime route definitions
+Cavgogateway/routes.json
+gateway-config/
+
 # Logs
 *.log
 logs/
