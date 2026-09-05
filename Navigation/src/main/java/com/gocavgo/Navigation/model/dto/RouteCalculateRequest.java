@@ -16,4 +16,7 @@ public class RouteCalculateRequest {
 
     @Builder.Default
     private Boolean includeInstructions = false;
+
+    @Builder.Default
+    private Integer numberOfAlternatives = 0;
 }

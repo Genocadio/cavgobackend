@@ -2,6 +2,7 @@ package com.gocavgo.Navigation.routing;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gocavgo.Navigation.exception.OsrmUnavailableException;
 import com.gocavgo.Navigation.model.Route;
 import com.gocavgo.Navigation.model.dto.Instruction;
 import lombok.RequiredArgsConstructor;
@@ -29,8 +30,16 @@ public class OsrmClient {
     }
     
     public Route getRoute(List<double[]> waypoints, boolean includeInstructions) {
+        List<Route> routes = getRoutes(waypoints, includeInstructions, 0);
+        return routes.get(0);
+    }
+
+    public List<Route> getRoutes(List<double[]> waypoints, boolean includeInstructions, int alternatives) {
         if (waypoints == null || waypoints.isEmpty()) {
             throw new IllegalArgumentException("Waypoints cannot be empty");
+        }
+        if (alternatives < 0) {
+            throw new IllegalArgumentException("Alternatives cannot be negative");
         }
         
         // Build OSRM route URL
@@ -44,9 +53,12 @@ public class OsrmClient {
         if (includeInstructions) {
             urlBuilder.append("&steps=true");
         }
+        if (alternatives > 0) {
+            urlBuilder.append("&alternatives=").append(alternatives);
+        }
         
         String url = urlBuilder.toString();
-        log.debug("Calling OSRM route: {}", url);
+        log.debug("Calling OSRM route (alternatives={}): {}", alternatives, url);
         
         try {
             // Use toEntity to get better control over response handling
@@ -70,14 +82,24 @@ public class OsrmClient {
                 throw new RuntimeException("OSRM route request failed: " + response);
             }
             
-            JsonNode route = response.get("routes").get(0);
+            JsonNode routesNode = response.get("routes");
             JsonNode waypointsNode = response.get("waypoints");
-            return parseRoute(route, waypointsNode, waypoints.size());
+            List<Route> routes = new ArrayList<>();
+            int routeCount = Math.min(routesNode.size(), alternatives + 1);
+            for (int i = 0; i < routeCount; i++) {
+                routes.add(parseRoute(routesNode.get(i), waypointsNode, waypoints.size()));
+            }
+            return routes;
         } catch (org.springframework.web.client.ResourceAccessException e) {
             log.error("OSRM API is not reachable at: {}. Please check if OSRM server is running.", osrmConfig.getUrl());
-            throw new RuntimeException("OSRM API is not reachable: " + e.getMessage(), e);
+            throw new OsrmUnavailableException(
+                    "Routing service (OSRM) is temporarily unavailable. Please try again later.", e);
         } catch (org.springframework.web.client.HttpClientErrorException | org.springframework.web.client.HttpServerErrorException e) {
             log.error("OSRM API returned HTTP error. Status: {}, URL: {}", e.getStatusCode(), url);
+            if (e instanceof org.springframework.web.client.HttpServerErrorException) {
+                throw new OsrmUnavailableException(
+                        "Routing service (OSRM) is temporarily unavailable (HTTP " + e.getStatusCode().value() + ").", e);
+            }
             throw new RuntimeException("OSRM API error: " + e.getStatusCode() + " - " + e.getMessage(), e);
         } catch (Exception e) {
             log.error("Error calling OSRM route API: {}", e.getMessage(), e);

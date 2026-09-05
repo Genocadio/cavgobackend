@@ -10,11 +10,12 @@ The Navigation API allows you to create multi-waypoint trips, track vehicle prog
 
 1. [Creating a Trip](#creating-a-trip)
 2. [What Happens When Creating a Trip](#what-happens-when-creating-a-trip)
-3. [Sending GPS Updates](#sending-gps-updates)
-4. [Trip Lifecycle and States](#trip-lifecycle-and-states)
-5. [Waypoint Progress Tracking](#waypoint-progress-tracking)
-6. [Trip Completion](#trip-completion)
-7. [API Endpoints Reference](#api-endpoints-reference)
+3. [Calculating Routes (with Alternatives)](#calculating-routes-with-alternatives)
+4. [Sending GPS Updates](#sending-gps-updates)
+5. [Trip Lifecycle and States](#trip-lifecycle-and-states)
+6. [Waypoint Progress Tracking](#waypoint-progress-tracking)
+7. [Trip Completion](#trip-completion)
+8. [API Endpoints Reference](#api-endpoints-reference)
 
 ---
 
@@ -172,6 +173,113 @@ When you create a trip, the following happens internally:
    - Waypoint progress is calculated based on initial route
    - Remaining distances and times are computed
    - If `includeInstructions=true`, turn-by-turn instructions are fetched and included
+
+---
+
+## Calculating Routes (with Alternatives)
+
+The route calculation endpoint computes the optimal route through an ordered set of waypoints **without creating a trip or persisting anything**. It is useful when you want to preview route options and let the user choose before starting navigation. Unlike `POST /api/trips`, this endpoint does **not** write to the database and does **not** initialize Redis navigation state.
+
+### Endpoint
+
+```
+POST /api/routes/calculate
+Content-Type: application/json
+```
+
+### Request Body
+
+```json
+{
+  "waypoints": [               // Required: Ordered list of waypoints (minimum 2)
+    {
+      "latitude": 49.390674,    // Required: Latitude
+      "longitude": 9.082976      // Required: Longitude
+    },
+    {
+      "latitude": 49.37816,
+      "longitude": 9.088095
+    },
+    {
+      "latitude": 49.368903,
+      "longitude": 9.108073
+    }
+  ],
+  "numberOfAlternatives": 2,    // Optional: Request N alternative routes (default: 0)
+  "includeInstructions": false  // Optional: Turn-by-turn instructions for the primary route (default: false)
+}
+```
+
+### Request Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `waypoints` | Array | Yes | Ordered list of waypoints (minimum 2). Each waypoint must have `latitude` and `longitude`. Waypoints are visited in the order provided — no reordering is performed |
+| `numberOfAlternatives` | Integer | No | Number of alternative routes to request from OSRM (default: `0`). OSRM returns up to `numberOfAlternatives + 1` routes total |
+| `includeInstructions` | Boolean | No | Include turn-by-turn instructions for the primary route (default: `false`) |
+
+### Response (200 OK)
+
+```json
+{
+  "route": {
+    "polyline": [
+      [49.390674, 9.082976],
+      [49.390231, 9.083318],
+      [49.389912, 9.083696]
+    ],
+    "cumulativeDistances": [0.0, 45.2, 118.7],
+    "totalDistance": 4123.5,
+    "totalDuration": 512.0,
+    "legStopIndices": [0, 214, 512],
+    "legCumulativeDistances": [0.0, 1234.7, 4123.5],
+    "legDurations": [123.4, 388.6]
+  },
+  "alternatives": [
+    {
+      "polyline": [
+        [49.390674, 9.082976],
+        [49.390411, 9.083122],
+        [49.390098, 9.083411]
+      ],
+      "cumulativeDistances": [0.0, 31.8, 89.9],
+      "totalDistance": 4380.2,
+      "totalDuration": 540.6,
+      "legStopIndices": [0, 197, 489],
+      "legCumulativeDistances": [0.0, 1138.2, 4380.2],
+      "legDurations": [135.1, 405.5]
+    }
+  ],
+  "instructions": null
+}
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `route` | Object | The primary (optimal) route. See `RouteDto` fields below |
+| `alternatives` | Array | Additional route options, each with the same structure as `route`. Empty array if `numberOfAlternatives` was `0` or OSRM found no alternatives |
+| `instructions` | Object \| null | Turn-by-turn instructions for the primary route. `null` unless `includeInstructions` is `true` |
+
+`RouteDto` fields (shared by `route` and each entry of `alternatives`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `polyline` | Array | Route geometry as `[lat, lon]` pairs |
+| `cumulativeDistances` | Array | Distance in meters from the start for each polyline point |
+| `totalDistance` | Double | Total route distance in meters |
+| `totalDuration` | Double | Total route duration in seconds |
+| `legStopIndices` | Array | Polyline indices where each waypoint stop is located |
+| `legCumulativeDistances` | Array | Cumulative distance in meters at each waypoint stop |
+| `legDurations` | Array | Duration in seconds for each leg (segment between waypoints) |
+
+### Behavior Notes
+
+- **Ordered waypoints**: Waypoints are passed to OSRM in the order provided; the route always visits them in that sequence. Order them the way you want to visit them.
+- **Alternatives**: OSRM may return fewer than `numberOfAlternatives + 1` routes if it cannot find that many distinct viable alternatives. `route` is always the fastest/optimal one.
+- **No persistence**: This endpoint does not create a trip, write to the database, or initialize any navigation state. To start live navigation using a chosen route, create a trip with `POST /api/trips` using the same waypoints.
+- **Instructions**: When `includeInstructions` is `true`, instructions are fetched for the primary `route` only.
 
 ---
 
@@ -495,6 +603,18 @@ Content-Type: application/json
 
 Request: TripCreateRequest
 Response: TripResponse (201 Created)
+```
+
+### Calculate Route
+
+```
+POST /api/routes/calculate
+Content-Type: application/json
+
+Request: RouteCalculateRequest
+Response: RouteCalculateResponse (200 OK)
+
+Computes the optimal route (and up to `numberOfAlternatives` alternative routes, default 0) through an ordered set of waypoints. Does not create a trip, write to the database, or initialize navigation state. See [Calculating Routes (with Alternatives)](#calculating-routes-with-alternatives) for details.
 ```
 
 ### Get Trip by ID

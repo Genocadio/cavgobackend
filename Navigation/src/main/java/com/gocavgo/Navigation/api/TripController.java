@@ -1,5 +1,6 @@
 package com.gocavgo.Navigation.api;
 
+import com.gocavgo.Navigation.exception.OsrmUnavailableException;
 import com.gocavgo.Navigation.model.dto.TripCreateRequest;
 import com.gocavgo.Navigation.model.dto.TripResponse;
 import com.gocavgo.Navigation.service.TripService;
@@ -33,6 +34,8 @@ public class TripController {
         } catch (IllegalArgumentException e) {
             log.error("Invalid trip creation request", e);
             return ResponseEntity.badRequest().build();
+        } catch (OsrmUnavailableException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Error creating trip", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();

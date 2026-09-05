@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -31,12 +32,21 @@ public class RouteService {
                 .collect(Collectors.toList());
 
         boolean includeInstructions = Boolean.TRUE.equals(request.getIncludeInstructions());
+        int numberOfAlternatives = request.getNumberOfAlternatives() != null ? request.getNumberOfAlternatives() : 0;
+        if (numberOfAlternatives < 0) {
+            throw new IllegalArgumentException("numberOfAlternatives cannot be negative");
+        }
 
-        // Calculate route
-        Route route = osrmClient.getRoute(waypointCoords, includeInstructions);
+        // Calculate routes (primary + alternatives)
+        List<Route> routes = osrmClient.getRoutes(waypointCoords, includeInstructions, numberOfAlternatives);
 
-        // Convert to DTO
-        RouteDto routeDto = convertRouteToDto(route);
+        // Convert to DTOs
+        RouteDto routeDto = convertRouteToDto(routes.get(0));
+        List<RouteDto> alternativeDtos = routes.size() > 1
+                ? routes.subList(1, routes.size()).stream()
+                        .map(this::convertRouteToDto)
+                        .collect(Collectors.toList())
+                : Collections.emptyList();
 
         // Optionally fetch instructions
         Instruction instructions = null;
@@ -46,6 +56,7 @@ public class RouteService {
 
         return RouteCalculateResponse.builder()
                 .route(routeDto)
+                .alternatives(alternativeDtos)
                 .instructions(instructions)
                 .build();
     }
