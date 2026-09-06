@@ -5,12 +5,16 @@ import com.gocavgo.delivary.entity.delivery.PackageCustodianEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface PackageCustodianJpaRepository extends JpaRepository<PackageCustodianEntity, UUID> {
     List<PackageCustodianEntity> findByPackageId(UUID packageId);
+
+    /** Batch variant used by list endpoints to avoid N+1 queries. */
+    List<PackageCustodianEntity> findByPackageIdIn(Collection<UUID> packageIds);
 
     List<UUID> findUserIdsByPackageId(UUID packageId);
     List<PackageCustodianEntity> findByUserId(Long userId);

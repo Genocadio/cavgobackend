@@ -3,6 +3,8 @@ package com.gocavgo.delivary.repository.user;
 import com.gocavgo.delivary.entity.user.UserEntity;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -23,6 +25,14 @@ public class UserRepositoryImpl implements UserRepository {
     @Override
     public Optional<UserEntity> findById(Long id) {
         return jpaRepository.findById(id);
+    }
+
+    @Override
+    public List<UserEntity> findAllById(Collection<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return jpaRepository.findAllById(ids);
     }
 
     @Override

@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -13,6 +14,10 @@ public interface TransferPackageJpaRepository extends JpaRepository<TransferPack
     List<TransferPackageEntity> findByTransferId(UUID transferId);
 
     List<TransferPackageEntity> findByPackageId(UUID packageId);
+
+    /** Batch variants used by list endpoints to avoid N+1 queries. */
+    List<TransferPackageEntity> findByPackageIdIn(Collection<UUID> packageIds);
+    List<TransferPackageEntity> findByTransferIdIn(Collection<UUID> transferIds);
 
     @Query("SELECT tp.packageId FROM TransferPackageEntity tp WHERE tp.transferId = :transferId")
     List<UUID> findPackageIdsByTransferId(@Param("transferId") UUID transferId);

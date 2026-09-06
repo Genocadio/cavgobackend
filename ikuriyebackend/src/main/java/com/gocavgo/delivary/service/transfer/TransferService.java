@@ -35,8 +35,12 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -462,6 +466,45 @@ public class TransferService {
                                         List<TransferPackageEntity> packages,
                                         String transferCode) {
         return transferMapper.toResponseWithCode(entity, packages, transferCode);
+    }
+
+    /**
+     * Batch variant of {@link #getOpenTransfersByPackageId(UUID)} used by list
+     * endpoints to avoid N+1 queries. Loads all transfer links for the given
+     * packages plus all referenced transfers in two queries, then maps each
+     * package to its open (PENDING/REQUESTED) transfers in memory.
+     */
+    @Transactional(readOnly = true)
+    public Map<UUID, List<TransferResponse>> getOpenTransfersByPackageIds(Collection<UUID> packageIds) {
+        if (packageIds == null || packageIds.isEmpty()) {
+            return Map.of();
+        }
+
+        var links = transferPackageRepo.findByPackageIdIn(packageIds);
+        if (links.isEmpty()) return Map.of();
+
+        // Load all referenced transfers in one query, keep only open ones
+        var transferIds = links.stream().map(TransferPackageEntity::getTransferId).distinct().toList();
+        var transfersById = transferRepo.findAllById(transferIds).stream()
+                .filter(t -> t.getStatus() == TransferStatus.PENDING
+                        || t.getStatus() == TransferStatus.REQUESTED)
+                .collect(java.util.stream.Collectors.toMap(TransferEntity::getId, t -> t));
+        if (transfersById.isEmpty()) return Map.of();
+
+        // Load package links for the open transfers in one query
+        var openTransferIds = List.copyOf(transfersById.keySet());
+        var packagesByTransferId = transferPackageRepo.findByTransferIdIn(openTransferIds).stream()
+                .collect(java.util.stream.Collectors.groupingBy(TransferPackageEntity::getTransferId));
+
+        var results = new HashMap<UUID, List<TransferResponse>>();
+        for (var link : links) {
+            var transfer = transfersById.get(link.getTransferId());
+            if (transfer == null) continue;
+            var packages = packagesByTransferId.getOrDefault(link.getTransferId(), List.of());
+            results.computeIfAbsent(link.getPackageId(), k -> new ArrayList<>())
+                    .add(toResponse(transfer, packages, null));
+        }
+        return results;
     }
 
 

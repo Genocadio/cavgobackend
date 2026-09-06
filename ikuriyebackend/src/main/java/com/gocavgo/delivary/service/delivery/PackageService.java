@@ -29,6 +29,7 @@ import com.gocavgo.delivary.entity.delivery.PackageLocationEntity;
 import com.gocavgo.delivary.entity.delivery.PackageMediaEntity;
 import com.gocavgo.delivary.entity.delivery.PackagePersonEntity;
 import com.gocavgo.delivary.entity.delivery.DeliveryCodeEntity;
+import com.gocavgo.delivary.entity.user.UserEntity;
 import com.gocavgo.delivary.repository.delivery.PackageAssignmentJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageCustodianJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageCustodyJpaRepository;
@@ -71,8 +72,12 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -213,7 +218,7 @@ public class PackageService {
         // Notify: package created
         noticeService.notifyPackageEvent(pkg, NoticeEventMapper.fromPackageStatus(pkg.getStatus()), creatorId, null);
 
-        var response = new PackageCreationResponse(toResponse(pkg, true), transferResponse);
+        var response = new PackageCreationResponse(toResponse(pkg), transferResponse);
 
         // Publish to real-time subscription subscribers if a transfer was auto-created
         if (transferResponse != null) {
@@ -323,7 +328,7 @@ public class PackageService {
                 "Accepted by " + custodianRole.name().toLowerCase());
         saveEvent(pkg.getId(), mapStatusToEvent(notifyStatus), actorId, "Package accepted");
 
-        return new AcceptOfferResponse(toResponse(pkg, true));
+        return new AcceptOfferResponse(toResponse(pkg));
     }
 
     @Transactional
@@ -428,7 +433,7 @@ public class PackageService {
         for (var tp : transferPackages) {
             acceptSinglePackage(tp.getPackageId(), requestorId, custodianRole);
             var pkg = packageRepo.findById(tp.getPackageId()).orElseThrow();
-            results.add(toResponse(pkg, true));
+            results.add(toResponse(pkg));
         }
 
         return results;
@@ -494,7 +499,7 @@ public class PackageService {
         noticeService.notifyDeliveryCodeIssued(pkg, rawCode, actorId, previousStatus);
 
         log.info("initiateDelivery: package={}, delivery code issued", packageId);
-        return new DeliveryCodeResult(toResponse(pkg, true), rawCode);
+        return new DeliveryCodeResult(toResponse(pkg), rawCode);
     }
 
     /**
@@ -541,7 +546,7 @@ public class PackageService {
         noticeService.notifyDeliveryCodeIssued(pkg, rawCode, actorId, previousStatus);
 
         log.info("regenerateDeliveryCode: package={}, delivery code reissued", packageId);
-        return new DeliveryCodeResult(toResponse(pkg, true), rawCode);
+        return new DeliveryCodeResult(toResponse(pkg), rawCode);
     }
 
     @Transactional
@@ -607,7 +612,7 @@ public class PackageService {
         saveEvent(pkg.getId(), PackageEventType.ASSIGNED, input.assignedBy(),
                 "Driver assigned: " + input.driverId());
 
-        return toResponse(pkg, true);
+        return toResponse(pkg);
     }
 
     @Transactional
@@ -656,7 +661,7 @@ public class PackageService {
         saveEvent(pkg.getId(), eventType, actorId,
                 notes != null ? notes : "Status: " + status);
 
-        return toResponse(pkg, true);
+        return toResponse(pkg);
     }
 
     /**
@@ -757,7 +762,7 @@ public class PackageService {
         pkg.setCompanyId(input.companyId());
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);
-        return toResponse(pkg, true);
+        return toResponse(pkg);
     }
 
     @Transactional
@@ -767,7 +772,7 @@ public class PackageService {
         pkg.setTripId(input.tripId());
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);
-        return toResponse(pkg, true);
+        return toResponse(pkg);
     }
 
     /**
@@ -951,14 +956,14 @@ public class PackageService {
     public PackageResponse getPackageById(UUID id) {
         var pkg = packageRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("Package not found: " + id));
-        return toResponse(pkg, true);
+        return toResponse(pkg);
     }
 
     @Transactional(readOnly = true)
     public PackageResponse getPackageByTrackingCode(String code) {
         var pkg = packageRepo.findByTrackingCode(code)
                 .orElseThrow(() -> new RuntimeException("Package not found: " + code));
-        return toResponse(pkg, true);
+        return toResponse(pkg);
     }
 
     @Transactional(readOnly = true)
@@ -997,10 +1002,8 @@ public class PackageService {
         // offer and should see those packages in their list.
         addPackageIdsFromRequestedTransfers(userId, packageIds);
 
-        var packages = packageIds.stream()
-                .map(id -> packageRepo.findById(id).orElse(null))
-                .filter(Objects::nonNull)
-                .toList();
+        // Single batched query instead of one findById per package (N+1)
+        var packages = packageRepo.findAllById(packageIds);
 
         return toPage(filterAndSort(packages, statusFilter, order), page, size);
     }
@@ -1033,10 +1036,11 @@ public class PackageService {
     @Transactional(readOnly = true)
     public DeliveryPackagePage getPackagesByDriver(Long driverId, PackageStatus statusFilter,
                                                    SortOrder order, int page, int size) {
-        var packages = custodianRepo.findByUserIdAndRole(driverId, CustodianRole.DRIVER).stream()
-                .map(c -> packageRepo.findById(c.getPackageId()).orElse(null))
-                .filter(Objects::nonNull)
+        var packageIds = custodianRepo.findByUserIdAndRole(driverId, CustodianRole.DRIVER).stream()
+                .map(PackageCustodianEntity::getPackageId)
                 .toList();
+        // Single batched query instead of one findById per custodian row (N+1)
+        var packages = packageRepo.findAllById(packageIds);
         return toPage(filterAndSort(packages, statusFilter, order), page, size);
     }
 
@@ -1089,7 +1093,8 @@ public class PackageService {
                 .filter(pkg -> !unavailablePackageIds.contains(pkg.getId()))
                 .toList();
 
-        return toPage(filtered, page, size);
+        // The repo already applied page/size — map without slicing again.
+        return toPageMapped(filtered, page, size);
     }
 
     @Transactional(readOnly = true)
@@ -1191,15 +1196,30 @@ public class PackageService {
     }
 
     private DeliveryPackagePage toPage(Page<PackageEntity> page) {
-        var items = page.getContent().stream().map(p -> toResponse(p, true)).toList();
+        var items = toResponses(page.getContent());
         return new DeliveryPackagePage(items, (int) page.getTotalElements(), page.getTotalPages(), page.getNumber());
     }
 
     private DeliveryPackagePage toPage(List<PackageEntity> entities, int page, int size) {
         var totalCount = entities.size();
         var totalPages = (int) Math.ceil((double) totalCount / size);
-        var items = entities.stream().map(p -> toResponse(p, true)).toList();
+        // Slice in memory (callers pre-filter/sort full result sets), then only
+        // hydrate the current page — keeps DB work and payload proportional to size.
+        var fromIndex = Math.min(page * size, totalCount);
+        var toIndex = Math.min(fromIndex + size, totalCount);
+        var items = toResponses(entities.subList(fromIndex, toIndex));
         return new DeliveryPackagePage(items, totalCount, totalPages, page);
+    }
+
+    /**
+     * Maps an ALREADY-PAGED list (repo applied page/size) without slicing again.
+     * Counting follows the legacy post-filter semantics: totalCount is the size
+     * of the filtered page list.
+     */
+    private DeliveryPackagePage toPageMapped(List<PackageEntity> alreadyPaged, int page, int size) {
+        var totalCount = alreadyPaged.size();
+        var totalPages = (int) Math.ceil((double) totalCount / size);
+        return new DeliveryPackagePage(toResponses(alreadyPaged), totalCount, totalPages, page);
     }
 
     @Transactional(readOnly = true)
@@ -1339,59 +1359,121 @@ public class PackageService {
         };
     }
 
-    private PackageResponse toResponse(PackageEntity pkg, boolean includeDetails) {
-        var custodians = custodianRepo.findByPackageId(pkg.getId()).stream()
-                .map(c -> {
-                    var user = userRepository.findById(c.getUserId());
-                    var name = user.map(u -> {
-                        var full = (u.getFirstName() != null ? u.getFirstName() + " " : "") + (u.getLastName() != null ? u.getLastName() : "");
-                        return full.isBlank() ? null : full.trim();
-                    }).orElse(null);
-                    var phone = user.map(u -> u.getPhone()).orElse(null);
-                    return deliveryMapper.toCustodianResponse(c, name, phone);
-                })
-                .toList();
+    private PackageResponse toResponse(PackageEntity pkg) {
+        return toResponses(List.of(pkg)).get(0);
+    }
 
-        var people = includeDetails ? personRepo.findByPackageId(pkg.getId()).stream()
-                .map(deliveryMapper::toPersonResponse)
-                .toList() : List.<PackageResponse.PersonResponse>of();
+    /**
+     * Batched assembly of package responses. Instead of running ~10 queries per
+     * package (the classic N+1 explosion), every nested collection is fetched
+     * for ALL packages in ONE query and grouped in memory:
+     * <ul>
+     *   <li>custodians + users (2 queries)</li>
+     *   <li>people + locations (2 queries)</li>
+     *   <li>details + media (2 queries)</li>
+     *   <li>events + custody (2 queries)</li>
+     *   <li>open transfers via TransferService batch (2-3 queries)</li>
+     * </ul>
+     * Total: ~11 queries regardless of package count (was ~10 × N).
+     */
+    private List<PackageResponse> toResponses(List<PackageEntity> packages) {
+        if (packages.isEmpty()) return List.of();
+        var ids = packages.stream().map(PackageEntity::getId).toList();
 
-        var locations = includeDetails ? locationRepo.findByPackageId(pkg.getId()).stream()
-                .map(deliveryMapper::toLocationResponse)
-                .toList() : List.<PackageResponse.LocationResponse>of();
+        // ── 1. Custodians + their users (2 queries) ──
+        var custodiansByPackage = custodianRepo.findByPackageIdIn(ids).stream()
+                .collect(Collectors.groupingBy(PackageCustodianEntity::getPackageId));
+        var userIds = custodiansByPackage.values().stream()
+                .flatMap(List::stream)
+                .map(PackageCustodianEntity::getUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        var usersById = userRepository.findAllById(userIds).stream()
+                .collect(Collectors.toMap(UserEntity::getId, Function.identity()));
 
-        var detail = includeDetails ? detailRepo.findByPackageId(pkg.getId()).map(d -> {
-            var media = mediaRepo.findByPackageId(pkg.getId()).stream()
-                    .map(m -> {
-                        // Resolve URL from storage path — handles both local and Supabase
-                        String url = null;
-                        if (m.getStoragePath() != null && m.getBucket() != null) {
-                            boolean isLocal = "local".equals(m.getStorageMode());
-                            url = storageService.getFileUrl(m.getBucket(), m.getStoragePath(), isLocal);
-                        }
-                        // Derive MIME type from mediaType enum
-                        String mime = m.getMediaType() == com.gocavgo.delivary.enums.delivery.MediaType.VIDEO
-                                ? "video/mp4" : "image/jpeg";
-                        return new PackageResponse.MediaResponse(
-                                m.getId(), url != null ? url : "", mime);
-                    })
+        // ── 2. People + locations (2 queries) ──
+        var peopleByPackage = personRepo.findByPackageIdIn(ids).stream()
+                .collect(Collectors.groupingBy(PackagePersonEntity::getPackageId));
+        var locationsByPackage = locationRepo.findByPackageIdIn(ids).stream()
+                .collect(Collectors.groupingBy(PackageLocationEntity::getPackageId));
+
+        // ── 3. Details + media (2 queries) ──
+        var detailsByPackage = detailRepo.findByPackageIdIn(ids).stream()
+                .collect(Collectors.toMap(PackageDetailEntity::getPackageId, Function.identity(), (a, b) -> a));
+        var mediaByPackage = mediaRepo.findByPackageIdIn(ids).stream()
+                .collect(Collectors.groupingBy(PackageMediaEntity::getPackageId));
+
+        // ── 4. Events + custody history (2 queries) ──
+        var eventsByPackage = eventRepo.findByPackageIdInOrderByCreatedAtAsc(ids).stream()
+                .collect(Collectors.groupingBy(PackageEventEntity::getPackageId));
+        var custodyByPackage = custodyRepo.findByPackageIdInOrderByTimestampAsc(ids).stream()
+                .collect(Collectors.groupingBy(PackageCustodyEntity::getPackageId));
+
+        // ── 5. Open (PENDING/REQUESTED) transfers, batched (2-3 queries) ──
+        var transfersByPackage = transferService.getOpenTransfersByPackageIds(ids);
+
+        var results = new ArrayList<PackageResponse>(packages.size());
+        for (var pkg : packages) {
+            var packageId = pkg.getId();
+
+            var custodians = custodiansByPackage.getOrDefault(packageId, List.of()).stream()
+                    .map(c -> toCustodianResponse(c, usersById))
                     .toList();
-            return deliveryMapper.toDetailResponse(d, media);
-        }).orElse(null) : null;
 
-        var events = includeDetails ? eventRepo.findByPackageIdOrderByCreatedAtAsc(pkg.getId()).stream()
-                .map(deliveryMapper::toEventResponse)
-                .toList() : List.<PackageResponse.EventResponse>of();
+            var people = peopleByPackage.getOrDefault(packageId, List.of()).stream()
+                    .map(deliveryMapper::toPersonResponse)
+                    .toList();
 
-        var custody = includeDetails ? custodyRepo.findByPackageIdOrderByTimestampAsc(pkg.getId()).stream()
-                .map(deliveryMapper::toCustodyResponse)
-                .toList() : List.<PackageResponse.CustodyResponse>of();
+            var locations = locationsByPackage.getOrDefault(packageId, List.of()).stream()
+                    .map(deliveryMapper::toLocationResponse)
+                    .toList();
 
-        // Look up any open (PENDING/REQUESTED) transfers for this package
-        var transfers = transferService.getOpenTransfersByPackageId(pkg.getId());
+            var detail = Optional.ofNullable(detailsByPackage.get(packageId)).map(d -> {
+                var media = mediaByPackage.getOrDefault(packageId, List.of()).stream()
+                        .map(this::toMediaResponse)
+                        .toList();
+                return deliveryMapper.toDetailResponse(d, media);
+            }).orElse(null);
 
-        return deliveryMapper.toFullResponse(
-                pkg, custodians, people, locations, detail, events, custody, transfers
-        );
+            var events = eventsByPackage.getOrDefault(packageId, List.of()).stream()
+                    .map(deliveryMapper::toEventResponse)
+                    .toList();
+
+            var custody = custodyByPackage.getOrDefault(packageId, List.of()).stream()
+                    .map(deliveryMapper::toCustodyResponse)
+                    .toList();
+
+            var transfers = transfersByPackage.getOrDefault(packageId, List.of());
+
+            results.add(deliveryMapper.toFullResponse(
+                    pkg, custodians, people, locations, detail, events, custody, transfers
+            ));
+        }
+        return results;
+    }
+
+    private PackageResponse.CustodianResponse toCustodianResponse(PackageCustodianEntity c,
+                                                                   Map<Long, UserEntity> usersById) {
+        var user = Optional.ofNullable(usersById.get(c.getUserId()));
+        var name = user.map(u -> {
+            var full = (u.getFirstName() != null ? u.getFirstName() + " " : "") + (u.getLastName() != null ? u.getLastName() : "");
+            return full.isBlank() ? null : full.trim();
+        }).orElse(null);
+        var phone = user.map(UserEntity::getPhone).orElse(null);
+        return deliveryMapper.toCustodianResponse(c, name, phone);
+    }
+
+    private PackageResponse.MediaResponse toMediaResponse(PackageMediaEntity m) {
+        // Resolve URL from storage path — handles both local and Supabase
+        String url = null;
+        if (m.getStoragePath() != null && m.getBucket() != null) {
+            boolean isLocal = "local".equals(m.getStorageMode());
+            url = storageService.getFileUrl(m.getBucket(), m.getStoragePath(), isLocal);
+        }
+        // Derive MIME type from mediaType enum
+        String mime = m.getMediaType() == com.gocavgo.delivary.enums.delivery.MediaType.VIDEO
+                ? "video/mp4" : "image/jpeg";
+        return new PackageResponse.MediaResponse(
+                m.getId(), url != null ? url : "", mime);
     }
 }

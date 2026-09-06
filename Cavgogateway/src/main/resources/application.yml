@@ -10,13 +10,14 @@ spring:
     max-in-memory-size: 100MB
   cloud:
     gateway:
-      # Add request/response logging filter globally
+      # Request/response body logging is expensive (buffers whole payloads,
+      # MB-size GraphQL responses included). Enable via env in non-prod only.
       default-filters:
         - name: RequestResponse
           args:
-            includeRequestBody: true
-            includeResponseBody: true
-            includeHeaders: true
+            includeRequestBody: ${GATEWAY_LOG_BODIES:false}
+            includeResponseBody: ${GATEWAY_LOG_BODIES:false}
+            includeHeaders: ${GATEWAY_LOG_HEADERS:false}
       server:
         webflux:
           routes:
@@ -161,20 +162,21 @@ spring:
 server:
   port: 8070
 
-# Enhanced Logging Configuration
+# Logging Configuration
+# INFO by default; set LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_CLOUD_GATEWAY=DEBUG (etc.)
+# via env when troubleshooting. DEBUG on reactor.netty/io.netty is extremely
+# verbose and measurably slows every request — keep it off in prod.
 logging:
   level:
-    org.springframework.cloud.gateway: DEBUG
-    org.springframework.cloud.gateway.filter: DEBUG
-    org.springframework.cloud.gateway.route: DEBUG
-    org.springframework.cloud.gateway.handler: DEBUG
-    org.springframework.security: DEBUG
-    com.nexxserve.gateway: DEBUG
-    com.nexxserve.cavgogateway: DEBUG
-    reactor.netty: DEBUG
-    org.springframework.web.reactive: DEBUG
-    org.springframework.web.cors: DEBUG
-    org.springframework.http.server.reactive: DEBUG
+    root: ${LOG_LEVEL:INFO}
+    org.springframework.cloud.gateway: ${GATEWAY_LOG_LEVEL:INFO}
+    org.springframework.security: ${SECURITY_LOG_LEVEL:INFO}
+    com.nexxserve.gateway: ${GATEWAY_LOG_LEVEL:INFO}
+    com.nexxserve.cavgogateway: ${GATEWAY_LOG_LEVEL:INFO}
+    reactor.netty: ${NETTY_LOG_LEVEL:INFO}
+    org.springframework.web.reactive: ${GATEWAY_LOG_LEVEL:INFO}
+    org.springframework.web.cors: ${GATEWAY_LOG_LEVEL:INFO}
+    org.springframework.http.server.reactive: ${GATEWAY_LOG_LEVEL:INFO}
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId},%X{spanId}] %logger{36} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId},%X{spanId}] %logger{36} - %msg%n"

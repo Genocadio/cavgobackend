@@ -107,6 +107,12 @@ logging:
 
 server:
   port: ${SERVER_PORT:6100}
+  compression:
+    # GraphQL list payloads (200 packages with nested data) are large JSON;
+    # gzip cuts them ~80-90% and nginx passes Accept-Encoding through.
+    enabled: true
+    mime-types: application/json,application/graphql-response+json,text/plain,text/html,text/css,application/javascript
+    min-response-size: 2048
 
 management:
   endpoints:

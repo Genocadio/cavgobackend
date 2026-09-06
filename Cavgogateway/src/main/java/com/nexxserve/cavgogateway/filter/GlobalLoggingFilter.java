@@ -20,10 +20,21 @@ import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
+/**
+ * Logs request/response headers and bodies for every request. Body logging
+ * buffers whole payloads (MB-size GraphQL responses included) and serialises
+ * them per request — expensive. Controlled by GATEWAY_LOG_BODIES / 
+ * GATEWAY_LOG_HEADERS env vars (default: off in production).
+ */
 @Component
 public class GlobalLoggingFilter implements GlobalFilter, Ordered {
 
     private static final Logger logger = LoggerFactory.getLogger(GlobalLoggingFilter.class);
+
+    private static final boolean LOG_BODIES = Boolean.parseBoolean(
+            System.getenv().getOrDefault("GATEWAY_LOG_BODIES", "false"));
+    private static final boolean LOG_HEADERS = Boolean.parseBoolean(
+            System.getenv().getOrDefault("GATEWAY_LOG_HEADERS", "false"));
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
@@ -34,8 +45,25 @@ public class GlobalLoggingFilter implements GlobalFilter, Ordered {
         boolean isSSERequest = isServerSentEventRequest(request);
         boolean isMultipartUpload = isMultipartUpload(request);
 
-        // Log request details
-        logRequest(requestId, request, isSSERequest);
+        if (logger.isInfoEnabled()) {
+            logger.info("🔵 [GATEWAY-REQUEST-{}] {} {}", requestId, request.getMethod(), request.getPath());
+        }
+
+        // Skip body buffering/decoration entirely unless body logging is enabled.
+        if (!LOG_BODIES) {
+            return chain.filter(exchange)
+                    .doOnSuccess(aVoid -> {
+                        if (isSSERequest) {
+                            logger.info("🟢 [SSE-SUCCESS-{}] SSE Connection established successfully", requestId);
+                        } else {
+                            logger.info("🟢 [GATEWAY-SUCCESS-{}] {} {} -> {}", requestId,
+                                    request.getMethod(), request.getPath(), exchange.getResponse().getStatusCode());
+                        }
+                    })
+                    .doOnError(error ->
+                            logger.error("🔴 [GATEWAY-ERROR-{}] {} {} failed: {}", requestId,
+                                    request.getMethod(), request.getPath(), error.getMessage()));
+        }
 
         // Decorate request to log body if present and not SSE / file upload
         ServerHttpRequestDecorator requestDecorator = new ServerHttpRequestDecorator(request) {
@@ -137,6 +165,10 @@ public class GlobalLoggingFilter implements GlobalFilter, Ordered {
         logger.info("{}{}} Query: {}", prefix, requestId, request.getQueryParams());
         logger.info("{}{}} Remote Address: {}", prefix, requestId, request.getRemoteAddress());
 
+        if (!LOG_HEADERS) {
+            return;
+        }
+
         // Log headers
         HttpHeaders headers = request.getHeaders();
         logger.info("{}{}} Headers:", prefix, requestId);
@@ -162,6 +194,9 @@ public class GlobalLoggingFilter implements GlobalFilter, Ordered {
         logger.info("{}{}} Status: {}", prefix, requestId, response.getStatusCode());
 
         // Log response headers
+        if (!LOG_HEADERS) {
+            return;
+        }
         HttpHeaders headers = response.getHeaders();
         logger.info("{}{}} Headers:", prefix, requestId);
         headers.forEach((key, values) -> {
