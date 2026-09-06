@@ -37,6 +37,12 @@ spring:
     baseline-version: 4
     clean-disabled: false
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:admin}
+    password: ${RABBITMQ_PASS:admin}
+
   graphql:
     graphiql:
       enabled: true
@@ -90,10 +96,13 @@ storage:
   migration:
     enabled: ${STORAGE_MIGRATION_ENABLED:true}
 
+rabbitmq:
+  naviga:
+    exchange: cavgomqt.trip.updates
+    queue: ikuriyebackend.naviga-trips
+
 logging:
   level:
-    # Suppress noisy ClosedChannelException from WebSocket subscriptions —
-    # this fires whenever a client disconnects mid-push (backgrounded, network drop).
     org.springframework.graphql.server.webmvc.GraphQlWebSocketHandler: WARN
 
 server:

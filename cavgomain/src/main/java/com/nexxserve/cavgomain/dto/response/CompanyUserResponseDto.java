@@ -25,6 +25,7 @@ public class CompanyUserResponseDto {
     private String createdAt;
     private String updatedAt;
     private VehicleResponseDto vehicle;
+    private OfficeResponseDto office;
 
     public static CompanyUserResponseDto fromEntity(CompanyUser entity) {
         CompanyUserResponseDto dto = new CompanyUserResponseDto();
@@ -43,6 +44,9 @@ public class CompanyUserResponseDto {
         dto.setLicenseExpiry(entity.getLicenseExpiry());
         dto.setCreatedAt(entity.getCreatedAt().toString());
         dto.setUpdatedAt(entity.getUpdatedAt() != null ? entity.getUpdatedAt().toString() : null);
+        if (entity.getOffice() != null) {
+            dto.setOffice(OfficeResponseDto.fromEntity(entity.getOffice()));
+        }
         return dto;
     }
 }

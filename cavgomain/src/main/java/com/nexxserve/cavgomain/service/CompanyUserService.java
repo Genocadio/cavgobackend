@@ -6,10 +6,12 @@ import com.nexxserve.cavgomain.dto.response.DriverVehicleResponseDto;
 import com.nexxserve.cavgomain.dto.response.VehicleResponseDto;
 import com.nexxserve.cavgomain.entity.Company;
 import com.nexxserve.cavgomain.entity.CompanyUser;
+import com.nexxserve.cavgomain.entity.Office;
 import com.nexxserve.cavgomain.entity.VehicleAssignment;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
+import com.nexxserve.cavgomain.repository.OfficeRepository;
 import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -28,6 +30,7 @@ public class CompanyUserService {
 
     private final CompanyUserRepository companyUserRepository;
     private final CompanyRepository companyRepository;
+    private final OfficeRepository officeRepository;
     private final VehicleAssignmentRepository assignmentRepository;
     private final AggregatorSyncService aggregatorSyncService;
 
@@ -37,7 +40,14 @@ public class CompanyUserService {
         if (user.getLicenseNumber() != null) {
             user.setRole(CompanyUserRole.DRIVER);
         }
-        CompanyUser saved = companyUserRepository.save(user.toEntity(company));
+        CompanyUser entity = user.toEntity(company);
+        // Assign office if provided
+        if (user.getOfficeId() != null) {
+            Office office = officeRepository.findById(user.getOfficeId())
+                    .orElseThrow(() -> new IllegalArgumentException("Office not found with id: " + user.getOfficeId()));
+            entity.setOffice(office);
+        }
+        CompanyUser saved = companyUserRepository.save(entity);
         CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(saved);
         
         // If user is a driver, populate vehicle information
@@ -71,6 +81,15 @@ public class CompanyUserService {
         existingUser.setLicenseExpiry(user.getLicenseExpiry());
         existingUser.setAddress(user.getAddress());
         existingUser.setStatus(user.getStatus());
+        // Update office assignment if provided
+        if (user.getOfficeId() != null) {
+            Office office = officeRepository.findById(user.getOfficeId())
+                    .orElseThrow(() -> new IllegalArgumentException("Office not found with id: " + user.getOfficeId()));
+            existingUser.setOffice(office);
+        } else if (user.getOfficeId() == null && existingUser.getOffice() != null) {
+            // Explicit null clears the office assignment
+            existingUser.setOffice(null);
+        }
         
         CompanyUser saved = companyUserRepository.save(existingUser);
         CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(saved);

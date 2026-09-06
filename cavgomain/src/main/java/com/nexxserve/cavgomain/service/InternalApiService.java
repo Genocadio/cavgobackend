@@ -2,7 +2,9 @@ package com.nexxserve.cavgomain.service;
 
 import com.nexxserve.cavgomain.dto.response.InternalVehicleResponseDto;
 import com.nexxserve.cavgomain.dto.response.InternalWorkerResponseDto;
+import com.nexxserve.cavgomain.dto.response.OfficeResponseDto;
 import com.nexxserve.cavgomain.entity.CompanyUser;
+import com.nexxserve.cavgomain.entity.Office;
 import com.nexxserve.cavgomain.entity.Vehicle;
 import com.nexxserve.cavgomain.entity.VehicleAssignment;
 import com.nexxserve.cavgomain.entity.VehicleLocation;
@@ -148,7 +150,14 @@ public class InternalApiService {
             }
         }
         
-        return InternalWorkerResponseDto.fromEntity(worker, vehicleDto);
+        // Get assigned office if exists (for WORKER, ADMIN, SUPERVISOR roles)
+        OfficeResponseDto officeDto = null;
+        Office office = worker.getOffice();
+        if (office != null) {
+            officeDto = OfficeResponseDto.fromEntity(office);
+        }
+        
+        return InternalWorkerResponseDto.fromEntity(worker, vehicleDto, officeDto);
     }
 }
 

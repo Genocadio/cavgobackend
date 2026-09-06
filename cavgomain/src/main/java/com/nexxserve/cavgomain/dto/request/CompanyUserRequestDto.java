@@ -44,6 +44,9 @@ public class CompanyUserRequestDto {
     /** Nexxauth user ID to link this company user to an existing Nexxauth identity */
     private Long nexxauthUserId;
 
+    /** Office ID to assign this worker to (optional — ADMIN can set, worker can self-assign) */
+    private Long officeId;
+
     public CompanyUser toEntity(Company company) {
         CompanyUser user = new CompanyUser();
         user.setCompany(company);
