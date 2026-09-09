@@ -103,13 +103,18 @@ func (s *RouteService) SearchAndFilterPaginated(origin, destination string, city
 		if limit > 0 {
 			page = offset/limit + 1
 		}
-		return s.search.SearchRoutesPaginated(context.Background(), search.RouteFilters{
+		res, total, err := s.search.SearchRoutesPaginated(context.Background(), search.RouteFilters{
 			Origin:              origin,
 			Destination:         destination,
 			CityRoute:           cityRoute,
 			OriginProvince:      originProvince,
 			DestinationProvince: destinationProvince,
 		}, page, limit)
+		if err != nil {
+			log.Printf("[route-search] search provider error (falling back to SQL): %v", err)
+		} else {
+			return res, total, nil
+		}
 	}
 	return s.repo.SearchAndFilterPaginated(origin, destination, cityRoute, originProvince, destinationProvince, limit, offset)
 }

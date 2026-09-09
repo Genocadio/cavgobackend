@@ -87,7 +87,9 @@ func (r *routeRepository) CheckUniqueness(route *models.Route) error {
 }
 
 // checkRouteWithSameWaypointSequence checks if a route with same origin, destination,
-// and identical passthrough waypoint sequence already exists
+// and identical passthrough waypoint sequence (locations AND prices) already exists.
+// Routes that share origin/destination but differ in waypoint locations or waypoint
+// prices are allowed.
 func (r *routeRepository) checkRouteWithSameWaypointSequence(route *models.Route) error {
 	// Get all routes with same origin and destination
 	var existingRoutes []models.Route
@@ -98,49 +100,60 @@ func (r *routeRepository) checkRouteWithSameWaypointSequence(route *models.Route
 		return err
 	}
 
-	// Get only passthrough waypoints from the new route (ordered by Order field)
-	newPassthroughWaypoints := make([]int64, 0)
-	for _, waypoint := range route.Waypoints {
-		if waypoint.IsPassThrough {
-			newPassthroughWaypoints = append(newPassthroughWaypoints, waypoint.LocationID)
-		}
-	}
+	// Build a signature for the new route's passthrough waypoints (location + price)
+	newSignature := buildWaypointSignature(route.Waypoints)
 
 	// Compare with each existing route
 	for _, existingRoute := range existingRoutes {
-		// Get passthrough waypoints from existing route (ordered by Order field)
-		existingPassthroughWaypoints := make([]int64, 0)
-		for _, waypoint := range existingRoute.Waypoints {
-			if waypoint.IsPassThrough {
-				existingPassthroughWaypoints = append(existingPassthroughWaypoints, waypoint.LocationID)
-			}
-		}
+		existingSignature := buildWaypointSignature(existingRoute.Waypoints)
 
-		// Compare the sequences
-		if areWaypointSequencesEqual(newPassthroughWaypoints, existingPassthroughWaypoints) {
-			if len(newPassthroughWaypoints) == 0 {
+		if areWaypointSignaturesEqual(newSignature, existingSignature) {
+			if len(newSignature) == 0 {
 				return errors.New("a route with the same origin and destination (no passthrough waypoints) already exists")
-			} else {
-				return errors.New("a route with the same origin, destination, and passthrough waypoint sequence already exists")
 			}
+			return errors.New("a route with the same origin, destination, passthrough waypoints, and waypoint prices already exists")
 		}
 	}
 
 	return nil
 }
 
-// areWaypointSequencesEqual compares two waypoint sequences for equality
-func areWaypointSequencesEqual(seq1, seq2 []int64) bool {
-	if len(seq1) != len(seq2) {
+// waypointSignatureEntry captures both location and price for uniqueness comparison.
+type waypointSignatureEntry struct {
+	LocationID int64
+	Price      float64
+}
+
+// buildWaypointSignature extracts an ordered list of (location, price) pairs
+// from non-passthrough waypoints. Nil prices are treated as zero.
+func buildWaypointSignature(waypoints []models.RouteWaypoint) []waypointSignatureEntry {
+	sig := make([]waypointSignatureEntry, 0)
+	for _, wp := range waypoints {
+		if wp.IsPassThrough {
+			price := 0.0
+			if wp.Price != nil {
+				price = *wp.Price
+			}
+			sig = append(sig, waypointSignatureEntry{
+				LocationID: wp.LocationID,
+				Price:      price,
+			})
+		}
+	}
+	return sig
+}
+
+// areWaypointSignaturesEqual returns true when two waypoint signature sequences
+// are identical in both location order and price values.
+func areWaypointSignaturesEqual(a, b []waypointSignatureEntry) bool {
+	if len(a) != len(b) {
 		return false
 	}
-
-	for i, locationID := range seq1 {
-		if locationID != seq2[i] {
+	for i := range a {
+		if a[i].LocationID != b[i].LocationID || a[i].Price != b[i].Price {
 			return false
 		}
 	}
-
 	return true
 }
 

@@ -775,13 +775,14 @@ func (s *TripService) GetTripsByFiltersPaginated(origin, destination, company st
 			Company:     company,
 		}, page, limit)
 		if err != nil {
-			return nil, 0, err
+			log.Printf("[trip-search] search provider error (falling back to SQL): %v", err)
+		} else {
+			for i := range trips {
+				trips[i].Route.Waypoints = nil
+				adjustRouteForReversed(&trips[i])
+			}
+			return trips, total, nil
 		}
-		for i := range trips {
-			trips[i].Route.Waypoints = nil
-			adjustRouteForReversed(&trips[i])
-		}
-		return trips, total, nil
 	}
 	trips, total, err := s.tripRepo.GetTripsByFiltersPaginated(origin, destination, company, limit, offset)
 	if err != nil {
@@ -1151,13 +1152,14 @@ func (s *TripService) GetTripsByFiltersWithCityRoute(origin, destination, compan
 			CityRoute:   cityRoute,
 		}, page, limit)
 		if err != nil {
-			return nil, 0, err
+			log.Printf("[trip-search] search provider error (falling back to SQL): %v", err)
+		} else {
+			for i := range trips {
+				trips[i].Route.Waypoints = nil
+				adjustRouteForReversed(&trips[i])
+			}
+			return trips, total, nil
 		}
-		for i := range trips {
-			trips[i].Route.Waypoints = nil
-			adjustRouteForReversed(&trips[i])
-		}
-		return trips, total, nil
 	}
 	trips, total, err := s.tripRepo.GetTripsByFiltersWithCityRoute(origin, destination, company, *cityRoute, limit, offset)
 	if err != nil {

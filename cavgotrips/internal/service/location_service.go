@@ -153,7 +153,12 @@ func (s *LocationService) SearchLocationsPaginated(searchTerm string, limit, off
 		if limit > 0 {
 			page = offset/limit + 1
 		}
-		return s.search.SearchLocationsPaginated(context.Background(), searchTerm, page, limit)
+		res, total, err := s.search.SearchLocationsPaginated(context.Background(), searchTerm, page, limit)
+		if err != nil {
+			log.Printf("[location-search] search provider error (falling back to SQL): %v", err)
+		} else {
+			return res, total, nil
+		}
 	}
 	if searchTerm == "" {
 		return s.repo.GetAllPaginated(limit, offset)

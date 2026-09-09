@@ -1,10 +1,13 @@
 package com.nexxserve.cavgomain.service;
 
 import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
+import com.nexxserve.cavgomain.dto.response.UserResponseDto;
 import com.nexxserve.cavgomain.entity.CompanyUser;
+import com.nexxserve.cavgomain.entity.User;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.UserStatus;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
+import com.nexxserve.cavgomain.repository.UserRepository;
 import com.nexxserve.cavgomain.security.NexxauthClient;
 import com.nexxserve.cavgomain.security.NexxauthRoles;
 import jakarta.persistence.EntityManager;
@@ -14,6 +17,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * User management, working hand in hand with Nexxauth.
@@ -28,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
 
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
+    private final UserRepository userRepository;
     private final CompanyUserRepository companyUserRepository;
     private final NexxauthClient nexxauthClient;
     private final EntityManager entityManager;
@@ -144,6 +151,43 @@ public class UserService {
         // transaction"). persist() always issues an INSERT for a new entity.
         entityManager.persist(user);
         return CompanyUserResponseDto.fromEntity(user);
+    }
+
+    /**
+     * Returns all users (both CompanyUser and ClientUser). When a timeLimit is
+     * provided only users created or updated after that time are returned (for
+     * incremental sync).
+     */
+    @Transactional(readOnly = true)
+    public List<UserResponseDto> findAllUsers(LocalDateTime timeLimit) {
+        List<User> users;
+        if (timeLimit != null) {
+            users = userRepository.findAllAfterTime(timeLimit);
+        } else {
+            users = userRepository.findAllAfterTime(LocalDateTime.of(1970, 1, 1, 0, 0));
+        }
+        return users.stream()
+                .map(UserResponseDto::fromEntity)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    /**
+     * Searches users by name (first name or last name). When a timeLimit is
+     * provided the search is restricted to records changed after that time.
+     */
+    @Transactional(readOnly = true)
+    public List<UserResponseDto> searchUsersByName(String name, LocalDateTime timeLimit) {
+        List<User> users;
+        if (timeLimit != null) {
+            users = userRepository.findByNameContainingAfterTime(name, timeLimit);
+        } else {
+            users = userRepository.findByNameContaining(name);
+        }
+        return users.stream()
+                .map(UserResponseDto::fromEntity)
+                .filter(java.util.Objects::nonNull)
+                .toList();
     }
 
     private static int precedence(CompanyUserRole role) {
