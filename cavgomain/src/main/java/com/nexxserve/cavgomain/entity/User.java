@@ -10,6 +10,11 @@ import lombok.ToString;
  * User profile mirror — identity and authentication are managed by Nexxauth.
  * The {@code id} is the Nexxauth org-user id (provided externally, never
  * auto-generated). Passwords are not stored locally.
+ *
+ * <p>The {@code version} (@Version) column is what lets a brand-new profile be
+ * INSERTed with its pre-assigned id: both Spring Data ({@code isNew}) and
+ * Hibernate treat a null version as "new", so {@code save()}/{@code saveAndFlush()}
+ * issue an INSERT instead of an UPDATE against a row that does not exist yet.
  */
 @Entity
 @Table(name = "users")
@@ -19,10 +24,17 @@ import lombok.ToString;
 @ToString(callSuper = true)
 public abstract class User extends BaseEntity {
 
-    // Override BaseEntity: Nexxauth provides the ID externally, never auto-generate
+    // Override BaseEntity: Nexxauth provides the ID externally, never auto-generate.
+    // The id is an "assigned" identifier (no generator), and the @Version column
+    // lets Hibernate/Spring Data INSERT a brand-new profile with its pre-assigned
+    // id (null version ⇒ new) instead of attempting an UPDATE on a nonexistent row.
     @Id
     @Column(name = "id")
     private Long id;
+
+    @Version
+    @Column(name = "version")
+    private Long version;
 
     @Column(name = "first_name")
     private String firstName;

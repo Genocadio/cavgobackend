@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:cavgotest;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate.globally_quoted_identifiers: true
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+nexxauth:
+  base-url: http://localhost:1
+  client-id: test-client
+  client-token: test-token
+  public-key: MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArjKbw5P+TDSFbInPPDsMa927ysC0S/CKovNeTfv1KP4zy3Kv8MDZQTtMvdqh67oyzDyR88MU6oDnYpPzwMEOHRu4jCvGrbnyzXIzcdWzjEXjhyNa2Ktwp49XLf/b8adLuS97/BIKCtRG2z7eW4vOsP+EhKAOuhJWJksqZF5HILjGYbVtWUWahjrJfFQdFEkeJ+z9n8c/HpMyU6Ljzsb7oXvdaGHbelk61PcLDGu1mkQbYMOWcBfaNJck4hyjHo/M9thKZjGEyRuZyBF1npJ83wGVYqfFTiZQ8M+pyU0dtyM3cKC3W/gnnrBDyw8APQlP/x+/a6C6caICDXesd5pXtQIDAQAB

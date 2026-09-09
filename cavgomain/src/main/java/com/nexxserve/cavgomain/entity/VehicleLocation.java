@@ -16,6 +16,11 @@ import java.time.LocalDateTime;
 @ToString(callSuper = true)
 public class VehicleLocation extends BaseEntity {
 
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
+    private Long id;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "vehicle_id", nullable = false)
     @ToString.Exclude

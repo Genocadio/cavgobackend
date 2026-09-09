@@ -17,6 +17,11 @@ import java.util.List;
 @ToString(callSuper = true)
 public class Company extends BaseEntity {
 
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
+    private Long id;
+
     @Column(name = "company_name", nullable = false)
     private String companyName;
 
