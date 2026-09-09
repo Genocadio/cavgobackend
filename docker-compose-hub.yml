@@ -359,6 +359,13 @@ services:
       RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER:-admin}
       RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-admin}
+      # HiveMQ broker secrets — REQUIRED, no defaults baked in (read from mqtt.*
+      # in application-docker.yml). Compose aborts if unset so the broker is never
+      # silently misconfigured. Set them in .env (see MQTT_* in .env.example) or
+      # in the server environment.
+      MQTT_BROKER_URL: ${MQTT_BROKER_URL:?MQTT_BROKER_URL must be set in .env}
+      MQTT_USERNAME: ${MQTT_USERNAME:?MQTT_USERNAME must be set in .env}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set in .env}
       GOOGLE_APPLICATION_CREDENTIALS: /opt/cavgo-data/firebase-credentials.json
       NAVIGA_BASE_URL: http://navigation:${PORT_NAVIGATION:-6040}
     ports:

@@ -24,10 +24,14 @@ spring:
 mqtt:
   client:
     id: cavgomqt
-  username: genoyves
-  password: Cadio*11.
+  # Broker connection is injected by docker compose from environment secrets
+  # (MQTT_BROKER_URL / MQTT_USERNAME / MQTT_PASSWORD — see .env.example at the
+  # cavgobackend root). Empty username/password disable authentication; the URL
+  # falls back to a local broker if the env vars are missing.
+  username: ${MQTT_USERNAME:}
+  password: ${MQTT_PASSWORD:}
   broker:
-    url: ssl://123b850a73774bcd84d2019d168d7f13.s1.eu.hivemq.cloud:8883
+    url: ${MQTT_BROKER_URL:tcp://localhost:1883}
 logging:
   level:
     org:

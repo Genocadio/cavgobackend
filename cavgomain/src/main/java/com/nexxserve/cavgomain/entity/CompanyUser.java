@@ -16,7 +16,7 @@ import java.util.List;
 public class CompanyUser extends User {
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "company_id", nullable = false)
+    @JoinColumn(name = "company_id")
     @ToString.Exclude
     private Company company;
 
