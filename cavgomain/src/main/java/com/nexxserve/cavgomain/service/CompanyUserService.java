@@ -226,6 +226,22 @@ public class CompanyUserService {
                 .toList();
     }
 
+    public CompanyUserResponseDto assignCompanyToUser(Long userId, Long companyId) {
+        CompanyUser user = companyUserRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("Company user not found with id: " + userId));
+        Company company = companyRepository.findById(companyId)
+                .orElseThrow(() -> new IllegalArgumentException("Company not found with id: " + companyId));
+        user.setCompany(company);
+        CompanyUser saved = companyUserRepository.save(user);
+        CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(saved);
+        try {
+            aggregatorSyncService.syncCompanyDataImmediately(companyId);
+        } catch (Exception e) {
+            System.err.println("Error triggering aggregator sync after company assignment: " + e.getMessage());
+        }
+        return dto;
+    }
+
     public void deleteCompanyUser(Long id) {
         companyUserRepository.deleteById(id);
     }

@@ -57,6 +57,11 @@ public class CompanyUserController {
         return companyUserService.findUsersWithExpiredLicense();
     }
 
+    @PutMapping("/{id}/company/{companyId}")
+    public CompanyUserResponseDto assignCompanyToUser(@PathVariable Long id, @PathVariable Long companyId) {
+        return companyUserService.assignCompanyToUser(id, companyId);
+    }
+
     @DeleteMapping("/{id}")
     public void deleteCompanyUser(@PathVariable Long id) {
         companyUserService.deleteCompanyUser(id);
