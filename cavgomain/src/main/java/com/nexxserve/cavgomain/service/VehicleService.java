@@ -57,11 +57,19 @@ public class VehicleService {
     public record VehicleCreateResult(VehicleResponseDto response, String initialPassword) {}
 
     public VehicleCreateResult createVehicleWithPassword(VehicleRequestDto vehicle) {
+        return createVehicleWithPassword(vehicle, null);
+    }
+
+    /**
+     * Creates a vehicle. If a company code is provided it is used to resolve the
+     * company; otherwise the company is resolved from the authenticated user's
+     * company (via nexxauthUserId).
+     */
+    public VehicleCreateResult createVehicleWithPassword(VehicleRequestDto vehicle, Long authUserId) {
         if (vehicleRepository.existsByLicensePlate(vehicle.getLicensePlate())) {
             throw new IllegalArgumentException("A vehicle with license plate '" + vehicle.getLicensePlate() + "' already exists. Please use a different license plate.");
         }
-        Company company = companyRepository.findByCompanyCode(vehicle.getCompanyCode())
-            .orElseThrow(() -> new IllegalArgumentException("Company with code '" + vehicle.getCompanyCode() + "' not found. Please check the company code and try again."));
+        Company company = resolveCompany(vehicle.getCompanyCode(), authUserId);
         Vehicle newVehicle = vehicle.toEntity(company);
 
         String initialPassword = generateSixDigitPassword();
@@ -93,6 +101,25 @@ public class VehicleService {
         }
         
         return new VehicleCreateResult(VehicleResponseDto.fromEntity(saved), initialPassword);
+    }
+
+    /**
+     * Resolves the company for a new vehicle. Prefers an explicit company code
+     * when present; otherwise falls back to the authenticated user's company.
+     */
+    private Company resolveCompany(String companyCode, Long authUserId) {
+        if (companyCode != null && !companyCode.isBlank()) {
+            return companyRepository.findByCompanyCode(companyCode.trim())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Company with code '" + companyCode + "' not found. Please check the company code and try again."));
+        }
+        if (authUserId != null) {
+            return companyUserRepository.findById(authUserId)
+                    .map(CompanyUser::getCompany)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Authenticated user has no associated company. Please set a company for this user."));
+        }
+        throw new IllegalArgumentException("Company code is required when the user has no company.");
     }
 
     public VehicleResponseDto getByDriver(Long id) {

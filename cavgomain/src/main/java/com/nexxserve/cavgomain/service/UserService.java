@@ -34,13 +34,20 @@ public class UserService {
 
     /**
      * Mirrors the authenticated user from Nexxauth into the local DB. Creates
-     * the row when missing, updates profile fields when changed. If the user
-     * belongs to a company, returns a CompanyUserResponseDto; otherwise creates
-     * a basic CompanyUser record linked to no company.
+     * the row when missing, updates profile fields when changed.
      */
     @Transactional
     public CompanyUserResponseDto syncUser(Long nexxauthUserId) {
-        return syncUser(nexxauthUserId, null);
+        return syncUser(nexxauthUserId, null, null);
+    }
+
+    /**
+     * Sync with an optional company code (for clients that know which company
+     * the user belongs to) and optional dataHash (for JWT inline sync).
+     */
+    @Transactional
+    public CompanyUserResponseDto syncUser(Long nexxauthUserId, String dataHash) {
+        return syncUser(nexxauthUserId, dataHash, null);
     }
 
     /**
@@ -56,9 +63,12 @@ public class UserService {
      * This avoids a Nexxauth API call (network I/O + latency) in the common case;
      * only when the user is newly created or their profile changed in Nexxauth
      * (which updates the dataHash) does a sync occur.
+     *
+     * @param companyCode optional company code — when provided and the user is new,
+     *                    the user is associated with that company instead of the fallback.
      */
     @Transactional
-    public CompanyUserResponseDto syncUser(Long nexxauthUserId, String dataHash) {
+    public CompanyUserResponseDto syncUser(Long nexxauthUserId, String dataHash, String companyCode) {
         // Fast path: if the user exists locally and the dataHash matches, skip the
         // Nexxauth API call entirely.
         if (dataHash != null) {
@@ -128,8 +138,8 @@ public class UserService {
             return CompanyUserResponseDto.fromEntity(user);
         }
 
-        // Create new user — find or create the company
-        log.info("syncUser: creating new local user id={}", nexxauthUserId);
+        // Create new user — resolve company by code if provided, otherwise fall back
+        log.info("syncUser: creating new local user id={} (companyCode={})", nexxauthUserId, companyCode);
         var user = new CompanyUser();
         user.setId(nexxauthUserId);
         user.setFirstName(nexxauthUser.firstName());
@@ -140,15 +150,21 @@ public class UserService {
         user.setRole(role);
         if (dataHash != null) user.setDataHash(dataHash);
 
-        // If no company is provided, we can't create a CompanyUser without a company.
-        // In that case, try to find a default company or leave it null.
-        // For now, the syncUser assumes the user already has a company association
-        // managed elsewhere (e.g. via admin creation).
-        // If the user has no company, we still create the record — the company
-        // can be set later via updateCompanyUser.
-        var companies = companyRepository.findAll();
-        if (!companies.isEmpty()) {
-            user.setCompany(companies.get(0));
+        Company company = null;
+        if (companyCode != null && !companyCode.isBlank()) {
+            company = companyRepository.findByCompanyCode(companyCode.trim()).orElse(null);
+            if (company == null) {
+                log.warn("syncUser: companyCode '{}' not found — falling back to first company", companyCode);
+            }
+        }
+        if (company == null) {
+            var companies = companyRepository.findAll();
+            if (!companies.isEmpty()) {
+                company = companies.get(0);
+            }
+        }
+        if (company != null) {
+            user.setCompany(company);
         }
 
         return CompanyUserResponseDto.fromEntity(companyUserRepository.save(user));

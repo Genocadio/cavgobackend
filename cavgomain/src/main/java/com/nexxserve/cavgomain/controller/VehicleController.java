@@ -11,6 +11,7 @@ import com.nexxserve.cavgomain.dto.response.VehicleSettingsResponseDto;
 import com.nexxserve.cavgomain.enums.VehicleStatus;
 import com.nexxserve.cavgomain.service.VehicleService;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -28,8 +29,11 @@ public class VehicleController {
     private final VehicleService vehicleService;
 
     @PostMapping
-    public ResponseEntity<VehicleResponseDto> createVehicle(@Valid @RequestBody VehicleRequestDto vehicle) {
-        var result = vehicleService.createVehicleWithPassword(vehicle);
+    public ResponseEntity<VehicleResponseDto> createVehicle(
+            @Valid @RequestBody VehicleRequestDto vehicle,
+            HttpServletRequest httpRequest) {
+        var authUserId = (Long) httpRequest.getAttribute("nexxauthUserId");
+        var result = vehicleService.createVehicleWithPassword(vehicle, authUserId);
         VehicleResponseDto body = result.response();
         body.setInitialPassword(result.initialPassword());
         return ResponseEntity.ok(body);

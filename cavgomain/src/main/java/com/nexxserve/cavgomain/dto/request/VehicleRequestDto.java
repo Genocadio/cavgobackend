@@ -14,7 +14,8 @@ import org.springframework.validation.annotation.Validated;
 @Data
 public class VehicleRequestDto {
 
-    @NotNull(message = "Company ID is required")
+    // Optional — when present the vehicle is linked to that company; otherwise
+    // it is resolved from the authenticated user's company.
     private String companyCode;
 
     @NotBlank(message = "Make is required")
