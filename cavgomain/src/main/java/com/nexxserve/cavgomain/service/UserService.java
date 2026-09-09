@@ -10,8 +10,6 @@ import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.UserRepository;
 import com.nexxserve.cavgomain.security.NexxauthClient;
 import com.nexxserve.cavgomain.security.NexxauthRoles;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,7 +35,6 @@ public class UserService {
     private final UserRepository userRepository;
     private final CompanyUserRepository companyUserRepository;
     private final NexxauthClient nexxauthClient;
-    private final EntityManager entityManager;
 
     /**
      * Mirrors the authenticated user from Nexxauth into the local DB. Creates
@@ -145,12 +142,14 @@ public class UserService {
         user.setRole(role);
         if (dataHash != null) user.setDataHash(dataHash);
 
-        // Use persist() — the id is pre-assigned (Nexxauth user id), so save()
-        // would treat this as an existing entity and attempt an UPDATE on a row
-        // that does not exist yet ("Row was updated or deleted by another
-        // transaction"). persist() always issues an INSERT for a new entity.
-        entityManager.persist(user);
-        return CompanyUserResponseDto.fromEntity(user);
+        // The id is pre-assigned (Nexxauth user id), so Spring Data's save()
+        // goes through merge() rather than persist() — persist() with a preset
+        // id throws "detached entity passed to persist" in Hibernate. For an
+        // entity whose row does not exist yet, merge() issues an INSERT with
+        // the requested id. saveAndFlush() additionally forces the INSERT now
+        // so creation timestamps are populated before the response is built.
+        var saved = companyUserRepository.saveAndFlush(user);
+        return CompanyUserResponseDto.fromEntity(saved);
     }
 
     /**

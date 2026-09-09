@@ -7,7 +7,6 @@ import com.nexxserve.cavgomain.enums.UserStatus;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.security.NexxauthClient;
 import com.nexxserve.cavgomain.security.NexxauthRoles;
-import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -29,8 +28,6 @@ class UserServiceTest {
     private CompanyUserRepository companyUserRepository;
     @Mock
     private NexxauthClient nexxauthClient;
-    @Mock
-    private EntityManager entityManager;
 
     @InjectMocks
     private UserService userService;
@@ -48,12 +45,12 @@ class UserServiceTest {
         when(nexxauthClient.getUser(100L)).thenReturn(nexxauthUser);
         when(companyUserRepository.findById(100L)).thenReturn(Optional.empty()).thenReturn(Optional.empty());
 
-        doAnswer(inv -> {
+        when(companyUserRepository.saveAndFlush(any(CompanyUser.class))).thenAnswer(inv -> {
             CompanyUser u = inv.getArgument(0);
             u.setCreatedAt(LocalDateTime.now());
             u.setUpdatedAt(LocalDateTime.now());
-            return null;
-        }).when(entityManager).persist(any(CompanyUser.class));
+            return u;
+        });
 
         var result = userService.syncUser(100L);
 
@@ -61,9 +58,10 @@ class UserServiceTest {
         assertEquals("John", result.getFirstName());
         assertEquals(CompanyUserRole.ADMIN, result.getRole());
         assertEquals(UserStatus.ACTIVE, result.getStatus());
-        // New CompanyUser has a pre-assigned (Nexxauth) id — must use persist()
-        // so Hibernate inserts instead of updating a non-existent row.
-        verify(entityManager).persist(any(CompanyUser.class));
+        // New CompanyUser has a pre-assigned (Nexxauth) id — saveAndFlush()
+        // inserts the row with the requested id (persist() with a preset id
+        // would throw "detached entity passed to persist").
+        verify(companyUserRepository).saveAndFlush(any(CompanyUser.class));
     }
 
     @Test
@@ -170,16 +168,17 @@ class UserServiceTest {
         when(nexxauthClient.getUser(100L)).thenReturn(nexxauthUser);
         when(companyUserRepository.findById(100L)).thenReturn(Optional.empty()).thenReturn(Optional.empty());
 
-        doAnswer(inv -> {
+        when(companyUserRepository.saveAndFlush(any(CompanyUser.class))).thenAnswer(inv -> {
             CompanyUser u = inv.getArgument(0);
             u.setCreatedAt(LocalDateTime.now());
             u.setUpdatedAt(LocalDateTime.now());
-            return null;
-        }).when(entityManager).persist(any(CompanyUser.class));
+            return u;
+        });
 
         var result = userService.syncUser(100L);
 
         assertEquals(CompanyUserRole.DRIVER, result.getRole());
+        verify(companyUserRepository).saveAndFlush(any(CompanyUser.class));
     }
 
     @Test

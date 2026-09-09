@@ -44,7 +44,7 @@ public class CompanyUserResponseDto {
         dto.setRole(entity.getRole());
         dto.setLicenseNumber(entity.getLicenseNumber());
         dto.setLicenseExpiry(entity.getLicenseExpiry());
-        dto.setCreatedAt(entity.getCreatedAt().toString());
+        dto.setCreatedAt(entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null);
         dto.setUpdatedAt(entity.getUpdatedAt() != null ? entity.getUpdatedAt().toString() : null);
         if (entity.getOffice() != null) {
             dto.setOffice(OfficeResponseDto.fromEntity(entity.getOffice()));
