@@ -30,8 +30,10 @@ public class CompanyUserResponseDto {
     public static CompanyUserResponseDto fromEntity(CompanyUser entity) {
         CompanyUserResponseDto dto = new CompanyUserResponseDto();
         dto.setId(entity.getId());
-        dto.setCompanyId(entity.getCompany().getId());
-        dto.setCompanyName(entity.getCompany().getCompanyName());
+        if (entity.getCompany() != null) {
+            dto.setCompanyId(entity.getCompany().getId());
+            dto.setCompanyName(entity.getCompany().getCompanyName());
+        }
         dto.setFirstName(entity.getFirstName());
         dto.setLastName(entity.getLastName());
         dto.setEmail(entity.getEmail());

@@ -1,14 +1,14 @@
 package com.nexxserve.cavgomain.service;
 
 import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
-import com.nexxserve.cavgomain.entity.Company;
 import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.UserStatus;
-import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.security.NexxauthClient;
 import com.nexxserve.cavgomain.security.NexxauthRoles;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,8 +29,8 @@ public class UserService {
 
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
     private final CompanyUserRepository companyUserRepository;
-    private final CompanyRepository companyRepository;
     private final NexxauthClient nexxauthClient;
+    private final EntityManager entityManager;
 
     /**
      * Mirrors the authenticated user from Nexxauth into the local DB. Creates
@@ -38,16 +38,7 @@ public class UserService {
      */
     @Transactional
     public CompanyUserResponseDto syncUser(Long nexxauthUserId) {
-        return syncUser(nexxauthUserId, null, null);
-    }
-
-    /**
-     * Sync with an optional company code (for clients that know which company
-     * the user belongs to) and optional dataHash (for JWT inline sync).
-     */
-    @Transactional
-    public CompanyUserResponseDto syncUser(Long nexxauthUserId, String dataHash) {
-        return syncUser(nexxauthUserId, dataHash, null);
+        return syncUser(nexxauthUserId, null);
     }
 
     /**
@@ -60,22 +51,21 @@ public class UserService {
      *       hash → fetch from Nexxauth and update.</li>
      *   <li>If the hash matches → return the cached local user (no Nexxauth call).</li>
      * </ul>
-     * This avoids a Nexxauth API call (network I/O + latency) in the common case;
-     * only when the user is newly created or their profile changed in Nexxauth
-     * (which updates the dataHash) does a sync occur.
      *
-     * @param companyCode optional company code — when provided and the user is new,
-     *                    the user is associated with that company instead of the fallback.
+     * @param nexxauthUserId the Nexxauth user id to sync
+     * @param dataHash optional dataHash from the JWT — when provided and matching
+     *                 the stored hash the Nexxauth call is skipped
      */
     @Transactional
-    public CompanyUserResponseDto syncUser(Long nexxauthUserId, String dataHash, String companyCode) {
+    public CompanyUserResponseDto syncUser(Long nexxauthUserId, String dataHash) {
+        var existing = companyUserRepository.findById(nexxauthUserId);
+
         // Fast path: if the user exists locally and the dataHash matches, skip the
         // Nexxauth API call entirely.
-        if (dataHash != null) {
-            var existing = companyUserRepository.findById(nexxauthUserId).orElse(null);
-            if (existing != null && dataHash.equals(existing.getDataHash())) {
+        if (dataHash != null && existing.isPresent()) {
+            if (dataHash.equals(existing.get().getDataHash())) {
                 log.debug("syncUser: dataHash matches for userId={}, skipping Nexxauth call", nexxauthUserId);
-                return CompanyUserResponseDto.fromEntity(existing);
+                return CompanyUserResponseDto.fromEntity(existing.get());
             }
         }
 
@@ -83,8 +73,6 @@ public class UserService {
         var nexxauthUser = nexxauthClient.getUser(nexxauthUserId);
         log.info("syncUser: Nexxauth returned user={} (enabled={}, roles={})",
                 nexxauthUserId, nexxauthUser.enabled(), nexxauthUser.roles());
-
-        var existing = companyUserRepository.findById(nexxauthUserId);
 
         var status = nexxauthUser.enabled() ? UserStatus.ACTIVE : UserStatus.INACTIVE;
 
@@ -125,12 +113,12 @@ public class UserService {
             }
 
             // Always update the dataHash if provided, even if no other fields changed
-        if (dataHash != null && !dataHash.equals(user.getDataHash())) {
-            user.setDataHash(dataHash);
-            changed = true;
-        }
+            if (dataHash != null && !dataHash.equals(user.getDataHash())) {
+                user.setDataHash(dataHash);
+                changed = true;
+            }
 
-        if (changed) {
+            if (changed) {
                 log.info("syncUser: saving updated user id={}", user.getId());
                 return CompanyUserResponseDto.fromEntity(companyUserRepository.save(user));
             }
@@ -138,8 +126,8 @@ public class UserService {
             return CompanyUserResponseDto.fromEntity(user);
         }
 
-        // Create new user — resolve company by code if provided, otherwise fall back
-        log.info("syncUser: creating new local user id={} (companyCode={})", nexxauthUserId, companyCode);
+        // Create new user
+        log.info("syncUser: creating new local user id={}", nexxauthUserId);
         var user = new CompanyUser();
         user.setId(nexxauthUserId);
         user.setFirstName(nexxauthUser.firstName());
@@ -150,24 +138,12 @@ public class UserService {
         user.setRole(role);
         if (dataHash != null) user.setDataHash(dataHash);
 
-        Company company = null;
-        if (companyCode != null && !companyCode.isBlank()) {
-            company = companyRepository.findByCompanyCode(companyCode.trim()).orElse(null);
-            if (company == null) {
-                log.warn("syncUser: companyCode '{}' not found — falling back to first company", companyCode);
-            }
-        }
-        if (company == null) {
-            var companies = companyRepository.findAll();
-            if (!companies.isEmpty()) {
-                company = companies.get(0);
-            }
-        }
-        if (company != null) {
-            user.setCompany(company);
-        }
-
-        return CompanyUserResponseDto.fromEntity(companyUserRepository.save(user));
+        // Use persist() — the id is pre-assigned (Nexxauth user id), so save()
+        // would treat this as an existing entity and attempt an UPDATE on a row
+        // that does not exist yet ("Row was updated or deleted by another
+        // transaction"). persist() always issues an INSERT for a new entity.
+        entityManager.persist(user);
+        return CompanyUserResponseDto.fromEntity(user);
     }
 
     private static int precedence(CompanyUserRole role) {

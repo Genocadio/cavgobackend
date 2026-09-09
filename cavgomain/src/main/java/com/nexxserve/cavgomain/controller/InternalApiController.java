@@ -96,12 +96,12 @@ public class InternalApiController {
      */
     @PostMapping("/users/sync")
     public ResponseEntity<CompanyUserResponseDto> syncUserFromIkuriye(@RequestBody SyncUserRequest request) {
-        log.info("Internal sync requested for userId={} companyCode={}", request.userId(), request.companyCode());
+        log.info("Internal sync requested for userId={}", request.userId());
         if (request.userId() == null) {
             return ResponseEntity.badRequest().build();
         }
         try {
-            var response = userService.syncUser(request.userId(), null, request.companyCode());
+            var response = userService.syncUser(request.userId());
             log.info("Internal sync completed for userId={}", response.getId());
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -111,6 +111,6 @@ public class InternalApiController {
     }
 
     /** Request body for internal user sync. */
-    public record SyncUserRequest(Long userId, String companyCode) {}
+    public record SyncUserRequest(Long userId) {}
 }
 

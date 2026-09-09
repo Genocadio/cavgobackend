@@ -1,6 +1,5 @@
 package com.nexxserve.cavgomain.controller;
 
-import com.nexxserve.cavgomain.dto.request.UserSyncRequestDto;
 import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
 import com.nexxserve.cavgomain.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -9,7 +8,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -30,21 +28,18 @@ public class UserController {
     /**
      * Syncs the authenticated user (identified by their Nexxauth org-user id)
      * from Nexxauth into the local DB. Creates the row when missing, updates
-     * profile fields when changed. Accepts an optional companyCode to associate
-     * the user with a specific company on first sync.
+     * profile fields when changed.
      */
     @PostMapping("/sync")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<CompanyUserResponseDto> syncUser(
-            @RequestBody(required = false) UserSyncRequestDto body) {
+    public ResponseEntity<CompanyUserResponseDto> syncUser() {
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
         log.info("syncUser called with userId={}", userId);
         if (userId == null) {
             throw new IllegalStateException("Missing user id on authenticated request");
         }
-        String companyCode = body != null ? body.getCompanyCode() : null;
-        var response = userService.syncUser(userId, companyCode);
+        var response = userService.syncUser(userId);
         log.info("syncUser returning userId={}", response.getId());
         return ResponseEntity.ok(response);
     }
