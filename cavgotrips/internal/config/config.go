@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -20,8 +21,9 @@ type Config struct {
 }
 
 type MeiliConfig struct {
-	URL    string
-	APIKey string
+	URL           string
+	APIKey        string
+	SearchTimeout time.Duration // per-request timeout for Meilisearch search calls
 }
 
 type EurekaConfig struct {
@@ -65,8 +67,9 @@ func Load() *Config {
 		StoreLogs:         getEnv("STORE_LOGS", "false") == "true",
 		TripUpdateBaseURL: getEnv("TRIP_UPDATE_BASE_URL", ""),
 		Meilisearch: MeiliConfig{
-			URL:    getEnv("MEILISEARCH_URL", "http://localhost:7700"),
-			APIKey: getEnv("MEILISEARCH_API_KEY", ""),
+			URL:           getEnv("MEILISEARCH_URL", "http://localhost:7700"),
+			APIKey:        getEnv("MEILISEARCH_API_KEY", ""),
+			SearchTimeout: getEnvDuration("MEILISEARCH_SEARCH_TIMEOUT", 15*time.Second),
 		},
 		SearchProvider: getEnv("SEARCH_PROVIDER", "auto"),
 		AdminAPIKey:    getEnv("ADMIN_API_KEY", ""),
@@ -76,6 +79,15 @@ func Load() *Config {
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		if d, err := time.ParseDuration(value); err == nil && d > 0 {
+			return d
+		}
 	}
 	return defaultValue
 }

@@ -110,6 +110,7 @@ func main() {
 		cfg.SearchProvider,
 		cfg.Meilisearch.URL,
 		cfg.Meilisearch.APIKey,
+		cfg.Meilisearch.SearchTimeout,
 		locationRepo,
 		routeRepo,
 		tripRepo,

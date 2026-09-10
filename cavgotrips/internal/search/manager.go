@@ -52,7 +52,10 @@ type Manager struct {
 //     returned (fails the service startup).
 //   - SEARCH_PROVIDER=auto:       Meilisearch is used when reachable and
 //     healthy, otherwise SQL.
-func NewManager(searchProvider, meiliURL, meiliAPIKey string, locs repository.LocationRepository, routes repository.RouteRepository, trips repository.TripRepository, newIndexer func(*MeiliClient) *Indexer) (*Manager, error) {
+//
+// searchTimeout sets the per-request timeout for Meilisearch search calls
+// (0 keeps the client default, which is larger than the boot timeout).
+func NewManager(searchProvider, meiliURL, meiliAPIKey string, searchTimeout time.Duration, locs repository.LocationRepository, routes repository.RouteRepository, trips repository.TripRepository, newIndexer func(*MeiliClient) *Indexer) (*Manager, error) {
 	m := &Manager{
 		configured:    searchProvider,
 		sqlLocations:  &sqlLocationProvider{repo: locs},
@@ -71,6 +74,7 @@ func NewManager(searchProvider, meiliURL, meiliAPIKey string, locs repository.Lo
 
 	if meiliURL != "" {
 		client := NewMeiliClient(meiliURL, meiliAPIKey, meiliBootTimeout)
+		client.SetSearchTimeout(searchTimeout)
 		m.indexer = newIndexer(client)
 
 		ctx, cancel := context.WithTimeout(context.Background(), meiliBootTimeout)
@@ -132,12 +136,14 @@ func (m *Manager) SearchLocationsPaginated(ctx context.Context, term string, pag
 	}
 	if m.breaker.ShouldBypass() {
 		m.recordFallback(entityLocations)
+		log.Printf("[search] meilisearch bypassed (circuit breaker open), falling back to SQL")
 		return m.sqlLocations.SearchLocationsPaginated(ctx, term, page, limit)
 	}
 	res, total, err := m.meiliLocations.SearchLocationsPaginated(ctx, term, page, limit)
 	if err != nil {
 		m.breaker.Failure()
 		m.recordFallback(entityLocations)
+		log.Printf("[search] meilisearch %s search error, falling back to SQL: %v", entityLocations, err)
 		return m.sqlLocations.SearchLocationsPaginated(ctx, term, page, limit)
 	}
 	m.breaker.Success()
@@ -150,12 +156,14 @@ func (m *Manager) SearchRoutesPaginated(ctx context.Context, filters RouteFilter
 	}
 	if m.breaker.ShouldBypass() {
 		m.recordFallback(entityRoutes)
+		log.Printf("[search] meilisearch bypassed (circuit breaker open), falling back to SQL")
 		return m.sqlRoutes.SearchRoutesPaginated(ctx, filters, page, limit)
 	}
 	res, total, err := m.meiliRoutes.SearchRoutesPaginated(ctx, filters, page, limit)
 	if err != nil {
 		m.breaker.Failure()
 		m.recordFallback(entityRoutes)
+		log.Printf("[search] meilisearch %s search error, falling back to SQL: %v", entityRoutes, err)
 		return m.sqlRoutes.SearchRoutesPaginated(ctx, filters, page, limit)
 	}
 	m.breaker.Success()
@@ -168,12 +176,14 @@ func (m *Manager) SearchTripsPaginated(ctx context.Context, filters TripFilters,
 	}
 	if m.breaker.ShouldBypass() {
 		m.recordFallback(entityTrips)
+		log.Printf("[search] meilisearch bypassed (circuit breaker open), falling back to SQL")
 		return m.sqlTrips.SearchTripsPaginated(ctx, filters, page, limit)
 	}
 	res, total, err := m.meiliTrips.SearchTripsPaginated(ctx, filters, page, limit)
 	if err != nil {
 		m.breaker.Failure()
 		m.recordFallback(entityTrips)
+		log.Printf("[search] meilisearch %s search error, falling back to SQL: %v", entityTrips, err)
 		return m.sqlTrips.SearchTripsPaginated(ctx, filters, page, limit)
 	}
 	m.breaker.Success()

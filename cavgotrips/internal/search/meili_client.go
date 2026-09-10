@@ -13,17 +13,27 @@ import (
 )
 
 const (
-	defaultMeiliTimeout   = 5 * time.Second
-	meiliTaskPollInterval = 200 * time.Millisecond
-	meiliTaskPollTimeout  = 60 * time.Second
+	defaultMeiliTimeout       = 5 * time.Second
+	defaultMeiliSearchTimeout = 15 * time.Second
+	meiliTaskPollInterval     = 200 * time.Millisecond
+	meiliTaskPollTimeout      = 60 * time.Second
 )
 
 // MeiliClient is a minimal Meilisearch REST client built on net/http, so the
-// service gains no new Go dependencies.
+// service gains no new Go dependencies. Two transports are used:
+//
+//   - httpClient: short timeout for admin/boot operations (health, indexes,
+//     tasks). Bounding those with the caller's context would suffice, but the
+//     HTTP timeout is kept as a hard ceiling.
+//   - searchClient: longer timeout for search requests. Searches with typo
+//     tolerance on large indexes can legitimately exceed the boot timeout; a
+//     too-short timeout aborts the connection, Meilisearch cancels the search
+//     coroutine, and the error surfaces as "Standalone coroutine was cancelled".
 type MeiliClient struct {
-	baseURL    string
-	apiKey     string
-	httpClient *http.Client
+	baseURL      string
+	apiKey       string
+	httpClient   *http.Client
+	searchClient *http.Client
 }
 
 func NewMeiliClient(baseURL, apiKey string, timeout time.Duration) *MeiliClient {
@@ -31,10 +41,20 @@ func NewMeiliClient(baseURL, apiKey string, timeout time.Duration) *MeiliClient 
 		timeout = defaultMeiliTimeout
 	}
 	return &MeiliClient{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		apiKey:     apiKey,
-		httpClient: &http.Client{Timeout: timeout},
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		apiKey:       apiKey,
+		httpClient:   &http.Client{Timeout: timeout},
+		searchClient: &http.Client{Timeout: defaultMeiliSearchTimeout},
 	}
+}
+
+// SetSearchTimeout overrides the timeout used for search requests. Values <= 0
+// keep the default.
+func (c *MeiliClient) SetSearchTimeout(d time.Duration) *MeiliClient {
+	if d > 0 {
+		c.searchClient = &http.Client{Timeout: d}
+	}
+	return c
 }
 
 // indexSettings holds the write-once index configuration.
@@ -137,7 +157,7 @@ func (c *MeiliClient) Search(ctx context.Context, uid string, req meiliSearchReq
 		req.Limit = 20
 	}
 	var out meiliSearchResponse
-	if err := c.do(ctx, http.MethodPost, "/indexes/"+uid+"/search", req, &out); err != nil {
+	if err := c.doSearch(ctx, http.MethodPost, "/indexes/"+uid+"/search", req, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -263,6 +283,14 @@ func parseMeiliError(err error, out *meiliAPIError) bool {
 }
 
 func (c *MeiliClient) do(ctx context.Context, method, path string, body, out any) error {
+	return c.doWith(c.httpClient, ctx, method, path, body, out)
+}
+
+func (c *MeiliClient) doSearch(ctx context.Context, method, path string, body, out any) error {
+	return c.doWith(c.searchClient, ctx, method, path, body, out)
+}
+
+func (c *MeiliClient) doWith(client *http.Client, ctx context.Context, method, path string, body, out any) error {
 	var bodyReader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -281,7 +309,7 @@ func (c *MeiliClient) do(ctx context.Context, method, path string, body, out any
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
