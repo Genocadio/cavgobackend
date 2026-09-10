@@ -135,7 +135,7 @@ public class UserService {
         var user = new CompanyUser();
         user.setId(nexxauthUserId);
         user.setFirstName(nexxauthUser.firstName());
-        user.setLastName(nexxauthUser.lastName());
+        user.setLastName(nexxauthUser.lastName() != null ? nexxauthUser.lastName() : "");
         user.setEmail(nexxauthUser.email());
         user.setPhone(nexxauthUser.phone());
         user.setStatus(status);
