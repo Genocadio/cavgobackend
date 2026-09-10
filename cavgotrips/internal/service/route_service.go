@@ -97,13 +97,13 @@ func (s *RouteService) SearchAndFilter(origin, destination string, cityRoute *bo
 	return s.repo.SearchAndFilter(origin, destination, cityRoute, originProvince, destinationProvince)
 }
 
-func (s *RouteService) SearchAndFilterPaginated(origin, destination string, cityRoute *bool, originProvince, destinationProvince string, limit, offset int) ([]models.Route, int64, error) {
+func (s *RouteService) SearchAndFilterPaginated(ctx context.Context, origin, destination string, cityRoute *bool, originProvince, destinationProvince string, limit, offset int) ([]models.Route, int64, error) {
 	if s.search != nil {
 		page := 1
 		if limit > 0 {
 			page = offset/limit + 1
 		}
-		res, total, err := s.search.SearchRoutesPaginated(context.Background(), search.RouteFilters{
+		res, total, err := s.search.SearchRoutesPaginated(ctx, search.RouteFilters{
 			Origin:              origin,
 			Destination:         destination,
 			CityRoute:           cityRoute,
@@ -111,6 +111,9 @@ func (s *RouteService) SearchAndFilterPaginated(origin, destination string, city
 			DestinationProvince: destinationProvince,
 		}, page, limit)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, 0, ctx.Err()
+			}
 			log.Printf("[route-search] search provider error (falling back to SQL): %v", err)
 		} else {
 			return res, total, nil

@@ -140,21 +140,30 @@ func (s *LocationService) GetAllLocationsPaginated(limit, offset int) ([]models.
 }
 
 func (s *LocationService) SearchLocations(searchTerm string) ([]models.Location, error) {
+	return s.SearchLocationsWithContext(context.Background(), searchTerm)
+}
+
+func (s *LocationService) SearchLocationsWithContext(ctx context.Context, searchTerm string) ([]models.Location, error) {
 	if searchTerm == "" {
 		return s.repo.GetAll()
 	}
-	locations, _, err := s.SearchLocationsPaginated(searchTerm, 20, 0)
+	locations, _, err := s.SearchLocationsPaginated(ctx, searchTerm, 20, 0)
 	return locations, err
 }
 
-func (s *LocationService) SearchLocationsPaginated(searchTerm string, limit, offset int) ([]models.Location, int64, error) {
+func (s *LocationService) SearchLocationsPaginated(ctx context.Context, searchTerm string, limit, offset int) ([]models.Location, int64, error) {
 	if s.search != nil {
 		page := 1
 		if limit > 0 {
 			page = offset/limit + 1
 		}
-		res, total, err := s.search.SearchLocationsPaginated(context.Background(), searchTerm, page, limit)
+		res, total, err := s.search.SearchLocationsPaginated(ctx, searchTerm, page, limit)
 		if err != nil {
+			// If the context was cancelled (e.g. client disconnected), don't
+			// fall back to SQL — there's no one to receive the response.
+			if ctx.Err() != nil {
+				return nil, 0, ctx.Err()
+			}
 			log.Printf("[location-search] search provider error (falling back to SQL): %v", err)
 		} else {
 			return res, total, nil

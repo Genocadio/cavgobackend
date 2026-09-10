@@ -142,6 +142,12 @@ func (m *Manager) SearchLocationsPaginated(ctx context.Context, term string, pag
 	res, total, err := m.meiliLocations.SearchLocationsPaginated(ctx, term, page, limit)
 	if err != nil {
 		m.breaker.Failure()
+		// If the caller's context was cancelled (client disconnected or
+		// new keystroke arrived), skip the SQL fallback — there is no
+		// point doing extra work for a request nobody is waiting for.
+		if ctx.Err() != nil {
+			return nil, 0, ctx.Err()
+		}
 		m.recordFallback(entityLocations)
 		log.Printf("[search] meilisearch %s search error, falling back to SQL: %v", entityLocations, err)
 		return m.sqlLocations.SearchLocationsPaginated(ctx, term, page, limit)
@@ -162,6 +168,9 @@ func (m *Manager) SearchRoutesPaginated(ctx context.Context, filters RouteFilter
 	res, total, err := m.meiliRoutes.SearchRoutesPaginated(ctx, filters, page, limit)
 	if err != nil {
 		m.breaker.Failure()
+		if ctx.Err() != nil {
+			return nil, 0, ctx.Err()
+		}
 		m.recordFallback(entityRoutes)
 		log.Printf("[search] meilisearch %s search error, falling back to SQL: %v", entityRoutes, err)
 		return m.sqlRoutes.SearchRoutesPaginated(ctx, filters, page, limit)
@@ -182,6 +191,9 @@ func (m *Manager) SearchTripsPaginated(ctx context.Context, filters TripFilters,
 	res, total, err := m.meiliTrips.SearchTripsPaginated(ctx, filters, page, limit)
 	if err != nil {
 		m.breaker.Failure()
+		if ctx.Err() != nil {
+			return nil, 0, ctx.Err()
+		}
 		m.recordFallback(entityTrips)
 		log.Printf("[search] meilisearch %s search error, falling back to SQL: %v", entityTrips, err)
 		return m.sqlTrips.SearchTripsPaginated(ctx, filters, page, limit)

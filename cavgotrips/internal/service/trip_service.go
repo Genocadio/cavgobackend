@@ -764,17 +764,24 @@ func (s *TripService) GetTripsByFilters(origin, destination, company string) ([]
 }
 
 func (s *TripService) GetTripsByFiltersPaginated(origin, destination, company string, limit, offset int) ([]models.Trip, int64, error) {
+	return s.GetTripsByFiltersPaginatedCtx(context.Background(), origin, destination, company, limit, offset)
+}
+
+func (s *TripService) GetTripsByFiltersPaginatedCtx(ctx context.Context, origin, destination, company string, limit, offset int) ([]models.Trip, int64, error) {
 	if s.search != nil {
 		page := 1
 		if limit > 0 {
 			page = offset/limit + 1
 		}
-		trips, total, err := s.search.SearchTripsPaginated(context.Background(), search.TripFilters{
+		trips, total, err := s.search.SearchTripsPaginated(ctx, search.TripFilters{
 			Origin:      origin,
 			Destination: destination,
 			Company:     company,
 		}, page, limit)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, 0, ctx.Err()
+			}
 			log.Printf("[trip-search] search provider error (falling back to SQL): %v", err)
 		} else {
 			for i := range trips {
@@ -1137,21 +1144,28 @@ func (s *TripService) UpdateTripFields(id int64, updates map[string]interface{})
 
 // GetTripsByFiltersWithCityRoute fetches trips filtered by origin, destination, company, and cityRoute (if provided)
 func (s *TripService) GetTripsByFiltersWithCityRoute(origin, destination, company string, cityRoute *bool, limit, offset int) ([]models.Trip, int64, error) {
+	return s.GetTripsByFiltersWithCityRouteCtx(context.Background(), origin, destination, company, cityRoute, limit, offset)
+}
+
+func (s *TripService) GetTripsByFiltersWithCityRouteCtx(ctx context.Context, origin, destination, company string, cityRoute *bool, limit, offset int) ([]models.Trip, int64, error) {
 	if cityRoute == nil {
-		return s.GetTripsByFiltersPaginated(origin, destination, company, limit, offset)
+		return s.GetTripsByFiltersPaginatedCtx(ctx, origin, destination, company, limit, offset)
 	}
 	if s.search != nil {
 		page := 1
 		if limit > 0 {
 			page = offset/limit + 1
 		}
-		trips, total, err := s.search.SearchTripsPaginated(context.Background(), search.TripFilters{
+		trips, total, err := s.search.SearchTripsPaginated(ctx, search.TripFilters{
 			Origin:      origin,
 			Destination: destination,
 			Company:     company,
 			CityRoute:   cityRoute,
 		}, page, limit)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, 0, ctx.Err()
+			}
 			log.Printf("[trip-search] search provider error (falling back to SQL): %v", err)
 		} else {
 			for i := range trips {

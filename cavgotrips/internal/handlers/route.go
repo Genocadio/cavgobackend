@@ -118,7 +118,7 @@ func (h *RouteHandler) GetRoutes(w http.ResponseWriter, r *http.Request) {
 
 	if hasFilters {
 		// Use search and filter with pagination
-		routes, total, err = h.service.SearchAndFilterPaginated(origin, destination, cityRoute, originProvince, destinationProvince, limit, offset)
+		routes, total, err = h.service.SearchAndFilterPaginated(r.Context(), origin, destination, cityRoute, originProvince, destinationProvince, limit, offset)
 	} else {
 		// Use basic pagination
 		routes, total, err = h.service.GetAllRoutesPaginated(limit, offset)

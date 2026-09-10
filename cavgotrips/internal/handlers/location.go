@@ -91,7 +91,7 @@ func (h *LocationHandler) GetLocations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		
-		locations, total, err := h.service.SearchLocationsPaginated(decodedSearchTerm, limit, offset)
+		locations, total, err := h.service.SearchLocationsPaginated(r.Context(), decodedSearchTerm, limit, offset)
 		if err != nil {
 			utils.ErrorResponse(w, err.Error(), http.StatusInternalServerError)
 			return

@@ -117,7 +117,7 @@ func (h *TripHandler) GetTrips(w http.ResponseWriter, r *http.Request) {
 
 	if originPresent && destinationPresent {
 		// Ignore cityRoute, filter by origin and destination (and company if present)
-		trips, total, err = h.service.GetTripsByFiltersPaginated(origin, destination, company, limit, offset)
+		trips, total, err = h.service.GetTripsByFiltersPaginatedCtx(r.Context(), origin, destination, company, limit, offset)
 	} else if (originPresent && companyPresent && cityRoutePresent) || (destinationPresent && companyPresent && cityRoutePresent) {
 		// Apply all three filters
 		cityRouteBool, parseErr := strconv.ParseBool(cityRoute)
@@ -125,7 +125,7 @@ func (h *TripHandler) GetTrips(w http.ResponseWriter, r *http.Request) {
 			utils.ErrorResponse(w, "Invalid city_route parameter; must be 'true' or 'false'", http.StatusBadRequest)
 			return
 		}
-		trips, total, err = h.service.GetTripsByFiltersWithCityRoute(origin, destination, company, &cityRouteBool, limit, offset)
+		trips, total, err = h.service.GetTripsByFiltersWithCityRouteCtx(r.Context(), origin, destination, company, &cityRouteBool, limit, offset)
 	} else if (originPresent || destinationPresent || companyPresent) && cityRoutePresent {
 		// Apply cityRoute in addition to the other filter(s)
 		cityRouteBool, parseErr := strconv.ParseBool(cityRoute)
@@ -133,7 +133,7 @@ func (h *TripHandler) GetTrips(w http.ResponseWriter, r *http.Request) {
 			utils.ErrorResponse(w, "Invalid city_route parameter; must be 'true' or 'false'", http.StatusBadRequest)
 			return
 		}
-		trips, total, err = h.service.GetTripsByFiltersWithCityRoute(origin, destination, company, &cityRouteBool, limit, offset)
+		trips, total, err = h.service.GetTripsByFiltersWithCityRouteCtx(r.Context(), origin, destination, company, &cityRouteBool, limit, offset)
 	} else if cityRoutePresent {
 		// Only cityRoute is present
 		cityRouteBool, parseErr := strconv.ParseBool(cityRoute)
@@ -145,7 +145,7 @@ func (h *TripHandler) GetTrips(w http.ResponseWriter, r *http.Request) {
 		total = int64(len(trips))
 	} else if originPresent || destinationPresent || companyPresent {
 		// Only origin, destination, or company (no cityRoute)
-		trips, total, err = h.service.GetTripsByFiltersPaginated(origin, destination, company, limit, offset)
+		trips, total, err = h.service.GetTripsByFiltersPaginatedCtx(r.Context(), origin, destination, company, limit, offset)
 	} else if status != "" {
 		trips, err = h.service.GetTripsByStatus(status)
 		total = int64(len(trips))
@@ -172,7 +172,7 @@ func (h *TripHandler) GetTrips(w http.ResponseWriter, r *http.Request) {
 			trips = []models.Trip{}
 		}
 	} else {
-		trips, total, err = h.service.GetTripsByFiltersPaginated("", "", "", limit, offset)
+		trips, total, err = h.service.GetTripsByFiltersPaginatedCtx(r.Context(), "", "", "", limit, offset)
 	}
 
 	if err != nil {
