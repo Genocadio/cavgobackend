@@ -10,6 +10,7 @@ import { makeExecutableSchema } from "@graphql-tools/schema";
 import * as db from "./db";
 import { typeDefs, resolvers } from "./graphql";
 import * as syncService from "./services/syncService";
+import * as pushSyncService from "./services/pushSyncService";
 import * as rabbitmq from "./services/rabbitmq";
 import * as eventHandlers from "./services/eventHandlers";
 import * as tripPolling from "./services/tripPolling";
@@ -205,6 +206,34 @@ export async function main(): Promise<void> {
       allowedHeaders: ["Content-Type", "Authorization"],
     })
   );
+
+  // 7.75. Push ingestion endpoints
+  // The main API pushes this company's vehicles/workers whenever they change
+  // (see AggregatorSyncService + AGGREGATOR_JSON_FORMAT.md). Upserts keep the
+  // local store consistent with the source of truth.
+  app.post("/company/:companyId/vehicle", express.json(), async (req, res) => {
+    const companyId = String(req.params.companyId ?? "");
+    try {
+      const vehicles = Array.isArray(req.body) ? req.body : [];
+      const result = await pushSyncService.syncVehiclesFromInternal(companyId, vehicles);
+      res.status(200).json({ synced: result.synced, skipped: result.skipped });
+    } catch (error) {
+      console.error(`[PUSH SYNC] Error syncing vehicles for company ${companyId}:`, error);
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/company/:companyId/worker", express.json(), async (req, res) => {
+    const companyId = String(req.params.companyId ?? "");
+    try {
+      const workers = Array.isArray(req.body) ? req.body : [];
+      const result = await pushSyncService.syncWorkersFromInternal(companyId, workers);
+      res.status(200).json({ synced: result.synced, skipped: result.skipped });
+    } catch (error) {
+      console.error(`[PUSH SYNC] Error syncing workers for company ${companyId}:`, error);
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
 
   // 8. Set up Express middleware for GraphQL (handles both GET and POST)
   app.use("/graphql", express.json(), async (req, res, next) => {
