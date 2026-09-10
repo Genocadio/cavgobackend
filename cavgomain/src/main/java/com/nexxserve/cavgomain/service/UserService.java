@@ -134,7 +134,12 @@ public class UserService {
         log.info("syncUser: creating new local user id={}", nexxauthUserId);
         var user = new CompanyUser();
         user.setId(nexxauthUserId);
-        user.setFirstName(nexxauthUser.firstName());
+        // The users table carries NOT NULL constraints on the name columns (from
+        // the original entity where they were nullable = false). Nexxauth profiles
+        // may legitimately have no last name (single-name accounts), so fall back
+        // to an empty string for BOTH names — a null here fails the INSERT with
+        // SQLState 23502 and blocks provisioning of the user's whole session.
+        user.setFirstName(nexxauthUser.firstName() != null ? nexxauthUser.firstName() : "");
         user.setLastName(nexxauthUser.lastName() != null ? nexxauthUser.lastName() : "");
         user.setEmail(nexxauthUser.email());
         user.setPhone(nexxauthUser.phone());

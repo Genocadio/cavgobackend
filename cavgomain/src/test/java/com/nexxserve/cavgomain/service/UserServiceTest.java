@@ -242,6 +242,32 @@ class UserServiceTest {
     }
 
     @Test
+    void syncUser_nullNames_fallsBackToEmptyString() {
+        // Regression: Nexxauth profiles with a single name (no last name) must
+        // still be provisioned — the users table has NOT NULL constraints on the
+        // name columns, so a null name fails the INSERT with SQLState 23502.
+        var nexxauthUser = new NexxauthClient.OrgUser(
+                100L, "Hajyengimana", null, "hajy@test.com", "+250789271269",
+                "hajyengimanamurungi", true, List.of("fleet_manager"), List.of("password")
+        );
+        when(nexxauthClient.getUser(100L)).thenReturn(nexxauthUser);
+        when(companyUserRepository.findById(100L)).thenReturn(Optional.empty());
+
+        when(companyUserRepository.saveAndFlush(any(CompanyUser.class))).thenAnswer(inv -> {
+            CompanyUser u = inv.getArgument(0);
+            u.setCreatedAt(LocalDateTime.now());
+            u.setUpdatedAt(LocalDateTime.now());
+            return u;
+        });
+
+        var result = userService.syncUser(100L);
+
+        // firstName is kept, null lastName is persisted as ""
+        assertEquals("Hajyengimana", result.getFirstName());
+        assertEquals("", result.getLastName());
+    }
+
+    @Test
     void nexxauthRoles_mappingCoversAllRoles() {
         for (CompanyUserRole role : CompanyUserRole.values()) {
             String nexxauthName = NexxauthRoles.toNexxauthName(role);

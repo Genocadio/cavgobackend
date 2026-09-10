@@ -3,6 +3,7 @@ package com.nexxserve.cavgomain.controller;
 import com.nexxserve.cavgomain.dto.request.CompanyUserRequestDto;
 import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
 import com.nexxserve.cavgomain.service.CompanyUserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -19,12 +20,12 @@ public class CompanyUserController {
     private final CompanyUserService companyUserService;
 
     @PostMapping
-    public CompanyUserResponseDto createCompanyUser(@RequestBody CompanyUserRequestDto user) {
+    public CompanyUserResponseDto createCompanyUser(@Valid @RequestBody CompanyUserRequestDto user) {
         return companyUserService.createCompanyUser(user);
     }
 
     @PutMapping("/{id}")
-    public CompanyUserResponseDto updateCompanyUser(@PathVariable Long id, @RequestBody CompanyUserRequestDto user) {
+    public CompanyUserResponseDto updateCompanyUser(@PathVariable Long id, @Valid @RequestBody CompanyUserRequestDto user) {
         return companyUserService.updateCompanyUser(id, user);
     }
 
