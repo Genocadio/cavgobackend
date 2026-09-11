@@ -8,10 +8,39 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-push:
-    name: Build and push ikuriyebackend image
+  detect-changes:
+    name: Detect changes
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    outputs:
+      ikuriye: ${{ steps.filter.outputs.ikuriye }}
+    steps:
+      - name: Checkout CI-validated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          fetch-depth: 2
+
+      - name: Detect changed areas
+        id: filter
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ikuriye=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --quiet HEAD^ HEAD -- "ikuriyebackend" 2>/dev/null; then
+            echo "ikuriye=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ikuriye=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-and-push:
+    name: Build and push ikuriyebackend image
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: ${{ needs.detect-changes.outputs.ikuriye == 'true' }}
 
     steps:
       - name: Checkout CI-validated commit
