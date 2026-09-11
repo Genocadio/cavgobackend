@@ -84,6 +84,21 @@ public final class NexxauthRoles {
         return primary;
     }
 
+    /**
+     * Picks the most privileged role from a list of local roles, or {@code null}
+     * if the list is empty.
+     */
+    public static CompanyUserRole highest(List<CompanyUserRole> roles) {
+        CompanyUserRole best = null;
+        if (roles == null) return null;
+        for (CompanyUserRole role : roles) {
+            if (best == null || PRECEDENCE.getOrDefault(role, 0) > PRECEDENCE.getOrDefault(best, 0)) {
+                best = role;
+            }
+        }
+        return best;
+    }
+
     public static CompanyUserRole fromAuthority(GrantedAuthority authority) {
         if (authority == null) return null;
         String name = authority.getAuthority();

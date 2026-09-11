@@ -1,8 +1,8 @@
 package com.nexxserve.cavgomain.controller;
 
-import com.nexxserve.cavgomain.dto.request.DriverRequestCreateDto;
-import com.nexxserve.cavgomain.dto.response.DriverRequestResponseDto;
-import com.nexxserve.cavgomain.service.DriverRequestService;
+import com.nexxserve.cavgomain.dto.request.CompanyAccessRequestCreateDto;
+import com.nexxserve.cavgomain.dto.response.CompanyAccessRequestResponseDto;
+import com.nexxserve.cavgomain.service.CompanyAccessRequestService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -17,45 +17,43 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Driver request management endpoints.
+ * Company access request endpoints.
  *
  * <ul>
- *   <li>POST /main/driver-requests — create a request (any authenticated user)</li>
- *   <li>GET /main/driver-requests/my-status — current user's latest request</li>
- *   <li>GET /main/driver-requests/company/{companyId} — list for company (fleet manager)</li>
- *   <li>GET /main/driver-requests/company/{companyId}/pending — pending only (fleet manager)</li>
- *   <li>GET /main/driver-requests/{id} — single request (fleet manager)</li>
- *   <li>POST /main/driver-requests/{id}/approve — approve (fleet manager / supervisor / admin)</li>
- *   <li>POST /main/driver-requests/{id}/reject — reject (fleet manager / supervisor / admin)</li>
+ *   <li>POST /main/company-access-requests — request access (any authenticated user)</li>
+ *   <li>GET /main/company-access-requests/my-status — current user's latest request</li>
+ *   <li>GET /main/company-access-requests/company/{companyId} — list for company (fleet manager)</li>
+ *   <li>GET /main/company-access-requests/company/{companyId}/pending — pending only</li>
+ *   <li>POST /main/company-access-requests/{id}/approve — approve (fleet manager / supervisor / admin)</li>
+ *   <li>POST /main/company-access-requests/{id}/reject — reject (fleet manager / supervisor / admin)</li>
  * </ul>
  *
- * <p>Approve/reject record the approving fleet manager on the request (who
- * approved), reject self-approval, and require a staff role — the same rules
- * as company access requests.
+ * <p>Self-approval is rejected in the service — a user can request access to
+ * a company but must be approved by another staff member of that company.
  */
 @RestController
-@RequestMapping("/main/driver-requests")
+@RequestMapping("/main/company-access-requests")
 @RequiredArgsConstructor
-public class DriverRequestController {
+public class CompanyAccessRequestController {
 
-    private static final Logger log = LoggerFactory.getLogger(DriverRequestController.class);
-    private final DriverRequestService driverRequestService;
+    private static final Logger log = LoggerFactory.getLogger(CompanyAccessRequestController.class);
+
+    private final CompanyAccessRequestService companyAccessRequestService;
     private final com.nexxserve.cavgomain.security.NexxauthClient nexxauthClient;
 
     /**
-     * Returns the authenticated user's latest driver request status.
-     * Used by ikuriye to check if the user already has a pending request
-     * before showing the request dialog.
+     * Returns the authenticated user's latest company access request status.
+     * Used by the app to show the current status while awaiting approval.
      */
     @GetMapping("/my-status")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<DriverRequestResponseDto> getMyStatus() {
+    public ResponseEntity<CompanyAccessRequestResponseDto> getMyStatus() {
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
         if (userId == null) {
             return ResponseEntity.badRequest().build();
         }
-        var response = driverRequestService.getMyLatestRequest(userId);
+        var response = companyAccessRequestService.getMyLatestRequest(userId);
         if (response == null) {
             return ResponseEntity.noContent().build();
         }
@@ -63,17 +61,15 @@ public class DriverRequestController {
     }
 
     /**
-     * Creates a driver request. The user's identity comes from the JWT.
+     * Creates a company access / fleet-manager role request. The user's
+     * identity comes from the JWT; the requested role is FLEET_MANAGER.
      */
     @PostMapping
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> createRequest(
-            @Valid @RequestBody DriverRequestCreateDto dto) {
+            @Valid @RequestBody CompanyAccessRequestCreateDto dto) {
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
-        var claims = (com.nexxserve.cavgomain.security.NexxauthJwtVerifier.NexxauthClaims)
-                request.getAttribute("nexxauthClaims");
-
         if (userId == null) {
             return ResponseEntity.badRequest().build();
         }
@@ -94,7 +90,7 @@ public class DriverRequestController {
         }
 
         try {
-            var response = driverRequestService.createRequest(
+            var response = companyAccessRequestService.createRequest(
                     dto.getCompanyCode(),
                     userId,
                     firstName,
@@ -104,84 +100,69 @@ public class DriverRequestController {
             );
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
-            log.warn("Failed to create driver request for userId={}: {}", userId, e.getMessage());
+            log.warn("Failed to create company access request for userId={}: {}", userId, e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
     }
 
     /**
-     * Lists all driver requests for a company (fleet manager view).
-     * Returns all requests (all statuses) so the fleet manager can see
-     * pending, approved, and rejected requests.
+     * Lists all company access requests for a company (fleet manager view).
      */
     @GetMapping("/company/{companyId}")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
-    public ResponseEntity<List<DriverRequestResponseDto>> getCompanyRequests(
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<List<CompanyAccessRequestResponseDto>> getCompanyRequests(
             @PathVariable Long companyId) {
-        var requests = driverRequestService.getAllRequestsByCompany(companyId);
+        var requests = companyAccessRequestService.getAllRequestsByCompany(companyId);
         return ResponseEntity.ok(requests);
     }
 
     /**
-     * Lists pending driver requests for a company.
+     * Lists pending company access requests for a company.
      */
     @GetMapping("/company/{companyId}/pending")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
-    public ResponseEntity<List<DriverRequestResponseDto>> getPendingCompanyRequests(
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<List<CompanyAccessRequestResponseDto>> getPendingCompanyRequests(
             @PathVariable Long companyId) {
-        var requests = driverRequestService.getPendingRequestsByCompany(companyId);
+        var requests = companyAccessRequestService.getPendingRequestsByCompany(companyId);
         return ResponseEntity.ok(requests);
     }
 
     /**
-     * Gets a single driver request by ID.
-     */
-    @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
-    public ResponseEntity<DriverRequestResponseDto> getRequest(@PathVariable Long id) {
-        try {
-            var response = driverRequestService.getRequestById(id);
-            return ResponseEntity.ok(response);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
-    }
-
-    /**
-     * Approves a driver request — assigns DRIVER role in Nexxauth and records
-     * which fleet manager approved. Only staff roles may approve, and a user
-     * cannot approve their own request (guarded in the service).
+     * Approves a company access request — grants the FLEET_MANAGER role in
+     * Nexxauth and assigns the user to the company, recording who approved.
+     * Only fleet manager, supervisor, or admin roles may approve, and a user
+     * cannot approve their own request.
      */
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
-    public ResponseEntity<DriverRequestResponseDto> approveRequest(@PathVariable Long id) {
+    public ResponseEntity<CompanyAccessRequestResponseDto> approveRequest(@PathVariable Long id) {
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
         try {
-            var response = driverRequestService.approveRequest(id, userId);
+            var response = companyAccessRequestService.approveRequest(id, userId);
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
-            log.warn("Failed to approve driver request {}: {}", id, e.getMessage());
+            log.warn("Failed to approve company access request {}: {}", id, e.getMessage());
             return ResponseEntity.badRequest().build();
         }
     }
 
     /**
-     * Rejects a driver request — records who rejected.
+     * Rejects a company access request.
      */
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
-    public ResponseEntity<DriverRequestResponseDto> rejectRequest(
+    public ResponseEntity<CompanyAccessRequestResponseDto> rejectRequest(
             @PathVariable Long id,
             @RequestBody(required = false) Map<String, String> body) {
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
         String reason = body != null ? body.get("reason") : null;
         try {
-            var response = driverRequestService.rejectRequest(id, reason, userId);
+            var response = companyAccessRequestService.rejectRequest(id, reason, userId);
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
-            log.warn("Failed to reject driver request {}: {}", id, e.getMessage());
+            log.warn("Failed to reject company access request {}: {}", id, e.getMessage());
             return ResponseEntity.badRequest().build();
         }
     }

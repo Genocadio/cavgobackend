@@ -1,27 +1,30 @@
 package com.nexxserve.cavgomain.dto.response;
 
-import com.nexxserve.cavgomain.entity.DriverRequest;
-import com.nexxserve.cavgomain.enums.DriverRequestStatus;
+import com.nexxserve.cavgomain.entity.CompanyAccessRequest;
+import com.nexxserve.cavgomain.enums.CompanyAccessRequestStatus;
+import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import lombok.Data;
 
 import java.time.LocalDateTime;
 
 /**
- * Response DTO for a driver request — used by both the requesting user
- * and the fleet manager viewing pending requests.
+ * Response DTO for a company access request — used by both the requesting
+ * user and the fleet manager approving pending requests.
  */
 @Data
-public class DriverRequestResponseDto {
+public class CompanyAccessRequestResponseDto {
+
     private Long id;
     private Long nexxauthUserId;
     private String firstName;
     private String lastName;
     private String email;
     private String phone;
+    private CompanyUserRole role;
     private String companyCode;
     private Long companyId;
     private String companyName;
-    private DriverRequestStatus status;
+    private CompanyAccessRequestStatus status;
     private String rejectionReason;
     private Long approvedBy;
     private Long rejectedBy;
@@ -30,14 +33,15 @@ public class DriverRequestResponseDto {
     private String createdAt;
     private String updatedAt;
 
-    public static DriverRequestResponseDto fromEntity(DriverRequest entity) {
-        DriverRequestResponseDto dto = new DriverRequestResponseDto();
+    public static CompanyAccessRequestResponseDto fromEntity(CompanyAccessRequest entity) {
+        CompanyAccessRequestResponseDto dto = new CompanyAccessRequestResponseDto();
         dto.setId(entity.getId());
         dto.setNexxauthUserId(entity.getNexxauthUserId());
         dto.setFirstName(entity.getFirstName());
         dto.setLastName(entity.getLastName());
         dto.setEmail(entity.getEmail());
         dto.setPhone(entity.getPhone());
+        dto.setRole(entity.getRole());
         dto.setCompanyCode(entity.getCompanyCode());
         if (entity.getCompany() != null) {
             dto.setCompanyId(entity.getCompany().getId());

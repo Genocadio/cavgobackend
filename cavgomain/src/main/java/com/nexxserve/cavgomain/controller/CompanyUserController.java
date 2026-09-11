@@ -7,7 +7,10 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -27,6 +30,22 @@ public class CompanyUserController {
     @PutMapping("/{id}")
     public CompanyUserResponseDto updateCompanyUser(@PathVariable Long id, @Valid @RequestBody CompanyUserRequestDto user) {
         return companyUserService.updateCompanyUser(id, user);
+    }
+
+    /**
+     * Assigns a company to a staff user. A user cannot assign themselves to a
+     * company — company access is granted by a fleet manager through the
+     * company access request approval flow.
+     */
+    @PutMapping("/{id}/company/{companyId}")
+    public ResponseEntity<CompanyUserResponseDto> assignCompanyToUser(
+            @PathVariable Long id, @PathVariable Long companyId) {
+        var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
+        var currentUserId = (Long) request.getAttribute("nexxauthUserId");
+        if (currentUserId != null && currentUserId.equals(id)) {
+            return ResponseEntity.status(403).build();
+        }
+        return ResponseEntity.ok(companyUserService.assignCompanyToUser(id, companyId));
     }
 
 
@@ -56,11 +75,6 @@ public class CompanyUserController {
     @GetMapping("/expired-licenses")
     public List<CompanyUserResponseDto> getUsersWithExpiredLicense() {
         return companyUserService.findUsersWithExpiredLicense();
-    }
-
-    @PutMapping("/{id}/company/{companyId}")
-    public CompanyUserResponseDto assignCompanyToUser(@PathVariable Long id, @PathVariable Long companyId) {
-        return companyUserService.assignCompanyToUser(id, companyId);
     }
 
     @DeleteMapping("/{id}")

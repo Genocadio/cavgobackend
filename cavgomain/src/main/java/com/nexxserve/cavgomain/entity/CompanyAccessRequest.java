@@ -1,6 +1,7 @@
 package com.nexxserve.cavgomain.entity;
 
-import com.nexxserve.cavgomain.enums.DriverRequestStatus;
+import com.nexxserve.cavgomain.enums.CompanyAccessRequestStatus;
+import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -9,23 +10,24 @@ import lombok.ToString;
 import java.time.LocalDateTime;
 
 /**
- * A request from a normal user to become a driver for a specific company.
- * The fleet manager approves or rejects the request. On approval, the user's
- * role is updated to DRIVER in Nexxauth.
+ * A request from a staff user (typically a fleet manager) to gain access to a
+ * company. The requesting user enters the company code; a different staff
+ * member of that company must approve the request before the user is assigned
+ * to the company. Self-approval is not allowed.
  */
 @Entity
-@Table(name = "driver_requests")
+@Table(name = "company_access_requests")
 @Data
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
-public class DriverRequest extends BaseEntity {
+public class CompanyAccessRequest extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id")
     private Long id;
 
-    /** Nexxauth user id of the user requesting to be a driver. */
+    /** Nexxauth user id of the user requesting company access. */
     @Column(name = "nexxauth_user_id", nullable = false)
     private Long nexxauthUserId;
 
@@ -41,11 +43,16 @@ public class DriverRequest extends BaseEntity {
     @Column(name = "phone")
     private String phone;
 
+    /** The role the requester carries (snapshot from Nexxauth roles). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role")
+    private CompanyUserRole role;
+
     /** The company code the user wants to join. */
     @Column(name = "company_code", nullable = false)
     private String companyCode;
 
-    /** Resolved company id (set when request is created). */
+    /** Resolved company id (set when the request is created). */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "company_id", nullable = false)
     @ToString.Exclude
@@ -53,23 +60,23 @@ public class DriverRequest extends BaseEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
-    private DriverRequestStatus status = DriverRequestStatus.PENDING;
+    private CompanyAccessRequestStatus status = CompanyAccessRequestStatus.PENDING;
 
     /** Rejection reason (set when rejected). */
     @Column(name = "rejection_reason")
     private String rejectionReason;
 
-    /** Nexxauth user id of the fleet manager who approved the request. */
+    /** Nexxauth user id of the staff member who approved the request. */
     @Column(name = "approved_by")
     private Long approvedBy;
 
     @Column(name = "approved_at")
     private LocalDateTime approvedAt;
 
-    /** Nexxauth user id of the fleet manager who rejected the request. */
-    @Column(name = "rejected_by")
-    private Long rejectedBy;
-
     @Column(name = "rejected_at")
     private LocalDateTime rejectedAt;
+
+    /** Nexxauth user id of the staff member who rejected the request. */
+    @Column(name = "rejected_by")
+    private Long rejectedBy;
 }

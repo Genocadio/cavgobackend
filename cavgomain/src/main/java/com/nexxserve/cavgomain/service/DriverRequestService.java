@@ -3,10 +3,13 @@ package com.nexxserve.cavgomain.service;
 import com.nexxserve.cavgomain.dto.request.DriverRequestCreateDto;
 import com.nexxserve.cavgomain.dto.response.DriverRequestResponseDto;
 import com.nexxserve.cavgomain.entity.Company;
+import com.nexxserve.cavgomain.entity.CompanyAccessRequest;
 import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.entity.DriverRequest;
+import com.nexxserve.cavgomain.enums.CompanyAccessRequestStatus;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.DriverRequestStatus;
+import com.nexxserve.cavgomain.repository.CompanyAccessRequestRepository;
 import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.DriverRequestRepository;
@@ -37,6 +40,7 @@ public class DriverRequestService {
     private final DriverRequestRepository driverRequestRepository;
     private final CompanyRepository companyRepository;
     private final CompanyUserRepository companyUserRepository;
+    private final CompanyAccessRequestRepository companyAccessRequestRepository;
     private final NexxauthClient nexxauthClient;
 
     /**
@@ -70,6 +74,14 @@ public class DriverRequestService {
         if (existingPending.isPresent()) {
             throw new IllegalArgumentException(
                     "You already have a pending driver request. Please wait for approval.");
+        }
+
+        // A user may only have one request in flight across both apps — block a
+        // driver request while a fleetman company-access request is still pending.
+        if (companyAccessRequestRepository
+                .existsByNexxauthUserIdAndStatus(nexxauthUserId, CompanyAccessRequestStatus.PENDING)) {
+            throw new IllegalArgumentException(
+                    "You already have a pending company access request in the fleet manager app. Please wait for it to be approved or rejected before requesting driver access.");
         }
 
         // Check if user is already a driver for this company
@@ -143,12 +155,16 @@ public class DriverRequestService {
 
     /**
      * Approves a driver request:
-     * 1. Updates the request status to APPROVED
-     * 2. Adds the "driver" role to the user in Nexxauth (adds to existing roles)
-     * 3. Creates/updates the local CompanyUser with DRIVER role
+     * 1. Validates the request is pending and that the approver is not the requester
+     * 2. Updates the request status to APPROVED (recording who approved)
+     * 3. Adds the "driver" role to the user in Nexxauth (adds to existing roles)
+     * 4. Creates/updates the local CompanyUser with DRIVER role
+     *
+     * @param requestId    the driver request id
+     * @param approverUserId the Nexxauth user id of the fleet manager approving
      */
     @Transactional
-    public DriverRequestResponseDto approveRequest(Long requestId) {
+    public DriverRequestResponseDto approveRequest(Long requestId, Long approverUserId) {
         DriverRequest request = driverRequestRepository.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Driver request not found with id: " + requestId));
@@ -157,9 +173,15 @@ public class DriverRequestService {
             throw new IllegalArgumentException(
                     "Request is not pending — current status: " + request.getStatus());
         }
+        if (approverUserId != null && approverUserId.equals(request.getNexxauthUserId())) {
+            throw new IllegalArgumentException(
+                    "You cannot approve your own driver request.");
+        }
 
-        // 1. Update request status
+        // 1. Update request status — record who approved
         request.setStatus(DriverRequestStatus.APPROVED);
+        request.setApprovedBy(approverUserId);
+        request.setApprovedAt(LocalDateTime.now());
         driverRequestRepository.save(request);
 
         // 2. Update Nexxauth roles — add "driver" to existing roles
@@ -212,9 +234,13 @@ public class DriverRequestService {
 
     /**
      * Rejects a driver request.
+     *
+     * @param requestId      the driver request id
+     * @param reason         optional rejection reason
+     * @param rejectedByUserId the Nexxauth user id of the fleet manager rejecting
      */
     @Transactional
-    public DriverRequestResponseDto rejectRequest(Long requestId, String reason) {
+    public DriverRequestResponseDto rejectRequest(Long requestId, String reason, Long rejectedByUserId) {
         DriverRequest request = driverRequestRepository.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Driver request not found with id: " + requestId));
@@ -223,9 +249,15 @@ public class DriverRequestService {
             throw new IllegalArgumentException(
                     "Request is not pending — current status: " + request.getStatus());
         }
+        if (rejectedByUserId != null && rejectedByUserId.equals(request.getNexxauthUserId())) {
+            throw new IllegalArgumentException(
+                    "You cannot reject your own driver request.");
+        }
 
         request.setStatus(DriverRequestStatus.REJECTED);
         request.setRejectionReason(reason);
+        request.setRejectedBy(rejectedByUserId);
+        request.setRejectedAt(LocalDateTime.now());
         driverRequestRepository.save(request);
 
         log.info("Driver request rejected: requestId={}, reason={}", requestId, reason);
