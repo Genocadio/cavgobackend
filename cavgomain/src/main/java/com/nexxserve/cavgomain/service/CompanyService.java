@@ -65,6 +65,13 @@ public class CompanyService {
     }
 
     @Transactional(readOnly = true)
+    public CompanyResponseDto findByCompanyCode(String code) {
+        Company company = companyRepository.findByCompanyCode(code)
+                .orElseThrow(() -> new IllegalArgumentException("Company not found with code: " + code));
+        return CompanyResponseDto.fromEntity(company);
+    }
+
+    @Transactional(readOnly = true)
     public List<CompanyResponseDto> findAll(LocalDateTime timeLimit) {
         List<Company> companies;
         if (timeLimit != null) {

@@ -4,6 +4,7 @@ import com.nexxserve.cavgomain.entity.Company;
 import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.UserStatus;
+import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.security.NexxauthClient;
 import com.nexxserve.cavgomain.security.NexxauthRoles;
@@ -26,6 +27,8 @@ class UserServiceTest {
 
     @Mock
     private CompanyUserRepository companyUserRepository;
+    @Mock
+    private CompanyRepository companyRepository;
     @Mock
     private NexxauthClient nexxauthClient;
 

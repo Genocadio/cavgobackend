@@ -33,6 +33,11 @@ public class CompanyController {
         return companyService.findById(id);
     }
 
+    @GetMapping("/by-code/{code}")
+    public CompanyResponseDto getCompanyByCode(@PathVariable String code) {
+        return companyService.findByCompanyCode(code);
+    }
+
     @GetMapping
     public List<CompanyResponseDto> getAllCompanies(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit) {

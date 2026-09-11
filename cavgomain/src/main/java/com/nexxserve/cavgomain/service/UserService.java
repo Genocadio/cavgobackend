@@ -39,6 +39,7 @@ public class UserService {
     /**
      * Mirrors the authenticated user from Nexxauth into the local DB. Creates
      * the row when missing, updates profile fields when changed.
+     * Pure identity sync — no company or role assignment.
      */
     @Transactional
     public CompanyUserResponseDto syncUser(Long nexxauthUserId) {

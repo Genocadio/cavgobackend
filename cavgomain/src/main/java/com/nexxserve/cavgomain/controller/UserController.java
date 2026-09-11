@@ -49,7 +49,8 @@ public class UserController {
     /**
      * Syncs the authenticated user (identified by their Nexxauth org-user id)
      * from Nexxauth into the local DB. Creates the row when missing, updates
-     * profile fields when changed.
+     * profile fields when changed. Pure identity mirror — no company or role
+     * assignment happens here.
      */
     @PostMapping("/sync")
     @PreAuthorize("isAuthenticated()")
