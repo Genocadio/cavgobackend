@@ -248,7 +248,7 @@ public class VehicleService {
        assignment.setAssignedDate(LocalDateTime.now());
        assignment.setNotes(notes);
 
-       vehicle.setStatus(VehicleStatus.AVAILABLE);
+       vehicle.setStatus(VehicleStatus.OCCUPIED);
        vehicleRepository.save(vehicle);
 
        return VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(assignment));
@@ -424,8 +424,8 @@ public class VehicleService {
            }
        }
        
-       // Keep vehicle status as AVAILABLE (not OCCUPIED)
-       vehicle.setStatus(VehicleStatus.AVAILABLE);
+       // Mark vehicle as OCCUPIED now that a driver is assigned.
+       vehicle.setStatus(VehicleStatus.OCCUPIED);
        vehicleRepository.save(vehicle);
        
        return VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(newAssignment));
@@ -492,8 +492,8 @@ public class VehicleService {
            newAssignment.setNotes("Driver swapped from driver ID: " + currentDriverId);
        }
        
-       // Keep vehicle status as AVAILABLE (not OCCUPIED)
-       vehicle.setStatus(VehicleStatus.AVAILABLE);
+       // Mark vehicle as OCCUPIED now that a driver is assigned.
+       vehicle.setStatus(VehicleStatus.OCCUPIED);
        vehicleRepository.save(vehicle);
        
        return VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(newAssignment));
