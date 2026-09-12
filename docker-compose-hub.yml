@@ -254,7 +254,7 @@ services:
       PORT: 6080
       EUREKA_SERVER_URL: http://eurekacavgo:${PORT_EUREKA:-8761}
       EUREKA_APP_NAME: CAVGOTRIPS
-      VEHICLE_SERVICE_URL: http://cavgomain:${PORT_MAIN:-6060}/main/vehicles/
+      VEHICLE_SERVICE_URL: http://cavgomain:${PORT_MAIN:-6060}/internal/api/vehicles/
       EUREKA_REGISTER: true
       EUREKA_PREFER_IP: true
       RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}:${RABBITMQ_PORT:-5672}

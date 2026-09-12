@@ -1,8 +1,6 @@
 package com.nexxserve.cavgomain.controller;
 
-import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
-import com.nexxserve.cavgomain.dto.response.InternalVehicleResponseDto;
-import com.nexxserve.cavgomain.dto.response.InternalWorkerResponseDto;
+import com.nexxserve.cavgomain.dto.response.*;
 import com.nexxserve.cavgomain.service.AggregatorSyncService;
 import com.nexxserve.cavgomain.service.InternalApiService;
 import com.nexxserve.cavgomain.service.UserService;
@@ -23,6 +21,23 @@ public class InternalApiController {
     private final InternalApiService internalApiService;
     private final AggregatorSyncService aggregatorSyncService;
     private final UserService userService;
+
+    // ── Company endpoints (for adminaggregate, no auth required) ──
+
+    @GetMapping("/companies")
+    public ResponseEntity<List<CompanyResponseDto>> getAllCompanies() {
+        return ResponseEntity.ok(internalApiService.getAllCompanies());
+    }
+
+    @GetMapping("/companies/{companyId}/vehicles")
+    public ResponseEntity<List<VehicleResponseDto>> getCompanyVehicles(@PathVariable Long companyId) {
+        return ResponseEntity.ok(internalApiService.getVehiclesByCompanyDto(companyId));
+    }
+
+    @GetMapping("/companies/{companyId}/drivers")
+    public ResponseEntity<List<CompanyUserResponseDto>> getCompanyDrivers(@PathVariable Long companyId) {
+        return ResponseEntity.ok(internalApiService.getDriversByCompanyDto(companyId));
+    }
 
     // Vehicle endpoints
     @GetMapping("/vehicles")

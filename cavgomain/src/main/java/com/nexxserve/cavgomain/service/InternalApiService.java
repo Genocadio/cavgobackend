@@ -1,8 +1,7 @@
 package com.nexxserve.cavgomain.service;
 
-import com.nexxserve.cavgomain.dto.response.InternalVehicleResponseDto;
-import com.nexxserve.cavgomain.dto.response.InternalWorkerResponseDto;
-import com.nexxserve.cavgomain.dto.response.OfficeResponseDto;
+import com.nexxserve.cavgomain.dto.response.*;
+import com.nexxserve.cavgomain.entity.Company;
 import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.entity.Office;
 import com.nexxserve.cavgomain.entity.Vehicle;
@@ -10,6 +9,7 @@ import com.nexxserve.cavgomain.entity.VehicleAssignment;
 import com.nexxserve.cavgomain.entity.VehicleLocation;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.VehicleStatus;
+import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
 import com.nexxserve.cavgomain.repository.VehicleLocationRepository;
@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
@@ -35,6 +36,7 @@ public class InternalApiService {
     private final CompanyUserRepository companyUserRepository;
     private final VehicleLocationRepository vehicleLocationRepository;
     private final VehicleAssignmentRepository vehicleAssignmentRepository;
+    private final CompanyRepository companyRepository;
 
     public List<InternalVehicleResponseDto> getAllVehicles() {
         return vehicleRepository.findAllWithActiveAssignments().stream()
@@ -107,6 +109,40 @@ public class InternalApiService {
     public CompanyUser getCompanyUserById(Long id) {
         return companyUserRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Company user not found with id: " + id));
+    }
+
+    // ── Public DTO endpoints (same shape as /main/ controllers, no auth required) ──
+
+    public List<CompanyResponseDto> getAllCompanies() {
+        return companyRepository.findAllAfterTime(LocalDateTime.of(1970, 1, 1, 0, 0))
+                .stream()
+                .map(CompanyResponseDto::fromEntity)
+                .toList();
+    }
+
+    public List<VehicleResponseDto> getVehiclesByCompanyDto(Long companyId) {
+        return vehicleRepository.findByCompanyIdWithActiveAssignments(companyId).stream()
+                .sorted(Comparator.comparingInt((Vehicle v) -> v.getStatus() == VehicleStatus.OCCUPIED ? 0 : 1)
+                        .thenComparing(Vehicle::getId, Comparator.reverseOrder()))
+                .map(VehicleResponseDto::fromEntity)
+                .toList();
+    }
+
+    public List<CompanyUserResponseDto> getDriversByCompanyDto(Long companyId) {
+        return companyUserRepository.findByCompanyId(companyId).stream()
+                .filter(u -> u.getRole() == CompanyUserRole.DRIVER)
+                .map(user -> {
+                    CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(user);
+                    List<VehicleAssignment> activeAssignments = vehicleAssignmentRepository
+                            .findActiveAssignmentsByDriver(user.getId());
+                    if (!activeAssignments.isEmpty()) {
+                        dto.setVehicle(VehicleResponseDto.fromEntity(activeAssignments.get(0).getVehicle(), null));
+                    } else {
+                        dto.setVehicle(null);
+                    }
+                    return dto;
+                })
+                .toList();
     }
 
     private InternalVehicleResponseDto toInternalVehicleDto(Vehicle vehicle) {

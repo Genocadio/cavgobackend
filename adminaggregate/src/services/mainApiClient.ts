@@ -38,7 +38,7 @@ function unwrapPaginatedResponse<T>(responseBody: T[] | PaginatedResponse<T>): T
 export async function fetchCompanies(): Promise<CompanyResponseDto[]> {
   console.log(`[URL] Constructing URL for companies...`);
   console.log(`[URL] Base URL: ${MAIN_BASE_URL}`);
-  const url = `${MAIN_BASE_URL}/main/companies`;
+  const url = `${MAIN_BASE_URL}/internal/api/companies`;
   console.log(`[URL] Final URL: ${url}`);
   console.log(`[FETCH] Starting fetch: ${url}`);
   try {
@@ -72,13 +72,8 @@ export async function fetchVehiclesByCompany(
 ): Promise<VehicleResponseDto[]> {
   console.log(`[URL] Constructing URL for vehicles (companyId: ${companyId})...`);
   console.log(`[URL] Base URL: ${MAIN_BASE_URL}`);
-  const url = new URL(`${MAIN_BASE_URL}/main/vehicles/company/${companyId}`);
-  if (timeLimit) {
-    console.log(`[URL] Adding timeLimit parameter for vehicles: ${timeLimit}`);
-    url.searchParams.set("timeLimit", timeLimit);
-  } else {
-    console.log(`[URL] No timeLimit - fetching all vehicles for company ${companyId}`);
-  }
+  const url = new URL(`${MAIN_BASE_URL}/internal/api/companies/${companyId}/vehicles`);
+  // Note: timeLimit is not supported on the internal endpoint; it always returns all records.
   
   const urlString = url.toString();
   console.log(`[URL] Final URL: ${urlString}`);
@@ -115,13 +110,8 @@ export async function fetchDriversByCompany(
 ): Promise<CompanyUserResponseDto[]> {
   console.log(`[URL] Constructing URL for drivers (companyId: ${companyId})...`);
   console.log(`[URL] Base URL: ${MAIN_BASE_URL}`);
-  const url = new URL(`${MAIN_BASE_URL}/main/staff/company/${companyId}/drivers`);
-  if (timeLimit) {
-    console.log(`[URL] Adding timeLimit parameter for drivers: ${timeLimit}`);
-    url.searchParams.set("timeLimit", timeLimit);
-  } else {
-    console.log(`[URL] No timeLimit - fetching all drivers for company ${companyId}`);
-  }
+  const url = new URL(`${MAIN_BASE_URL}/internal/api/companies/${companyId}/drivers`);
+  // Note: timeLimit is not supported on the internal endpoint; it always returns all records.
   
   const urlString = url.toString();
   console.log(`[URL] Final URL: ${urlString}`);

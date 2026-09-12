@@ -184,16 +184,10 @@ public class DriverRequestService {
         request.setApprovedAt(LocalDateTime.now());
         driverRequestRepository.save(request);
 
-        // 2. Update Nexxauth roles — add "driver" to existing roles
+        // 2. Update Nexxauth roles — assign "driver" role (replaces existing roles such as "customer")
         try {
-            var nexxauthUser = nexxauthClient.getUser(request.getNexxauthUserId());
-            var currentRoles = nexxauthUser.roles();
-            if (!currentRoles.contains("driver")) {
-                var updatedRoles = new java.util.ArrayList<>(currentRoles);
-                updatedRoles.add("driver");
-                nexxauthClient.updateUserRoles(request.getNexxauthUserId(), updatedRoles);
-                log.info("Added driver role in Nexxauth for userId={}", request.getNexxauthUserId());
-            }
+            nexxauthClient.updateUserRoles(request.getNexxauthUserId(), List.of("driver"));
+            log.info("Assigned driver role in Nexxauth for userId={}", request.getNexxauthUserId());
         } catch (Exception e) {
             log.error("Failed to update Nexxauth roles for userId={}: {}",
                     request.getNexxauthUserId(), e.getMessage());

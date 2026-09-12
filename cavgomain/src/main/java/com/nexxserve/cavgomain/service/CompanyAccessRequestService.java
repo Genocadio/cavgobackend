@@ -167,28 +167,21 @@ public class CompanyAccessRequestService {
                     "You cannot approve your own company access request.");
         }
 
-        // 1. Grant the FLEET_MANAGER role in Nexxauth (adds to existing roles).
+        // 1. Assign the requested role in Nexxauth (replaces existing roles such as "customer").
         CompanyUserRole effectiveRole = request.getRole() != null
                 ? request.getRole() : REQUESTED_ROLE;
+        String roleNexxauthName = NexxauthRoles.toNexxauthName(effectiveRole);
+        if (roleNexxauthName == null) {
+            roleNexxauthName = "fleet_manager";
+        }
         try {
-            var nexxauthUser = nexxauthClient.getUser(request.getNexxauthUserId());
-            var currentRoles = nexxauthUser.roles() != null
-                    ? new java.util.ArrayList<>(nexxauthUser.roles())
-                    : new java.util.ArrayList<String>();
-            if (!currentRoles.contains("fleet_manager")) {
-                currentRoles.add("fleet_manager");
-                nexxauthClient.updateUserRoles(request.getNexxauthUserId(), currentRoles);
-                log.info("Added fleet_manager role in Nexxauth for userId={} (request {})",
-                        request.getNexxauthUserId(), requestId);
-            }
-            // The user's effective role is their most privileged Nexxauth role.
-            var mapped = NexxauthRoles.fromNexxauthNames(currentRoles);
-            var primary = NexxauthRoles.highest(mapped);
-            if (primary != null) effectiveRole = primary;
+            nexxauthClient.updateUserRoles(request.getNexxauthUserId(), List.of(roleNexxauthName));
+            log.info("Assigned {} role in Nexxauth for userId={} (request {})",
+                    roleNexxauthName, request.getNexxauthUserId(), requestId);
             request.setRole(effectiveRole);
         } catch (Exception e) {
-            log.error("Failed to grant fleet_manager role in Nexxauth for userId={} (request {}): {}",
-                    request.getNexxauthUserId(), requestId, e.getMessage());
+            log.error("Failed to assign {} role in Nexxauth for userId={} (request {}): {}",
+                    roleNexxauthName, request.getNexxauthUserId(), requestId, e.getMessage());
         }
 
         // 2. Assign the requesting user to the company with their effective role.

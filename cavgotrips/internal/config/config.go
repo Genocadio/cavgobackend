@@ -55,7 +55,7 @@ func Load() *Config {
 			RegisterWithEureka: getEnv("EUREKA_REGISTER", "true") == "true",
 			PreferIPAddress:    getEnv("EUREKA_PREFER_IP", "true") == "true",
 		},
-		VehicleServiceURL: getEnv("VEHICLE_SERVICE_URL", "http://localhost:8060/main/vehicles/"),
+		VehicleServiceURL: getEnv("VEHICLE_SERVICE_URL", "http://localhost:8060/internal/api/vehicles/"),
 		RabbitMQ: RabbitMQConfig{
 			Host:             getEnv("RABBITMQ_HOST", "localhost:5672"),
 			User:             getEnv("RABBITMQ_USER", "admin"),
