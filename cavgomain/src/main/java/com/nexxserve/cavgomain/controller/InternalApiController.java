@@ -58,6 +58,17 @@ public class InternalApiController {
         return ResponseEntity.ok(vehicles);
     }
 
+    /**
+     * Sets a vehicle's operational status. Called by cavgotrips to flag a vehicle
+     * OCCUPIED while it has an active trip and AVAILABLE once a trip is completed,
+     * cancelled or deleted. No auth — internal only.
+     */
+    @PutMapping("/vehicles/{id}/status")
+    public ResponseEntity<VehicleResponseDto> setVehicleStatus(@PathVariable Long id,
+                                                               @RequestParam("status") String status) {
+        return ResponseEntity.ok(internalApiService.setVehicleStatus(id, status));
+    }
+
     // Worker endpoints
     @GetMapping("/workers")
     public ResponseEntity<List<InternalWorkerResponseDto>> getAllWorkers() {

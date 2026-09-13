@@ -60,6 +60,18 @@ public class VehicleController {
         return vehicleService.updateVehicle(id, vehicle);
     }
 
+    /**
+     * Updates the vehicle's operational status (AVAILABLE, OCCUPIED, MAINTENANCE,
+     * OUT_OF_SERVICE). Called by the fleet manager app for MAINTENANCE /
+     * OUT_OF_SERVICE; OCCUPIED/AVAILABLE transitions are normally driven by the
+     * trip service via the internal endpoint.
+     */
+    @PutMapping("/{id}/status")
+    public VehicleResponseDto updateVehicleStatus(@PathVariable Long id,
+                                                  @RequestParam("status") String status) {
+        return vehicleService.updateVehicleStatus(id, status);
+    }
+
     @GetMapping("/company/{companyId}")
     public Page<VehicleResponseDto> getcompanyVehicles(
             @PathVariable Long companyId,

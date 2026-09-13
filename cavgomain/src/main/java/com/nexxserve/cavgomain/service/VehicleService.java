@@ -159,6 +159,30 @@ public class VehicleService {
         return VehicleResponseDto.fromEntity(getVehicle(id));
     }
 
+    /**
+     * Updates a vehicle's operational status (AVAILABLE, OCCUPIED, MAINTENANCE,
+     * OUT_OF_SERVICE). Used by the fleet manager for MAINTENANCE/OUT_OF_SERVICE
+     * and by the trip service (internal endpoint) for OCCUPIED/AVAILABLE. The
+     * change is broadcast so consumers stay in sync.
+     */
+    @Transactional
+    public VehicleResponseDto updateVehicleStatus(Long id, String status) {
+        Vehicle vehicle = getVehicle(id);
+        VehicleStatus newStatus;
+        try {
+            newStatus = VehicleStatus.valueOf(status == null ? "" : status.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid vehicle status: " + status, e);
+        }
+        if (vehicle.getStatus() == newStatus) {
+            return VehicleResponseDto.fromEntity(vehicle);
+        }
+        vehicle.setStatus(newStatus);
+        Vehicle saved = vehicleRepository.save(vehicle);
+        eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(saved));
+        return VehicleResponseDto.fromEntity(saved);
+    }
+
     public List<VehicleResponseDto> getAllVehicles(LocalDateTime timeLimit) {
         List<Vehicle> vehicles;
         if (timeLimit != null) {
@@ -257,8 +281,8 @@ public class VehicleService {
        assignment.setAssignedDate(LocalDateTime.now());
        assignment.setNotes(notes);
 
-       vehicle.setStatus(VehicleStatus.OCCUPIED);
-       vehicleRepository.save(vehicle);
+       // NOTE: assignment does not change vehicle status. OCCUPIED is driven by
+       // the trip service (cavgotrips) and only while the vehicle has an active trip.
 
        VehicleAssignmentResponseDto response = VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(assignment));
        eventMessagePublisher.publishVehicleEvent("DRIVER_ASSIGNMENT", Map.of("vehicleId", vehicleId, "driverId", driverId));
@@ -299,9 +323,6 @@ public class VehicleService {
        // Create assignment using DTO
        VehicleAssignment assignment = assignmentDto.toEntity(vehicle, driver);
        assignment.setStatus(assignmentDto.getStatus());
-
-       vehicle.setStatus(VehicleStatus.OCCUPIED);
-       vehicleRepository.save(vehicle);
 
        VehicleAssignmentResponseDto response = VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(assignment));
        eventMessagePublisher.publishVehicleEvent("DRIVER_ASSIGNMENT",
@@ -366,15 +387,11 @@ public class VehicleService {
            throw new IllegalStateException("No active assignment found for this vehicle");
        }
        
-       VehicleAssignment assignment = activeAssignment.get();
-       assignment.setUnassignedDate(LocalDateTime.now());
-       assignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.COMPLETED);
-       assignmentRepository.save(assignment);
-       
-// Set vehicle status to AVAILABLE
-        vehicle.setStatus(VehicleStatus.AVAILABLE);
-        vehicleRepository.save(vehicle);
-
+VehicleAssignment assignment = activeAssignment.get();
+        assignment.setUnassignedDate(LocalDateTime.now());
+        assignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.COMPLETED);
+        assignmentRepository.save(assignment);
+        
         VehicleAssignmentResponseDto response = VehicleAssignmentResponseDto.fromEntity(assignment);
         // Broadcast post-state (no driver) so consumers clear the assignment
         eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(vehicle));
@@ -383,10 +400,13 @@ public class VehicleService {
     }
 
    @Transactional
-   public VehicleAssignmentResponseDto swapAssignment(Long vehicleId, Long newDriverId) {
-       Vehicle vehicle = getVehicle(vehicleId);
-       
-       CompanyUser newDriver = companyUserRepository.findById(newDriverId)
+public VehicleAssignmentResponseDto swapAssignment(Long vehicleId, Long newDriverId) {
+        Vehicle vehicle = getVehicle(vehicleId);
+        if (vehicle.getStatus() != VehicleStatus.AVAILABLE) {
+            throw new IllegalStateException("Vehicle is not available for assignment");
+        }
+        
+        CompanyUser newDriver = companyUserRepository.findById(newDriverId)
                .orElseThrow(() -> new EntityNotFoundException("Driver not found"));
        
        if (newDriver.getRole() != CompanyUserRole.DRIVER) {
@@ -407,46 +427,37 @@ public class VehicleService {
            assignmentRepository.save(assignment);
        }
        
-       // End new driver's current assignment if it exists (true swap)
-       if (!newDriverAssignments.isEmpty()) {
-           VehicleAssignment newDriverAssignment = newDriverAssignments.get(0);
-           newDriverAssignment.setUnassignedDate(LocalDateTime.now());
-           newDriverAssignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.COMPLETED);
-           assignmentRepository.save(newDriverAssignment);
-           
-           // Set the old vehicle to AVAILABLE
-           Vehicle oldVehicle = newDriverAssignment.getVehicle();
-           oldVehicle.setStatus(VehicleStatus.AVAILABLE);
-           vehicleRepository.save(oldVehicle);
-       }
-       
-       // Create new assignment
-       VehicleAssignment newAssignment = new VehicleAssignment();
-       newAssignment.setVehicle(vehicle);
-       newAssignment.setDriver(newDriver);
-       newAssignment.setAssignedDate(LocalDateTime.now());
-       newAssignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.ACTIVE);
-       
-       if (currentAssignment.isPresent()) {
-           if (!newDriverAssignments.isEmpty()) {
-               newAssignment.setNotes("Full swap: Driver " + newDriverId + " from vehicle " + 
-                   newDriverAssignments.get(0).getVehicle().getId() + " to vehicle " + vehicleId + 
-                   ", Driver " + currentAssignment.get().getDriver().getId() + " unassigned");
-           } else {
-               newAssignment.setNotes("Assignment swapped from driver ID: " + currentAssignment.get().getDriver().getId());
-           }
-       } else {
-           if (!newDriverAssignments.isEmpty()) {
-               newAssignment.setNotes("Driver " + newDriverId + " swapped from vehicle " + 
-                   newDriverAssignments.get(0).getVehicle().getId() + " to vehicle " + vehicleId);
-           } else {
-               newAssignment.setNotes("New assignment created via swap");
-           }
-       }
-       
-// Mark vehicle as OCCUPIED now that a driver is assigned.
-        vehicle.setStatus(VehicleStatus.OCCUPIED);
-        vehicleRepository.save(vehicle);
+// End new driver's current assignment if it exists (true swap)
+        if (!newDriverAssignments.isEmpty()) {
+            VehicleAssignment newDriverAssignment = newDriverAssignments.get(0);
+            newDriverAssignment.setUnassignedDate(LocalDateTime.now());
+            newDriverAssignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.COMPLETED);
+            assignmentRepository.save(newDriverAssignment);
+        }
+        
+        // Create new assignment
+        VehicleAssignment newAssignment = new VehicleAssignment();
+        newAssignment.setVehicle(vehicle);
+        newAssignment.setDriver(newDriver);
+        newAssignment.setAssignedDate(LocalDateTime.now());
+        newAssignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.ACTIVE);
+        
+        if (currentAssignment.isPresent()) {
+            if (!newDriverAssignments.isEmpty()) {
+                newAssignment.setNotes("Full swap: Driver " + newDriverId + " from vehicle " + 
+                    newDriverAssignments.get(0).getVehicle().getId() + " to vehicle " + vehicleId + 
+                    ", Driver " + currentAssignment.get().getDriver().getId() + " unassigned");
+            } else {
+                newAssignment.setNotes("Assignment swapped from driver ID: " + currentAssignment.get().getDriver().getId());
+            }
+        } else {
+            if (!newDriverAssignments.isEmpty()) {
+                newAssignment.setNotes("Driver " + newDriverId + " swapped from vehicle " + 
+                    newDriverAssignments.get(0).getVehicle().getId() + " to vehicle " + vehicleId);
+            } else {
+                newAssignment.setNotes("New assignment created via swap");
+            }
+        }
 
         VehicleAssignmentResponseDto response = VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(newAssignment));
         syncAfterAssignment(vehicle);
@@ -484,46 +495,40 @@ public class VehicleService {
        // Find new driver's current assignment (if any)
        List<VehicleAssignment> newDriverAssignments = assignmentRepository.findActiveAssignmentsByDriver(newDriverId);
        
-       VehicleAssignment currentAssignment = currentDriverAssignments.get(0);
-       Vehicle vehicle = currentAssignment.getVehicle();
-       
-       // End current assignment
-       currentAssignment.setUnassignedDate(LocalDateTime.now());
-       currentAssignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.COMPLETED);
-       assignmentRepository.save(currentAssignment);
-       
-       // End new driver's current assignment if it exists (true swap)
-       if (!newDriverAssignments.isEmpty()) {
-           VehicleAssignment newDriverAssignment = newDriverAssignments.get(0);
-           newDriverAssignment.setUnassignedDate(LocalDateTime.now());
-           newDriverAssignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.COMPLETED);
-           assignmentRepository.save(newDriverAssignment);
-           
-           // Set the old vehicle to AVAILABLE
-           Vehicle oldVehicle = newDriverAssignment.getVehicle();
-           oldVehicle.setStatus(VehicleStatus.AVAILABLE);
-           vehicleRepository.save(oldVehicle);
-       }
-       
-       // Create new assignment
-       VehicleAssignment newAssignment = new VehicleAssignment();
-       newAssignment.setVehicle(vehicle);
-       newAssignment.setDriver(newDriver);
-       newAssignment.setAssignedDate(LocalDateTime.now());
-       newAssignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.ACTIVE);
-       
-       if (!newDriverAssignments.isEmpty()) {
-           newAssignment.setNotes("Full driver swap: Driver " + newDriverId + " from vehicle " + 
-               newDriverAssignments.get(0).getVehicle().getId() + " to vehicle " + vehicle.getId() + 
-               ", Driver " + currentDriverId + " unassigned");
-       } else {
-           newAssignment.setNotes("Driver swapped from driver ID: " + currentDriverId);
-       }
-       
-// Mark vehicle as OCCUPIED now that a driver is assigned.
-        vehicle.setStatus(VehicleStatus.OCCUPIED);
-        vehicleRepository.save(vehicle);
-
+VehicleAssignment currentAssignment = currentDriverAssignments.get(0);
+        Vehicle vehicle = currentAssignment.getVehicle();
+        if (vehicle.getStatus() != VehicleStatus.AVAILABLE) {
+            throw new IllegalStateException("Vehicle is not available for assignment");
+        }
+        
+        // End current assignment
+        currentAssignment.setUnassignedDate(LocalDateTime.now());
+        currentAssignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.COMPLETED);
+        assignmentRepository.save(currentAssignment);
+        
+        // End new driver's current assignment if it exists (true swap)
+        if (!newDriverAssignments.isEmpty()) {
+            VehicleAssignment newDriverAssignment = newDriverAssignments.get(0);
+            newDriverAssignment.setUnassignedDate(LocalDateTime.now());
+            newDriverAssignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.COMPLETED);
+            assignmentRepository.save(newDriverAssignment);
+        }
+        
+        // Create new assignment
+        VehicleAssignment newAssignment = new VehicleAssignment();
+        newAssignment.setVehicle(vehicle);
+        newAssignment.setDriver(newDriver);
+        newAssignment.setAssignedDate(LocalDateTime.now());
+        newAssignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.ACTIVE);
+        
+        if (!newDriverAssignments.isEmpty()) {
+            newAssignment.setNotes("Full driver swap: Driver " + newDriverId + " from vehicle " + 
+                newDriverAssignments.get(0).getVehicle().getId() + " to vehicle " + vehicle.getId() + 
+                ", Driver " + currentDriverId + " unassigned");
+        } else {
+            newAssignment.setNotes("Driver swapped from driver ID: " + currentDriverId);
+        }
+        
         VehicleAssignmentResponseDto response = VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(newAssignment));
         syncAfterAssignment(vehicle);
         eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(getVehicle(vehicle.getId())));

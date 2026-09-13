@@ -57,6 +57,54 @@ func NewTripService(tripRepo repository.TripRepository, routeRepo repository.Rou
 	return service
 }
 
+// setVehicleOccupied asynchronously flags the vehicle OCCUPIED (occupied=true)
+// or AVAILABLE (occupied=false) in cavgomain via the internal /status endpoint.
+// Fire-and-forget: trip flows must never fail because the status push failed.
+func (s *TripService) setVehicleOccupied(vehicleID int64, occupied bool) {
+	status := "AVAILABLE"
+	if occupied {
+		status = "OCCUPIED"
+	}
+	url := fmt.Sprintf("%s%d/status?status=%s", s.vehicleServiceURL, vehicleID, status)
+	go func() {
+		req, err := http.NewRequest(http.MethodPut, url, nil)
+		if err != nil {
+			log.Printf("[vehicleStatus] failed to build request for vehicle %d -> %s: %v", vehicleID, status, err)
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Printf("[vehicleStatus] failed to set vehicle %d -> %s: %v", vehicleID, status, err)
+			return
+		}
+		defer resp.Body.Close()
+		log.Printf("[vehicleStatus] vehicle %d -> %s (HTTP %d)", vehicleID, status, resp.StatusCode)
+	}()
+}
+
+// syncVehicleOccupancy recomputes whether the vehicle has any started trip
+// (excluding excludeTripID) and pushes the matching operational status to
+// cavgomain: OCCUPIED while at least one IN_PROGRESS trip remains, AVAILABLE
+// otherwise. SCHEDULED (not yet started) trips do not affect vehicle state.
+func (s *TripService) syncVehicleOccupancy(vehicleID int64, excludeTripID int64) {
+	occupied := false
+	trips, err := s.tripRepo.GetTripsByVehicleID(vehicleID)
+	if err != nil {
+		log.Printf("[vehicleStatus] failed to load trips for vehicle %d: %v", vehicleID, err)
+		return
+	}
+	for _, t := range trips {
+		if t.ID == excludeTripID {
+			continue
+		}
+		if t.Status == "IN_PROGRESS" {
+			occupied = true
+			break
+		}
+	}
+	s.setVehicleOccupied(vehicleID, occupied)
+}
+
 // SetTripExchange sets the fanout exchange name for publishing trip events
 func (s *TripService) SetTripExchange(exchangeName string) {
 	s.tripExchange = exchangeName
@@ -543,6 +591,13 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 		}
 	}
 
+	// Trip status changed — recompute vehicle occupancy: only started
+	// (IN_PROGRESS) trips keep a vehicle OCCUPIED; scheduled trips do not
+	// affect vehicle state.
+	if _, ok := updates["status"]; ok {
+		s.syncVehicleOccupancy(updatedTrip.VehicleID, updatedTrip.ID)
+	}
+
 	s.syncTrip(updatedTrip)
 
 	return updatedTrip, nil
@@ -609,6 +664,9 @@ func (s *TripService) StartTrip(id int64) (*models.Trip, error) {
 	}
 
 	s.syncTrip(startedTrip)
+	// Trip started — occupy the vehicle until the trip is completed,
+	// cancelled or deleted.
+	s.setVehicleOccupied(startedTrip.VehicleID, true)
 
 	return startedTrip, nil
 }
@@ -674,6 +732,9 @@ func (s *TripService) CompleteTrip(id int64) (*models.Trip, error) {
 			log.Printf("[AutoReturn] Failed to create return trip from completed trip %d: %v", completedTrip.ID, err)
 		}
 	}
+
+	// Recompute vehicle occupancy after completion (only started trips occupy).
+	s.syncVehicleOccupancy(completedTrip.VehicleID, completedTrip.ID)
 
 	s.syncTrip(completedTrip)
 
@@ -1132,6 +1193,11 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 		}
 	}
 
+	// Recompute vehicle occupancy when this Naviga update changed the trip status.
+	if _, ok := updates["status"]; ok {
+		s.syncVehicleOccupancy(updatedTrip.VehicleID, updatedTrip.ID)
+	}
+
 	s.syncTrip(updatedTrip)
 
 	return updatedTrip, nil
@@ -1240,6 +1306,9 @@ func (s *TripService) DeleteTrip(id int64) error {
 				s.poster.PostTripUpdate(companyID, updatedTrip)
 			}
 		}
+
+		// Recompute vehicle occupancy after cancellation.
+		s.syncVehicleOccupancy(updatedTrip.VehicleID, updatedTrip.ID)
 
 		s.syncTrip(updatedTrip)
 
@@ -1463,6 +1532,11 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 		if _, err := s.createAutoReturnTripFromCompleted(updatedTrip); err != nil {
 			log.Printf("[AutoReturn] Failed to create return trip from MQTT completion for trip %d: %v", updatedTrip.ID, err)
 		}
+	}
+
+	// Recompute vehicle occupancy when the status changed.
+	if _, ok := updates["status"]; ok {
+		s.syncVehicleOccupancy(updatedTrip.VehicleID, updatedTrip.ID)
 	}
 
 	s.syncTrip(updatedTrip)

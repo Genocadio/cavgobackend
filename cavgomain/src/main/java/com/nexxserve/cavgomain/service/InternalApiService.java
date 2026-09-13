@@ -37,6 +37,7 @@ public class InternalApiService {
     private final VehicleLocationRepository vehicleLocationRepository;
     private final VehicleAssignmentRepository vehicleAssignmentRepository;
     private final CompanyRepository companyRepository;
+    private final VehicleService vehicleService;
 
     public List<InternalVehicleResponseDto> getAllVehicles() {
         return vehicleRepository.findAllWithActiveAssignments().stream()
@@ -60,6 +61,20 @@ public class InternalApiService {
         Vehicle vehicle = vehicleRepository.findByIdWithActiveAssignment(id)
                 .orElseThrow(() -> new EntityNotFoundException("Vehicle not found with id: " + id));
         return VehicleResponseDto.fromEntity(vehicle);
+    }
+
+    /**
+     * Sets a vehicle's operational status. The trip service (cavgotrips) calls
+     * this to flag a vehicle OCCUPIED while it has an active trip and back to
+     * AVAILABLE once the trip is completed, cancelled or deleted. A vehicle with
+     * a non-AVAILABLE status is not assignable to a driver.
+     *
+     * @param id     vehicle id
+     * @param status one of {@link VehicleStatus} (AVAILABLE, OCCUPIED, MAINTENANCE, OUT_OF_SERVICE)
+     */
+    @Transactional
+    public VehicleResponseDto setVehicleStatus(Long id, String status) {
+        return vehicleService.updateVehicleStatus(id, status);
     }
 
     public List<InternalVehicleResponseDto> getVehiclesByCompany(Long companyId) {
