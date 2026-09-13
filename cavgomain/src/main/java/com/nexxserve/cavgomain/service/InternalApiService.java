@@ -9,6 +9,7 @@ import com.nexxserve.cavgomain.entity.VehicleAssignment;
 import com.nexxserve.cavgomain.entity.VehicleLocation;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.VehicleStatus;
+import com.nexxserve.cavgomain.messaging.EventMessagePublisher;
 import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
@@ -37,7 +38,7 @@ public class InternalApiService {
     private final VehicleLocationRepository vehicleLocationRepository;
     private final VehicleAssignmentRepository vehicleAssignmentRepository;
     private final CompanyRepository companyRepository;
-    private final VehicleService vehicleService;
+    private final EventMessagePublisher eventMessagePublisher;
 
     public List<InternalVehicleResponseDto> getAllVehicles() {
         return vehicleRepository.findAllWithActiveAssignments().stream()
@@ -69,12 +70,36 @@ public class InternalApiService {
      * AVAILABLE once the trip is completed, cancelled or deleted. A vehicle with
      * a non-AVAILABLE status is not assignable to a driver.
      *
+     * <p>Implemented against repositories directly (no VehicleService dependency)
+     * to avoid a Spring bean cycle: VehicleService -> AggregatorSyncService ->
+     * InternalApiService.
+     *
      * @param id     vehicle id
      * @param status one of {@link VehicleStatus} (AVAILABLE, OCCUPIED, MAINTENANCE, OUT_OF_SERVICE)
      */
     @Transactional
     public VehicleResponseDto setVehicleStatus(Long id, String status) {
-        return vehicleService.updateVehicleStatus(id, status);
+        if (id == null) {
+            throw new IllegalArgumentException("Vehicle id cannot be null");
+        }
+        Vehicle vehicle = vehicleRepository.findByIdWithActiveAssignment(id)
+                .orElseThrow(() -> new EntityNotFoundException("Vehicle not found with id: " + id));
+
+        VehicleStatus newStatus;
+        try {
+            newStatus = VehicleStatus.valueOf(status == null ? "" : status.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid vehicle status: " + status, e);
+        }
+
+        if (vehicle.getStatus() == newStatus) {
+            return VehicleResponseDto.fromEntity(vehicle);
+        }
+
+        vehicle.setStatus(newStatus);
+        Vehicle saved = vehicleRepository.save(vehicle);
+        eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(saved));
+        return VehicleResponseDto.fromEntity(saved);
     }
 
     public List<InternalVehicleResponseDto> getVehiclesByCompany(Long companyId) {
