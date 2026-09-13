@@ -105,6 +105,20 @@ func (s *TripService) syncVehicleOccupancy(vehicleID int64, excludeTripID int64)
 	s.setVehicleOccupied(vehicleID, occupied)
 }
 
+// syncOccupancyFromTransition keeps the vehicle's operational status in sync
+// with a trip status transition. Only started (IN_PROGRESS) trips occupy a
+// vehicle: entering IN_PROGRESS occupies it, and leaving IN_PROGRESS
+// (completed/cancelled/deleted) releases it. A scheduled trip that is simply
+// created or cancelled never changes the vehicle status.
+func (s *TripService) syncOccupancyFromTransition(oldStatus, newStatus string, vehicleID, tripID int64) {
+	switch {
+	case newStatus == "IN_PROGRESS":
+		s.setVehicleOccupied(vehicleID, true)
+	case oldStatus == "IN_PROGRESS":
+		s.syncVehicleOccupancy(vehicleID, tripID)
+	}
+}
+
 // SetTripExchange sets the fanout exchange name for publishing trip events
 func (s *TripService) SetTripExchange(exchangeName string) {
 	s.tripExchange = exchangeName
@@ -591,11 +605,12 @@ func (s *TripService) UpdateTripProgress(id int64, update *models.TripProgressUp
 		}
 	}
 
-	// Trip status changed — recompute vehicle occupancy: only started
-	// (IN_PROGRESS) trips keep a vehicle OCCUPIED; scheduled trips do not
-	// affect vehicle state.
-	if _, ok := updates["status"]; ok {
-		s.syncVehicleOccupancy(updatedTrip.VehicleID, updatedTrip.ID)
+	// Trip status changed — sync vehicle occupancy. Only started (IN_PROGRESS)
+	// trips occupy/release a vehicle; scheduled trips do not affect it.
+	if statusVal, ok := updates["status"]; ok {
+		if statusStr, ok2 := statusVal.(string); ok2 {
+			s.syncOccupancyFromTransition(trip.Status, statusStr, updatedTrip.VehicleID, updatedTrip.ID)
+		}
 	}
 
 	s.syncTrip(updatedTrip)
@@ -1193,9 +1208,12 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 		}
 	}
 
-	// Recompute vehicle occupancy when this Naviga update changed the trip status.
-	if _, ok := updates["status"]; ok {
-		s.syncVehicleOccupancy(updatedTrip.VehicleID, updatedTrip.ID)
+	// Sync vehicle occupancy on Naviga status transitions (only started trips
+	// occupy/release the vehicle).
+	if statusVal, ok := updates["status"]; ok {
+		if statusStr, ok2 := statusVal.(string); ok2 {
+			s.syncOccupancyFromTransition(trip.Status, statusStr, updatedTrip.VehicleID, updatedTrip.ID)
+		}
 	}
 
 	s.syncTrip(updatedTrip)
@@ -1307,8 +1325,11 @@ func (s *TripService) DeleteTrip(id int64) error {
 			}
 		}
 
-		// Recompute vehicle occupancy after cancellation.
-		s.syncVehicleOccupancy(updatedTrip.VehicleID, updatedTrip.ID)
+		// Vehicle is released only if the cancelled/deleted trip was actually
+		// ongoing (IN_PROGRESS). Cancelling a scheduled trip has no effect.
+		if trip.Status == "IN_PROGRESS" {
+			s.syncVehicleOccupancy(updatedTrip.VehicleID, updatedTrip.ID)
+		}
 
 		s.syncTrip(updatedTrip)
 
@@ -1534,9 +1555,12 @@ func (s *TripService) UpdateTripFromMQTT(mqttTrip models.Trip) (*models.Trip, er
 		}
 	}
 
-	// Recompute vehicle occupancy when the status changed.
-	if _, ok := updates["status"]; ok {
-		s.syncVehicleOccupancy(updatedTrip.VehicleID, updatedTrip.ID)
+	// Sync vehicle occupancy on MQTT status transitions (only started trips
+	// occupy/release the vehicle).
+	if statusVal, ok := updates["status"]; ok {
+		if statusStr, ok2 := statusVal.(string); ok2 {
+			s.syncOccupancyFromTransition(existingTrip.Status, statusStr, updatedTrip.VehicleID, updatedTrip.ID)
+		}
 	}
 
 	s.syncTrip(updatedTrip)
