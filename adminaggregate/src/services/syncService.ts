@@ -15,6 +15,7 @@ import { updateTripMetrics } from "./tripMetricsService";
 import * as locationRepository from "../repositories/locations";
 
 let locationPollingTimer: NodeJS.Timeout | null = null;
+let dataPollingTimer: NodeJS.Timeout | null = null;
 
 interface PendingAssignment {
   driverId: string | null;
@@ -241,6 +242,31 @@ export function startLocationPolling(): () => void {
       console.log("[LOCATION POLLING] Stopping location polling service...");
       clearInterval(locationPollingTimer);
       locationPollingTimer = null;
+    }
+  };
+}
+
+/**
+ * Periodically re-pulls companies, vehicles, drivers and driver->car
+ * assignments from cavgomain. This is the self-healing fallback for anything
+ * missed by RabbitMQ events or the immediate REST push, since those only ever
+ * happen on an explicit mutation (e.g. profile reassigns a vehicle to a driver).
+ */
+export function startDataPolling(): () => void {
+  console.log("[DATA POLLING] Starting vehicle/driver/assignment polling service (every 15 minutes)...");
+
+  dataPollingTimer = setInterval(() => {
+    console.log("[DATA POLLING] Polling vehicles/drivers/assignments...");
+    void syncAllData().catch((error) => {
+      console.error("[DATA POLLING] Error during data sync:", error);
+    });
+  }, 15 * 60 * 1000);
+
+  return () => {
+    if (dataPollingTimer) {
+      console.log("[DATA POLLING] Stopping vehicle/driver/assignment polling service...");
+      clearInterval(dataPollingTimer);
+      dataPollingTimer = null;
     }
   };
 }

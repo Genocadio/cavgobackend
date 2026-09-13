@@ -9,6 +9,7 @@ import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.entity.Office;
 import com.nexxserve.cavgomain.entity.VehicleAssignment;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
+import com.nexxserve.cavgomain.messaging.EventMessagePublisher;
 import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.OfficeRepository;
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +35,7 @@ public class CompanyUserService {
     private final OfficeRepository officeRepository;
     private final VehicleAssignmentRepository assignmentRepository;
     private final AggregatorSyncService aggregatorSyncService;
+    private final EventMessagePublisher eventMessagePublisher;
 
     public CompanyUserResponseDto createCompanyUser(CompanyUserRequestDto user) {
         Company company = companyRepository.findByCompanyCode(user.getCompanyCode())
@@ -66,12 +69,17 @@ public class CompanyUserService {
         } catch (Exception e) {
             System.err.println("Error triggering aggregator sync after company user creation: " + e.getMessage());
         }
-        
+
+        if (saved.getRole() == CompanyUserRole.DRIVER) {
+            eventMessagePublisher.publishDriverEvent("CREATE", buildDriverEventDto(saved));
+        }
+
         return dto;
     }
 
     public CompanyUserResponseDto updateCompanyUser(Long id, CompanyUserRequestDto user) {
         CompanyUser existingUser = companyUserRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("Company not found with id: " + id));
+        CompanyUserRole oldRole = existingUser.getRole();
         existingUser.setFirstName(user.getFirstName());
         existingUser.setLastName(user.getLastName());
         existingUser.setEmail(user.getEmail());
@@ -93,17 +101,14 @@ public class CompanyUserService {
         
         CompanyUser saved = companyUserRepository.save(existingUser);
         CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(saved);
-        
+
         if (saved.getRole() == CompanyUserRole.DRIVER) {
-            List<VehicleAssignment> activeAssignments = assignmentRepository.findActiveAssignmentsByDriver(saved.getId());
-            if (!activeAssignments.isEmpty()) {
-                VehicleAssignment activeAssignment = activeAssignments.get(0);
-                dto.setVehicle(VehicleResponseDto.fromEntity(activeAssignment.getVehicle(), null));
-            } else {
-                dto.setVehicle(null);
-            }
+            eventMessagePublisher.publishDriverEvent("UPDATE", buildDriverEventDto(saved));
+        } else if (oldRole == CompanyUserRole.DRIVER) {
+            // Demoted from DRIVER - tell consumers to drop the driver
+            eventMessagePublisher.publishDriverEvent("DELETE", Map.of("driverId", saved.getId()));
         }
-        
+
         return dto;
     }
 
@@ -243,7 +248,29 @@ public class CompanyUserService {
     }
 
     public void deleteCompanyUser(Long id) {
+        CompanyUser user = companyUserRepository.findById(id).orElse(null);
         companyUserRepository.deleteById(id);
+        if (user != null && user.getRole() == CompanyUserRole.DRIVER) {
+            eventMessagePublisher.publishDriverEvent("DELETE", Map.of("driverId", user.getId()));
+        }
+    }
+
+    /**
+     * Builds the {@code driver.events} payload: the company user DTO with its
+     * currently assigned vehicle embedded (or null when unassigned).
+     */
+    private CompanyUserResponseDto buildDriverEventDto(CompanyUser user) {
+        CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(user);
+        if (user.getRole() == CompanyUserRole.DRIVER) {
+            List<VehicleAssignment> activeAssignments = assignmentRepository.findActiveAssignmentsByDriver(user.getId());
+            if (!activeAssignments.isEmpty()) {
+                VehicleAssignment activeAssignment = activeAssignments.get(0);
+                dto.setVehicle(VehicleResponseDto.fromEntity(activeAssignment.getVehicle(), null));
+            } else {
+                dto.setVehicle(null);
+            }
+        }
+        return dto;
     }
 
     private String normalizeQueryFilter(String value) {

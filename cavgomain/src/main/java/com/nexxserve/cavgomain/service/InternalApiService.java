@@ -46,13 +46,20 @@ public class InternalApiService {
                 .collect(Collectors.toList());
     }
 
-    public InternalVehicleResponseDto getVehicleById(Long id) {
+    /**
+     * Returns the public {@link VehicleResponseDto} shape (licensePlate, companyName,
+     * driver, status) for a single vehicle. This is the shape the trip service
+     * (cavgotrips) decodes when it snapshots the vehicle + driver at trip creation,
+     * and matches the {@code vehicle.events} RabbitMQ payloads.
+     */
+    @Transactional(readOnly = true)
+    public VehicleResponseDto getVehicleById(Long id) {
         if (id == null) {
             throw new IllegalArgumentException("Vehicle id cannot be null");
         }
         Vehicle vehicle = vehicleRepository.findByIdWithActiveAssignment(id)
                 .orElseThrow(() -> new EntityNotFoundException("Vehicle not found with id: " + id));
-        return toInternalVehicleDto(vehicle);
+        return VehicleResponseDto.fromEntity(vehicle);
     }
 
     public List<InternalVehicleResponseDto> getVehiclesByCompany(Long companyId) {

@@ -79,6 +79,9 @@ export async function main(): Promise<void> {
     stopTripPolling = tripPolling.startTripPolling();
   }
 
+  // 1.6. Periodic vehicle/driver/assignment refresh (self-healing fallback)
+  syncService.startDataPolling();
+
   // 2. Setup RabbitMQ subscriptions
   try {
     await rabbitmq.connectRabbitMQ();

@@ -22,6 +22,10 @@ public class RabbitMQConfig {
     public static final String VEHICLE_SETTINGS_EXCHANGE = "vehicle.settings.exchange";
     public static final String VEHICLE_SETTINGS_ROUTING_KEY_PREFIX = "vehicle.settings.";
 
+    // Exchanges published to downstream consumers (adminaggregate)
+    public static final String VEHICLE_EVENTS_EXCHANGE = "vehicle.events";
+    public static final String DRIVER_EVENTS_EXCHANGE = "driver.events";
+
     // Bean for vehicle location fanout exchange
     @Bean
     public FanoutExchange vehicleLocationExchange() {
@@ -45,6 +49,17 @@ public class RabbitMQConfig {
     @Bean
     public TopicExchange vehicleSettingsExchange() {
         return new TopicExchange(VEHICLE_SETTINGS_EXCHANGE);
+    }
+
+    // Durable fanout exchanges for vehicle/driver events (consumed by adminaggregate)
+    @Bean
+    public FanoutExchange vehicleEventsExchange() {
+        return new FanoutExchange(VEHICLE_EVENTS_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public FanoutExchange driverEventsExchange() {
+        return new FanoutExchange(DRIVER_EVENTS_EXCHANGE, true, false);
     }
 
     // Message converter for JSON

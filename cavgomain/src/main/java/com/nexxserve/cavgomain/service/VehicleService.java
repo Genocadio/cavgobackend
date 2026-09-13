@@ -11,6 +11,7 @@ import com.nexxserve.cavgomain.dto.response.VehicleSettingsResponseDto;
 import com.nexxserve.cavgomain.entity.*;
 import com.nexxserve.cavgomain.enums.VehicleStatus;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
+import com.nexxserve.cavgomain.messaging.EventMessagePublisher;
 import com.nexxserve.cavgomain.messaging.VehicleSettingsPublisher;
 import com.nexxserve.cavgomain.repository.*;
 import jakarta.persistence.EntityNotFoundException;
@@ -25,6 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -41,6 +43,7 @@ public class VehicleService {
     private final VehicleLocationRepository locationRepository;
     private final VehicleSettingsPublisher settingsPublisher;
     private final AggregatorSyncService aggregatorSyncService;
+    private final EventMessagePublisher eventMessagePublisher;
 
 
     // CRUD methods
@@ -99,7 +102,10 @@ public class VehicleService {
             // Using System.err as fallback if logger not available
             System.err.println("Error triggering aggregator sync after vehicle creation: " + e.getMessage());
         }
-        
+
+        // Broadcast vehicle CREATE so consumers (adminaggregate) pick it up in real time
+        eventMessagePublisher.publishVehicleEvent("CREATE", VehicleResponseDto.fromEntity(saved));
+
         return new VehicleCreateResult(VehicleResponseDto.fromEntity(saved), initialPassword);
     }
 
@@ -203,11 +209,14 @@ public class VehicleService {
         vehicle.setLicensePlate(updated.getLicensePlate());
         vehicle.setVehicleType(updated.getVehicleType());
         vehicle.setStatus(updated.getStatus());
-        return VehicleResponseDto.fromEntity(vehicleRepository.save(vehicle));
+        Vehicle updatedVehicle = vehicleRepository.save(vehicle);
+        eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(updatedVehicle));
+        return VehicleResponseDto.fromEntity(updatedVehicle);
     }
 
     public void deleteVehicle(Long id) {
         vehicleRepository.deleteById(id);
+        eventMessagePublisher.publishVehicleEvent("DELETE", Map.of("vehicleId", id));
     }
 
     // Assign vehicle to driver
@@ -251,7 +260,10 @@ public class VehicleService {
        vehicle.setStatus(VehicleStatus.OCCUPIED);
        vehicleRepository.save(vehicle);
 
-       return VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(assignment));
+       VehicleAssignmentResponseDto response = VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(assignment));
+       eventMessagePublisher.publishVehicleEvent("DRIVER_ASSIGNMENT", Map.of("vehicleId", vehicleId, "driverId", driverId));
+       syncAfterAssignment(vehicle);
+       return response;
    }
 
    @Transactional
@@ -291,7 +303,11 @@ public class VehicleService {
        vehicle.setStatus(VehicleStatus.OCCUPIED);
        vehicleRepository.save(vehicle);
 
-       return VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(assignment));
+       VehicleAssignmentResponseDto response = VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(assignment));
+       eventMessagePublisher.publishVehicleEvent("DRIVER_ASSIGNMENT",
+               Map.of("vehicleId", assignmentDto.getVehicleId(), "driverId", assignmentDto.getDriverId()));
+       syncAfterAssignment(vehicle);
+       return response;
    }
 
    public VehicleResponseDto loginVehicle(String companyCode, String licensePlate, String password, String newPubKey) {
@@ -355,12 +371,16 @@ public class VehicleService {
        assignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.COMPLETED);
        assignmentRepository.save(assignment);
        
-       // Set vehicle status to AVAILABLE
-       vehicle.setStatus(VehicleStatus.AVAILABLE);
-       vehicleRepository.save(vehicle);
-       
-       return VehicleAssignmentResponseDto.fromEntity(assignment);
-   }
+// Set vehicle status to AVAILABLE
+        vehicle.setStatus(VehicleStatus.AVAILABLE);
+        vehicleRepository.save(vehicle);
+
+        VehicleAssignmentResponseDto response = VehicleAssignmentResponseDto.fromEntity(assignment);
+        // Broadcast post-state (no driver) so consumers clear the assignment
+        eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(vehicle));
+        syncAfterAssignment(vehicle);
+        return response;
+    }
 
    @Transactional
    public VehicleAssignmentResponseDto swapAssignment(Long vehicleId, Long newDriverId) {
@@ -424,15 +444,23 @@ public class VehicleService {
            }
        }
        
-       // Mark vehicle as OCCUPIED now that a driver is assigned.
-       vehicle.setStatus(VehicleStatus.OCCUPIED);
-       vehicleRepository.save(vehicle);
-       
-       return VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(newAssignment));
-   }
+// Mark vehicle as OCCUPIED now that a driver is assigned.
+        vehicle.setStatus(VehicleStatus.OCCUPIED);
+        vehicleRepository.save(vehicle);
 
-   @Transactional
-   public VehicleAssignmentResponseDto swapDriverAssignment(Long currentDriverId, Long newDriverId) {
+        VehicleAssignmentResponseDto response = VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(newAssignment));
+        syncAfterAssignment(vehicle);
+        eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(getVehicle(vehicleId)));
+        if (!newDriverAssignments.isEmpty()) {
+            Vehicle oldVehicle = newDriverAssignments.get(0).getVehicle();
+            eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(getVehicle(oldVehicle.getId())));
+            syncAfterAssignment(oldVehicle);
+        }
+        return response;
+    }
+
+    @Transactional
+    public VehicleAssignmentResponseDto swapDriverAssignment(Long currentDriverId, Long newDriverId) {
        CompanyUser currentDriver = companyUserRepository.findById(currentDriverId)
                .orElseThrow(() -> new EntityNotFoundException("Current driver not found"));
        
@@ -492,11 +520,32 @@ public class VehicleService {
            newAssignment.setNotes("Driver swapped from driver ID: " + currentDriverId);
        }
        
-       // Mark vehicle as OCCUPIED now that a driver is assigned.
-       vehicle.setStatus(VehicleStatus.OCCUPIED);
-       vehicleRepository.save(vehicle);
-       
-       return VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(newAssignment));
+// Mark vehicle as OCCUPIED now that a driver is assigned.
+        vehicle.setStatus(VehicleStatus.OCCUPIED);
+        vehicleRepository.save(vehicle);
+
+        VehicleAssignmentResponseDto response = VehicleAssignmentResponseDto.fromEntity(assignmentRepository.save(newAssignment));
+        syncAfterAssignment(vehicle);
+        eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(getVehicle(vehicle.getId())));
+        if (!newDriverAssignments.isEmpty()) {
+            Vehicle oldVehicle = newDriverAssignments.get(0).getVehicle();
+            eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(getVehicle(oldVehicle.getId())));
+            syncAfterAssignment(oldVehicle);
+        }
+        return response;
+    }
+
+   /**
+    * Pushes this company's vehicles + workers to the aggregator (adminaggregate)
+    * so assignment changes are reflected over REST even if the RabbitMQ
+    * subscription is unavailable. Fire-and-forget.
+    */
+   private void syncAfterAssignment(Vehicle vehicle) {
+       try {
+           aggregatorSyncService.syncCompanyDataImmediately(vehicle.getCompany().getId());
+       } catch (Exception e) {
+           System.err.println("Error triggering aggregator sync after assignment: " + e.getMessage());
+       }
    }
 
    // Vehicle Settings Methods

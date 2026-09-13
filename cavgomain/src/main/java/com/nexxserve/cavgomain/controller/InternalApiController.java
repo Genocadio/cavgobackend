@@ -46,7 +46,7 @@ public class InternalApiController {
     }
 
     @GetMapping("/vehicles/{id}")
-    public ResponseEntity<InternalVehicleResponseDto> getVehicleById(@PathVariable Long id) {
+    public ResponseEntity<VehicleResponseDto> getVehicleById(@PathVariable Long id) {
         return ResponseEntity.ok(internalApiService.getVehicleById(id));
     }
 

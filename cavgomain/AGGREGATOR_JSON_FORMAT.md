@@ -76,7 +76,7 @@ GET /internal/api/vehicles
 
 **Endpoint:** `GET /internal/api/vehicles/{id}`
 
-**Description:** Retrieves a single vehicle by its ID.
+**Description:** Retrieves a single vehicle by its ID. Returns the **public `VehicleResponseDto` shape** (contains `licensePlate`, `companyName`, `driver`, `status`). This is the snapshot the trip service (cavgotrips) decodes when creating a trip and matches the `vehicle.events` RabbitMQ payloads.
 
 **Path Parameters:**
 - `id` (Long, required) - Vehicle ID
@@ -91,26 +91,44 @@ GET /internal/api/vehicles/1
 **Example Response:**
 ```json
 {
-  "id": "1",
-  "companyId": "1",
-  "companyCode": "RWA",
-  "plate": "RAC 123A",
-  "model": "Corolla",
+  "id": 1,
+  "companyId": 1,
+  "companyName": "ABC Transport",
   "make": "Toyota",
+  "model": "Corolla",
   "capacity": 4,
-  "connectionStatus": "ONLINE",
-  "operationalStatus": "AVAILABLE",
-  "currentLocation": {
-    "latitude": -1.9441,
-    "longitude": 30.0619,
-    "address": null,
-    "timestamp": "2024-01-15T10:30:00.000Z",
-    "bearing": 45.5,
-    "speed": 0.0
+  "licensePlate": "RAC 123A",
+  "vehicleType": "SEDAN",
+  "status": "OCCUPIED",
+  "createdAt": "2024-01-15T10:30:00",
+  "updatedAt": "2024-01-15T10:30:00",
+  "driver": {
+    "id": 456,
+    "companyId": 1,
+    "companyName": "ABC Transport",
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john.doe@example.com",
+    "phone": "+250700000000",
+    "status": "ACTIVE",
+    "dateOfBirth": "1990-01-01",
+    "address": "Kigali",
+    "role": "DRIVER",
+    "licenseNumber": "DL123456",
+    "licenseExpiry": "2025-12-31",
+    "createdAt": "2024-01-01T09:00:00",
+    "updatedAt": "2024-01-01T09:00:00",
+    "vehicle": null,
+    "office": null
   },
-  "lastUpdated": "2024-01-15T10:30:00.000Z"
+  "initialPassword": null,
+  "lastLocation": null,
+  "isOnline": true,
+  "lastOnlineAt": "2024-01-15T10:30:00"
 }
 ```
+
+**Note:** The distinct internal shape (`plate`, `companyCode`, `operationalStatus`, `currentLocation`) remains available via `GET /internal/api/vehicles` and `GET /internal/api/vehicles/company/{companyId}` (used for push sync to the aggregator).
 
 **Error Responses:**
 - `404 Not Found` - Vehicle with the specified ID does not exist
