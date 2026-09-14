@@ -273,7 +273,8 @@ public class PackageResolver {
                 input.packageId(),
                 input.driverId(),
                 authenticatedUserId,
-                input.notes()
+                input.notes(),
+                input.tripId()
         );
         return packageService.assignDriver(resolvedInput);
     }

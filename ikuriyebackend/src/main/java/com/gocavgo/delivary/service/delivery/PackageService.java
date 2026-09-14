@@ -251,8 +251,16 @@ public class PackageService {
      * keep their status and swap custodian), add custodian, record custody and event.
      */
     private AcceptOfferResponse acceptSinglePackage(UUID packageId, Long actorId, CustodianRole custodianRole) {
+        return acceptSinglePackage(packageId, actorId, custodianRole, null);
+    }
+
+    private AcceptOfferResponse acceptSinglePackage(UUID packageId, Long actorId, CustodianRole custodianRole, UUID tripId) {
         var pkg = packageRepo.findById(packageId)
                 .orElseThrow(() -> new RuntimeException("Package not found: " + packageId));
+
+        if (tripId != null) {
+            pkg.setTripId(tripId);
+        }
 
         // Re-validate right before mutation — guards against race conditions
         // where the package status was changed (e.g. cancelled) after
@@ -333,6 +341,11 @@ public class PackageService {
 
     @Transactional
     public TransferAcceptResult acceptPackageByTransfer(Long actorId, UUID transferId, String transferCode) {
+        return acceptPackageByTransfer(actorId, transferId, transferCode, null);
+    }
+
+    @Transactional
+    public TransferAcceptResult acceptPackageByTransfer(Long actorId, UUID transferId, String transferCode, UUID tripId) {
         // Find and validate the transfer (with pessimistic lock to prevent race conditions)
         var transferEntity = transferService.getTransferEntityWithLock(transferId);
 
@@ -375,11 +388,14 @@ public class PackageService {
         // Accept all packages
         var acceptResults = new ArrayList<AcceptOfferResponse>();
         for (var tp : transferPackages) {
-            acceptResults.add(acceptSinglePackage(tp.getPackageId(), actorId, custodianRole));
+            acceptResults.add(acceptSinglePackage(tp.getPackageId(), actorId, custodianRole, tripId));
         }
 
         // Complete the transfer
         transferEntity.setStatus(TransferStatus.DONE);
+        if (tripId != null) {
+            transferEntity.setTripId(tripId);
+        }
         transferEntity.setUpdatedAt(Instant.now());
         transferService.saveTransferEntity(transferEntity);
 
@@ -394,18 +410,19 @@ public class PackageService {
         return new TransferAcceptResult(transferResp, acceptResults);
     }
 
+    @Transactional
+    public List<PackageResponse> acceptPackagesForTransferConfirmation(Long requestorId, UUID transferId) {
+        return acceptPackagesForTransferConfirmation(requestorId, transferId, null);
+    }
+
     /**
      * Accepts all packages in a transfer as part of the CONFIRM flow.
      * Called by TransferService.confirmTransfer() when the owner confirms.
      * The requestor (who previously called requestTransfer) becomes the custodian.
-     * <p>
-     * The requestor's role is resolved from the database (worker/driver profile)
-     * rather than the JWT, because the caller is the transfer owner, not the
-     * requestor. CUSTOMER role is allowed here — they become a RECEIVER custodian.
      */
     @Transactional
-    public List<PackageResponse> acceptPackagesForTransferConfirmation(Long requestorId, UUID transferId) {
-        log.info("acceptPackagesForTransferConfirmation: requestorId={}, transferId={}", requestorId, transferId);
+    public List<PackageResponse> acceptPackagesForTransferConfirmation(Long requestorId, UUID transferId, UUID tripId) {
+        log.info("acceptPackagesForTransferConfirmation: requestorId={}, transferId={}, tripId={}", requestorId, transferId, tripId);
 
         // The requestor must exist and be ACTIVE
         var requestor = userRepository.findById(requestorId)
@@ -415,8 +432,6 @@ public class PackageService {
         }
 
         // Resolve the requestor's role from their profile to determine custodian role.
-        // The requestor was already validated when they called acceptTransfer (CONFIRM mode),
-        // so we only need to determine their custodian role here.
         var custodianRole = resolveRequestorCustodianRole(requestorId);
 
         // Get all packages in the transfer
@@ -431,7 +446,7 @@ public class PackageService {
         // Accept all packages
         var results = new ArrayList<PackageResponse>();
         for (var tp : transferPackages) {
-            acceptSinglePackage(tp.getPackageId(), requestorId, custodianRole);
+            acceptSinglePackage(tp.getPackageId(), requestorId, custodianRole, tripId);
             var pkg = packageRepo.findById(tp.getPackageId()).orElseThrow();
             results.add(toResponse(pkg));
         }
@@ -574,6 +589,9 @@ public class PackageService {
         if (pkg.getDeliveryType() == DeliveryType.FIXED_ROUTE) {
             validationService.validateTransition(pkg.getStatus(), PackageStatus.ASSIGNED_DRIVER, pkg.getDeliveryType());
             pkg.setStatus(PackageStatus.ASSIGNED_DRIVER);
+        }
+        if (input.tripId() != null) {
+            pkg.setTripId(input.tripId());
         }
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);

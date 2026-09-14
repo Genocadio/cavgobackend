@@ -222,8 +222,8 @@ public class TransferService {
      * - CONFIRM: set status to REQUESTED with actor as requestor.
      */
     @Transactional
-    public TransferAcceptResult acceptTransfer(Long actorId, UUID transferId, String transferCode) {
-        log.info("acceptTransfer: actorId={}, transferId={}, ruleType check", actorId, transferId);
+    public TransferAcceptResult acceptTransfer(Long actorId, UUID transferId, String transferCode, UUID tripId) {
+        log.info("acceptTransfer: actorId={}, transferId={}, tripId={}, ruleType check", actorId, transferId, tripId);
 
         var transfer = transferRepo.findById(transferId)
                 .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + transferId));
@@ -235,7 +235,7 @@ public class TransferService {
         if (transfer.getRuleType() == TransferRuleType.AUTO
                 || transfer.getRuleType() == TransferRuleType.SECURE) {
             // Delegate to PackageService which handles package acceptance + transfer completion
-            return packageService.acceptPackageByTransfer(actorId, transferId, transferCode);
+            return packageService.acceptPackageByTransfer(actorId, transferId, transferCode, tripId);
         }
 
         if (transfer.getRuleType() == TransferRuleType.CONFIRM) {
@@ -251,6 +251,9 @@ public class TransferService {
 
             var previousStatus = transfer.getStatus();
             transfer.setRequestorId(actorId);
+            if (tripId != null) {
+                transfer.setTripId(tripId);
+            }
             transfer.setStatus(TransferStatus.REQUESTED);
             transfer.setUpdatedAt(Instant.now());
             transferRepo.save(transfer);
@@ -289,7 +292,7 @@ public class TransferService {
         }
 
         // ★ Auto-accept all packages in the transfer — requestor becomes custodian
-        packageService.acceptPackagesForTransferConfirmation(requestorId, transferId);
+        packageService.acceptPackagesForTransferConfirmation(requestorId, transferId, transfer.getTripId());
 
         var previousStatus = transfer.getStatus();
         transfer.setStatus(TransferStatus.DONE);

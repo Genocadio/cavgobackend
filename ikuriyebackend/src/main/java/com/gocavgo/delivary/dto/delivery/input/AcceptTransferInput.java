@@ -6,6 +6,7 @@ import java.util.UUID;
 
 public record AcceptTransferInput(
         @NotNull UUID transferId,
-        String transferCode
+        String transferCode,
+        UUID tripId
 ) {
 }

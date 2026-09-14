@@ -112,7 +112,7 @@ public class TransferResolver {
     public TransferAcceptResult acceptTransfer(@Argument @Valid AcceptTransferInput input) {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         var actorId = Long.parseLong(authentication.getName());
-        return transferService.acceptTransfer(actorId, input.transferId(), input.transferCode());
+        return transferService.acceptTransfer(actorId, input.transferId(), input.transferCode(), input.tripId());
     }
 
     // ──────────────────────────────────────────────

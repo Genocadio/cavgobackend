@@ -402,6 +402,8 @@ input AcceptTransferInput {
     transferId: ID!
     "Transfer code — required for SECURE transfers, optional for AUTO"
     transferCode: String
+    "Optional: Driver trip ID linked to the accepted package"
+    tripId: ID
 }
 
 "Input: assign a driver to a package."
@@ -414,6 +416,8 @@ input AssignDriverInput {
     assignedBy: ID!
     "Optional notes about the assignment"
     notes: String
+    "Optional: Driver trip ID linked to the assigned package"
+    tripId: ID
 }
 
 "Input: advance a package to a new status."
