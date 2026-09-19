@@ -48,6 +48,34 @@ public class CompanyUserController {
         return ResponseEntity.ok(companyUserService.assignCompanyToUser(id, companyId));
     }
 
+    /**
+     * Returns the authenticated user's own company membership (company + office).
+     * Used by the worker web portal at login: 200 when the user belongs to a
+     * company (includes company name + chosen office), 204 when they have not
+     * joined a company yet (the portal then shows the join-a-company flow).
+     */
+    @GetMapping("/me")
+    public ResponseEntity<CompanyUserResponseDto> getMe() {
+        var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
+        var userId = (Long) request.getAttribute("nexxauthUserId");
+        if (userId == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        var result = companyUserService.findForSelf(userId);
+        return result.map(ResponseEntity::ok).orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /**
+     * Self-service office assignment: a worker who has been approved into a
+     * company picks their office here. The change is pushed to ikuriyebackend
+     * (office-location sync) when the user is a non-driver (worker).
+     */
+    @PutMapping("/{id}/office/{officeId}")
+    public CompanyUserResponseDto assignOffice(
+            @PathVariable Long id, @PathVariable Long officeId) {
+        return companyUserService.assignOfficeToUser(id, officeId);
+    }
+
 
 
     @GetMapping("/{id}")

@@ -230,9 +230,10 @@ public class UserService {
     private static int precedence(CompanyUserRole role) {
         return switch (role) {
             case DRIVER -> 1;
-            case FLEET_MANAGER -> 2;
-            case SUPERVISOR -> 3;
-            case ADMIN -> 4;
+            case WORKER -> 2;
+            case FLEET_MANAGER -> 3;
+            case SUPERVISOR -> 4;
+            case ADMIN -> 5;
         };
     }
 }

@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -148,6 +149,62 @@ public class CompanyUserService {
             }
         }
         
+        return dto;
+    }
+
+    /**
+     * Returns the current user's own company membership (company + office), or
+     * {@code Optional.empty()} when the user is not yet a company user. Used by
+     * the worker web portal to decide whether to show the workspace or the
+     * join-a-company flow.
+     */
+    @Transactional(readOnly = true)
+    public Optional<CompanyUserResponseDto> findForSelf(Long userId) {
+        if (userId == null) {
+            return Optional.empty();
+        }
+        return companyUserRepository.findById(userId).map(user -> {
+            CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(user);
+            if (user.getRole() == CompanyUserRole.DRIVER) {
+                List<VehicleAssignment> activeAssignments =
+                        assignmentRepository.findActiveAssignmentsByDriver(user.getId());
+                if (!activeAssignments.isEmpty()) {
+                    dto.setVehicle(VehicleResponseDto.fromEntity(activeAssignments.get(0).getVehicle(), null));
+                } else {
+                    dto.setVehicle(null);
+                }
+            }
+            return dto;
+        });
+    }
+
+    /**
+     * Assigns an office to the given user (self-service: a worker picks their
+     * office after being approved into a company). When the user is a worker
+     * (non-driver) the new office location id is pushed to ikuriyebackend so
+     * the worker's {@code company_id} resolves to that office.
+     */
+    public CompanyUserResponseDto assignOfficeToUser(Long userId, Long officeId) {
+        CompanyUser user = companyUserRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("Company user not found with id: " + userId));
+        Office office = officeRepository.findById(officeId)
+                .orElseThrow(() -> new IllegalArgumentException("Office not found with id: " + officeId));
+        user.setOffice(office);
+        CompanyUser saved = companyUserRepository.save(user);
+        CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(saved);
+
+        if (isWorkerRole(saved.getRole())) {
+            pushOfficeToIkuriye(saved);
+        }
+
+        try {
+            if (saved.getCompany() != null) {
+                aggregatorSyncService.syncCompanyDataImmediately(saved.getCompany().getId());
+            }
+        } catch (Exception e) {
+            System.err.println("Error triggering aggregator sync after office assignment: " + e.getMessage());
+        }
+
         return dto;
     }
 

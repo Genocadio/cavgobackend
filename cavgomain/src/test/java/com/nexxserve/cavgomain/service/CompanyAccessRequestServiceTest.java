@@ -5,6 +5,7 @@ import com.nexxserve.cavgomain.entity.CompanyAccessRequest;
 import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.enums.CompanyAccessRequestStatus;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
+import com.nexxserve.cavgomain.enums.DriverRequestStatus;
 import com.nexxserve.cavgomain.repository.CompanyAccessRequestRepository;
 import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
@@ -80,5 +81,74 @@ class CompanyAccessRequestServiceTest {
                         user.getRole() == CompanyUserRole.FLEET_MANAGER &&
                         user.getCompany().getId().equals(1L)
         ));
+    }
+
+    @Test
+    void createRequest_grantsWorkerRoleForNonStaffUser() {
+        Long userId = 100L;
+
+        Company company = new Company();
+        company.setId(1L);
+        company.setCompanyCode("COMP1");
+        company.setCompanyName("Comp One");
+
+        when(companyRepository.findByCompanyCode("COMP1")).thenReturn(Optional.of(company));
+        when(requestRepository.existsByNexxauthUserIdAndStatus(userId, CompanyAccessRequestStatus.PENDING))
+                .thenReturn(false);
+        when(driverRequestRepository.findByNexxauthUserIdAndStatus(userId, DriverRequestStatus.PENDING))
+                .thenReturn(Optional.empty());
+        when(companyUserRepository.findById(userId)).thenReturn(Optional.empty());
+        when(requestRepository.save(any(CompanyAccessRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        var response = companyAccessRequestService.createRequest(
+                "COMP1", userId, "Bob", "Jones", "bob@example.com", null,
+                List.of("customer"));
+
+        assertNotNull(response);
+        assertEquals(CompanyUserRole.WORKER, response.getRole());
+        assertEquals(CompanyAccessRequestStatus.PENDING, response.getStatus());
+        verify(requestRepository).save(argThat(req ->
+                req.getRole() == CompanyUserRole.WORKER && req.getCompanyCode().equals("COMP1")));
+    }
+
+    @Test
+    void createRequest_keepsFleetManagerRoleForStaffUser() {
+        Long userId = 100L;
+
+        Company company = new Company();
+        company.setId(1L);
+        company.setCompanyCode("COMP1");
+
+        when(companyRepository.findByCompanyCode("COMP1")).thenReturn(Optional.of(company));
+        when(requestRepository.existsByNexxauthUserIdAndStatus(userId, CompanyAccessRequestStatus.PENDING))
+                .thenReturn(false);
+        when(driverRequestRepository.findByNexxauthUserIdAndStatus(userId, DriverRequestStatus.PENDING))
+                .thenReturn(Optional.empty());
+        when(companyUserRepository.findById(userId)).thenReturn(Optional.empty());
+        when(requestRepository.save(any(CompanyAccessRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        var response = companyAccessRequestService.createRequest(
+                "COMP1", userId, "Carol", "Ray", "carol@example.com", null,
+                List.of("fleet_manager", "customer"));
+
+        assertNotNull(response);
+        assertEquals(CompanyUserRole.FLEET_MANAGER, response.getRole());
+    }
+
+    @Test
+    void createRequest_blocksDuplicatePendingRequest() {
+        Long userId = 100L;
+
+        Company company = new Company();
+        company.setId(1L);
+        company.setCompanyCode("COMP1");
+
+        when(companyRepository.findByCompanyCode("COMP1")).thenReturn(Optional.of(company));
+        when(requestRepository.existsByNexxauthUserIdAndStatus(userId, CompanyAccessRequestStatus.PENDING))
+                .thenReturn(true);
+
+        assertThrows(IllegalArgumentException.class, () ->
+                companyAccessRequestService.createRequest(
+                        "COMP1", userId, "Dana", "Lee", "dana@example.com", null, List.of("customer")));
     }
 }

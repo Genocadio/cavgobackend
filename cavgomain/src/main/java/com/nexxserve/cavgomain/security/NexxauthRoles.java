@@ -36,9 +36,10 @@ public final class NexxauthRoles {
 
     static {
         PRECEDENCE.put(CompanyUserRole.DRIVER, 1);
-        PRECEDENCE.put(CompanyUserRole.FLEET_MANAGER, 2);
-        PRECEDENCE.put(CompanyUserRole.SUPERVISOR, 3);
-        PRECEDENCE.put(CompanyUserRole.ADMIN, 4);
+        PRECEDENCE.put(CompanyUserRole.WORKER, 2);
+        PRECEDENCE.put(CompanyUserRole.FLEET_MANAGER, 3);
+        PRECEDENCE.put(CompanyUserRole.SUPERVISOR, 4);
+        PRECEDENCE.put(CompanyUserRole.ADMIN, 5);
     }
 
     public static String toNexxauthName(CompanyUserRole role) {

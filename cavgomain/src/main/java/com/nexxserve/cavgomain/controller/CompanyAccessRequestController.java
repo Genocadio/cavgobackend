@@ -61,8 +61,9 @@ public class CompanyAccessRequestController {
     }
 
     /**
-     * Creates a company access / fleet-manager role request. The user's
-     * identity comes from the JWT; the requested role is FLEET_MANAGER.
+     * Creates a company access / role request. The user's identity comes from
+     * the JWT; the requested role is derived from the user's current Nexxauth
+     * roles (non-staff users are granted the worker role on approval).
      */
     @PostMapping
     @PreAuthorize("isAuthenticated()")
@@ -79,12 +80,14 @@ public class CompanyAccessRequestController {
         String lastName = null;
         String email = null;
         String phone = null;
+        List<String> nexxauthRoles = null;
         try {
             var nexxauthUser = nexxauthClient.getUser(userId);
             firstName = nexxauthUser.firstName() != null ? nexxauthUser.firstName() : "";
             lastName = nexxauthUser.lastName();
             email = nexxauthUser.email();
             phone = nexxauthUser.phone();
+            nexxauthRoles = nexxauthUser.roles();
         } catch (Exception e) {
             log.warn("Could not fetch Nexxauth user profile for userId={}: {}", userId, e.getMessage());
         }
@@ -96,7 +99,8 @@ public class CompanyAccessRequestController {
                     firstName,
                     lastName,
                     email,
-                    phone
+                    phone,
+                    nexxauthRoles
             );
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {

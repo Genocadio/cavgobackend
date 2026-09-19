@@ -24,12 +24,16 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * Manages company access & fleet-manager role requests. A user requests the
- * FLEET_MANAGER role and company access by entering the company code; another
- * fleet manager of that company must approve the request before the user is
- * assigned to the company AND granted the FLEET_MANAGER role in Nexxauth —
- * a user can never self-assign or self-approve. Every approval records who
- * approved (approvedBy).
+ * Manages company access & role requests. A user requests access to a company
+ * by entering the company code; another staff member of that company must
+ * approve the request before the user is assigned to the company AND granted
+ * the requested role in Nexxauth — a user can never self-assign or
+ * self-approve. Every approval records who approved (approvedBy).
+ *
+ * <p>The requested role follows the requester's current profile: staff
+ * (admin / supervisor / fleet_manager) keep their role when requesting access;
+ * a driver stays a driver; every other user (worker, customer, unassigned) is
+ * granted the {@code worker} role on approval.
  */
 @Service
 @RequiredArgsConstructor
@@ -37,8 +41,8 @@ public class CompanyAccessRequestService {
 
     private static final Logger log = LoggerFactory.getLogger(CompanyAccessRequestService.class);
 
-    /** The role requested through the fleetman workflow. */
-    private static final CompanyUserRole REQUESTED_ROLE = CompanyUserRole.FLEET_MANAGER;
+    /** The role granted through the worker/company-access workflow for non-staff users. */
+    private static final CompanyUserRole REQUESTED_ROLE = CompanyUserRole.WORKER;
 
     private final CompanyAccessRequestRepository requestRepository;
     private final CompanyRepository companyRepository;
@@ -48,8 +52,8 @@ public class CompanyAccessRequestService {
     private final NexxauthClient nexxauthClient;
 
     /**
-     * Creates a pending company access / fleet-manager role request for the
-     * authenticated user.
+     * Creates a pending company access / role request for the authenticated
+     * user.
      *
      * @param companyCode    the company the user wants access to
      * @param nexxauthUserId the Nexxauth user id from the JWT
@@ -57,6 +61,9 @@ public class CompanyAccessRequestService {
      * @param lastName       user's last name
      * @param email          user's email
      * @param phone          user's phone
+     * @param nexxauthRoles  user's current Nexxauth role names (used to derive
+     *                       the requested role — staff keep their role, others
+     *                       are granted the worker role)
      */
     @Transactional
     public CompanyAccessRequestResponseDto createRequest(
@@ -65,7 +72,8 @@ public class CompanyAccessRequestService {
             String firstName,
             String lastName,
             String email,
-            String phone
+            String phone,
+            List<String> nexxauthRoles
     ) {
         Company company = companyRepository.findByCompanyCode(companyCode)
                 .orElseThrow(() -> new IllegalArgumentException(
@@ -97,7 +105,7 @@ public class CompanyAccessRequestService {
         request.setLastName(lastName);
         request.setEmail(email);
         request.setPhone(phone);
-        request.setRole(REQUESTED_ROLE);
+        request.setRole(resolveRequestedRole(nexxauthRoles));
         request.setCompanyCode(companyCode);
         request.setCompany(company);
         request.setStatus(CompanyAccessRequestStatus.PENDING);
@@ -140,17 +148,18 @@ public class CompanyAccessRequestService {
     }
 
     /**
-     * Approves a pending company access / fleet-manager role request. The
-     * approving user must be a different user than the requester (no
-     * self-approval). On approval:
+     * Approves a pending company access request. The approving user must be a
+     * different user than the requester (no self-approval). On approval:
      * <ol>
-     *   <li>the "fleet_manager" role is added to the user in Nexxauth (if not already present)</li>
+     *   <li>the requested role (worker for non-staff, preserved for staff) is
+     *       granted to the user in Nexxauth (replacing prior roles such as
+     *       "customer")</li>
      *   <li>the user is assigned to the company with their effective role</li>
      *   <li>the approval is recorded (who approved + when)</li>
      * </ol>
      *
      * @param requestId     the request id
-     * @param approverUserId the Nexxauth user id of the fleet manager approving
+     * @param approverUserId the Nexxauth user id of the staff member approving
      */
     @Transactional
     public CompanyAccessRequestResponseDto approveRequest(Long requestId, Long approverUserId) {
@@ -172,7 +181,7 @@ public class CompanyAccessRequestService {
                 ? request.getRole() : REQUESTED_ROLE;
         String roleNexxauthName = NexxauthRoles.toNexxauthName(effectiveRole);
         if (roleNexxauthName == null) {
-            roleNexxauthName = "fleet_manager";
+            roleNexxauthName = "worker";
         }
         try {
             nexxauthClient.updateUserRoles(request.getNexxauthUserId(), List.of(roleNexxauthName));
@@ -255,5 +264,44 @@ public class CompanyAccessRequestService {
         log.info("Company access request {} rejected by userId={}: reason={}",
                 requestId, rejectedByUserId, reason);
         return CompanyAccessRequestResponseDto.fromEntity(saved);
+    }
+
+    /**
+     * Derives the role requested through the company access workflow from the
+     * requester's current Nexxauth role names:
+     * <ul>
+     *   <li>staff (admin / supervisor / fleet_manager) keep their highest staff role;</li>
+     *   <li>a driver keeps the DRIVER role (drivers join through the driver app);</li>
+     *   <li>everyone else (worker, customer, unassigned) is granted the WORKER role.</li>
+     * </ul>
+     */
+    private CompanyUserRole resolveRequestedRole(List<String> nexxauthRoles) {
+        var mapped = NexxauthRoles.fromNexxauthNames(nexxauthRoles);
+        CompanyUserRole highest = null;
+        for (CompanyUserRole role : mapped) {
+            if (role == CompanyUserRole.ADMIN || role == CompanyUserRole.SUPERVISOR
+                    || role == CompanyUserRole.FLEET_MANAGER) {
+                if (highest == null || precedence(role) > precedence(highest)) {
+                    highest = role;
+                }
+            }
+        }
+        if (highest != null) {
+            return highest;
+        }
+        if (mapped.contains(CompanyUserRole.DRIVER)) {
+            return CompanyUserRole.DRIVER;
+        }
+        return REQUESTED_ROLE;
+    }
+
+    private static int precedence(CompanyUserRole role) {
+        return switch (role) {
+            case DRIVER -> 1;
+            case WORKER -> 2;
+            case FLEET_MANAGER -> 3;
+            case SUPERVISOR -> 4;
+            case ADMIN -> 5;
+        };
     }
 }
