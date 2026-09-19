@@ -10,8 +10,10 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * An office/branch. An office is a Company (JOINED inheritance into the
@@ -56,4 +58,19 @@ public class Office extends Company {
     @Column(name = "phone")
     @ToString.Exclude
     private List<String> contactPhones = new ArrayList<>();
+
+    /**
+     * The stable office location id shared with ikuriyebackend. Ikuriye's
+     * {@code office_location_id} / worker {@code company_id} is a UUID with no
+     * FK, so it is derived deterministically from this office's unique company
+     * code. Reassigning a worker to a different office therefore yields a
+     * different id, which ikuriye stores as the office location id.
+     */
+    public UUID getOfficeLocationId() {
+        String code = getCompanyCode();
+        if (code == null || code.isBlank()) {
+            return null;
+        }
+        return UUID.nameUUIDFromBytes(("cavgomain:office:" + code).getBytes(StandardCharsets.UTF_8));
+    }
 }

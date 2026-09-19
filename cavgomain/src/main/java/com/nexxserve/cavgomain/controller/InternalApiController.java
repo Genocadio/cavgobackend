@@ -113,23 +113,30 @@ public class InternalApiController {
     // ── User sync (called by ikuriyebackend) ─────────────────────────────────
 
     /**
-     * Syncs a user from Nexxauth into cavgomain's local DB. Called by ikuriyebackend
-     * when a WORKER or DRIVER token is verified — ensures cavgomain always has an
-     * up-to-date mirror of workers/drivers that ikuriye serves.
-     *
-     * <p>This is a fire-and-forget internal endpoint — no auth required.
-     * The caller should not block on the response.
+     * Syncs a user from ikuriyebackend into cavgomain's local DB only when the
+     * user already exists here. Response contract (error-guarded, no Nexxauth
+     * wait):
+     * <ul>
+     *   <li>404 — user unknown to cavgomain. ikuriyebackend does NOT wait for a
+     *       Nexxauth call; it falls back to its own provisioning.</li>
+     *   <li>200 — the current user (with its assigned office, incl. the office
+     *       location id) is returned immediately, even when the user "needs an
+     *       update" — no Nexxauth update is awaited.</li>
+     * </ul>
      */
     @PostMapping("/users/sync")
     public ResponseEntity<CompanyUserResponseDto> syncUserFromIkuriye(@RequestBody SyncUserRequest request) {
-        log.info("Internal sync requested for userId={}", request.userId());
         if (request.userId() == null) {
             return ResponseEntity.badRequest().build();
         }
         try {
-            var response = userService.syncUser(request.userId());
-            log.info("Internal sync completed for userId={}", response.getId());
-            return ResponseEntity.ok(response);
+            var response = userService.findForIkuriyeSync(request.userId(), null);
+            if (response.isEmpty()) {
+                log.info("Internal sync: user not found in cavgomain, userId={}", request.userId());
+                return ResponseEntity.notFound().build();
+            }
+            log.info("Internal sync completed for userId={}", response.get().getId());
+            return ResponseEntity.ok(response.get());
         } catch (Exception e) {
             log.error("Internal sync failed for userId={}: {}", request.userId(), e.getMessage());
             return ResponseEntity.internalServerError().build();

@@ -22,6 +22,12 @@ public class RabbitMqConfig {
     @Value("${rabbitmq.naviga.queue}")
     private String navigaQueueName;
 
+    @Value("${rabbitmq.cavgotrips.exchange}")
+    private String cavgoTripsExchangeName;
+
+    @Value("${rabbitmq.cavgotrips.queue}")
+    private String cavgoTripsQueueName;
+
     @Bean
     public FanoutExchange navigaTripExchange() {
         return new FanoutExchange(navigaExchangeName, true, false);
@@ -35,6 +41,21 @@ public class RabbitMqConfig {
     @Bean
     public Binding navigaTripBinding(Queue navigaTripQueue, FanoutExchange navigaTripExchange) {
         return BindingBuilder.bind(navigaTripQueue).to(navigaTripExchange);
+    }
+
+    @Bean
+    public FanoutExchange cavgoTripsExchange() {
+        return new FanoutExchange(cavgoTripsExchangeName, true, false);
+    }
+
+    @Bean
+    public Queue cavgoTripsQueue() {
+        return new Queue(cavgoTripsQueueName, true, false, false);
+    }
+
+    @Bean
+    public Binding cavgoTripsBinding(Queue cavgoTripsQueue, FanoutExchange cavgoTripsExchange) {
+        return BindingBuilder.bind(cavgoTripsQueue).to(cavgoTripsExchange);
     }
 
     @Bean

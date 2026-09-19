@@ -108,7 +108,7 @@ jobs:
           cache: gradle
       - name: Build cavgomain
         working-directory: ./cavgomain
-        run: ./gradlew build -x test --no-daemon
+        run: ./gradlew build --no-daemon
 
   build-gateway:
     name: Validate gateway
@@ -204,7 +204,7 @@ jobs:
           cache: gradle
       - name: Build ikuriyebackend
         working-directory: ./ikuriyebackend
-        run: ./gradlew build -x test --no-daemon
+        run: ./gradlew build --no-daemon
 
   # ── Go services ──────────────────────────────────────────────────────
   build-trips:
@@ -299,3 +299,21 @@ jobs:
           tags: cavgo-ci/${{ matrix.service }}:validate
           cache-from: type=gha,scope=ci-${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=ci-${{ matrix.service }}
+
+  # ── Docker Compose validation ────────────────────────────────────────
+  compose-config:
+    name: Validate docker-compose
+    runs-on: ubuntu-latest
+    env:
+      MQTT_BROKER_URL: ssl://ci.invalid:8883
+      MQTT_USERNAME: ci
+      MQTT_PASSWORD: ci
+      GOOGLE_APPLICATION_CREDENTIALS: ./firebase-credentials.json
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provision env file
+        run: cp .env.example .env
+      - name: Validate compose (dev)
+        run: docker compose -f docker-compose.yml config --quiet
+      - name: Validate compose (hub)
+        run: docker compose -f docker-compose-hub.yml config --quiet

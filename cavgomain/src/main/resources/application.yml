@@ -50,3 +50,10 @@ server:
 
 aggregator:
   base-url: ${AGGREGATOR_BASE_URL:}
+
+# Ikuriye — internal push target for worker office assignments. When a WORKER
+# (non-driver company user) is assigned/changed offices, cavgomain fires a
+# fire-and-forget office-location push to this service. Optional: if not set,
+# the push is skipped entirely.
+ikuriye:
+  base-url: ${IKURIYE_BASE_URL:}

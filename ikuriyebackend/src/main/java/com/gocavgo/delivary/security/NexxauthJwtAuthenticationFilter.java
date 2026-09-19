@@ -143,13 +143,30 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
 
-        // ── Cavgo Main sync (fire-and-forget) ───────────────────────────────
-        // When a WORKER or DRIVER authenticates through ikuriyebackend, trigger
-        // an async sync to cavgomain so it mirrors the same user. Non-blocking.
+        // ── Cavgo Main sync ──────────────────────────────────────────────────
+        // WORKER: evaluative — expect the user as cavgomain serves it (with
+        // office data) and extract the office location id into the local worker
+        // profile. Unknown user (404) or any error falls straight back to the
+        // Nexxauth provisioning above — never block or fail the request.
+        // DRIVER: keep the fire-and-forget mirror so cavgomain stays aware.
         boolean isWorkerOrDriver = authorities.stream().anyMatch(a ->
                 a.getAuthority().equals("ROLE_WORKER") || a.getAuthority().equals("ROLE_DRIVER"));
         if (isWorkerOrDriver && cavgoSyncClient.isEnabled()) {
-            cavgoSyncClient.syncUser(claims.userId());
+            boolean isWorker = authorities.stream().anyMatch(a -> a.getAuthority().equals("ROLE_WORKER"));
+            if (isWorker) {
+                try {
+                    var cavgomainUser = cavgoSyncClient.syncUserAndGetResult(claims.userId());
+                    if (cavgomainUser != null) {
+                        String officeLocationId = cavgomainUser.office() != null
+                                ? cavgomainUser.office().officeLocationId() : null;
+                        userService.applyOfficeLocation(claims.userId(), officeLocationId);
+                    }
+                } catch (Exception e) {
+                    log.warn("Cavgomain office sync failed for userId={}: {}", claims.userId(), e.getMessage());
+                }
+            } else {
+                cavgoSyncClient.syncUser(claims.userId());
+            }
         }
 
         log.debug("Nexxauth token verified for userId={}, roles={}, synced={}",

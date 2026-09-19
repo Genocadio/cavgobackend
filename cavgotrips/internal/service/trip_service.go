@@ -657,8 +657,10 @@ func (s *TripService) StartTrip(id int64) (*models.Trip, error) {
 		_, _ = s.tripLogService.LogTripUpdate(startedTrip, "started")
 	}
 
-	// Publish event to RabbitMQ
-	if s.rabbitMQService != nil {
+	// Publish event to RabbitMQ fanout exchange
+	if s.rabbitMQService != nil && s.tripExchange != "" {
+		_ = s.rabbitMQService.PublishTripEventToExchange(s.tripExchange, "started", *startedTrip)
+	} else if s.rabbitMQService != nil {
 		_ = s.rabbitMQService.PublishTripEvent("started", *startedTrip)
 	}
 
@@ -721,8 +723,10 @@ func (s *TripService) CompleteTrip(id int64) (*models.Trip, error) {
 		_, _ = s.tripLogService.LogTripUpdate(completedTrip, "completed")
 	}
 
-	// Publish event to RabbitMQ
-	if s.rabbitMQService != nil {
+	// Publish event to RabbitMQ fanout exchange
+	if s.rabbitMQService != nil && s.tripExchange != "" {
+		_ = s.rabbitMQService.PublishTripEventToExchange(s.tripExchange, "completed", *completedTrip)
+	} else if s.rabbitMQService != nil {
 		_ = s.rabbitMQService.PublishTripEvent("completed", *completedTrip)
 	}
 
@@ -1344,6 +1348,11 @@ func (s *TripService) DeleteTrip(id int64) error {
 		// Allow deletion of CANCELLED trips (second delete call)
 		if err := s.tripRepo.Delete(id); err != nil {
 			return err
+		}
+
+		// Publish event to RabbitMQ fanout exchange
+		if s.rabbitMQService != nil && s.tripExchange != "" {
+			_ = s.rabbitMQService.PublishTripEventToExchange(s.tripExchange, "deleted", *trip)
 		}
 
 		// Broadcast SSE event for trip deletion

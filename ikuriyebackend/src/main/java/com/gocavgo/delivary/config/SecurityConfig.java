@@ -32,6 +32,7 @@ public class SecurityConfig {
                         .requestMatchers("/graphql").permitAll()
                         .requestMatchers("/api/files/local/**").permitAll()
                         .requestMatchers("/api/files/**").authenticated()
+                        .requestMatchers("/internal/api/**").permitAll()  // service-to-service (cavgomain)
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

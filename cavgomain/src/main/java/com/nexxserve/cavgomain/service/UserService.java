@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * User management, working hand in hand with Nexxauth.
@@ -156,6 +157,37 @@ public class UserService {
         // so creation timestamps are populated before the response is built.
         var saved = companyUserRepository.saveAndFlush(user);
         return CompanyUserResponseDto.fromEntity(saved);
+    }
+
+    /**
+     * Returns an existing user for the ikuriyebackend sync caller. Nothing is
+     * fetched from Nexxauth here and no user is provisioned — the caller does
+     * NOT wait for a Nexxauth round-trip:
+     * <ul>
+     *   <li>User missing → {@code Optional.empty()} (ikuriye then falls back to
+     *       its own Nexxauth provisioning instead of blocking).</li>
+     *   <li>User present → the current row is returned immediately (with its
+     *       office), even if it "needs an update"; only the cheap local
+     *       dataHash stamp is applied when supplied.</li>
+     * </ul>
+     * This keeps the call fast and stable when Nexxauth is slow or down.
+     */
+    @Transactional
+    public Optional<CompanyUserResponseDto> findForIkuriyeSync(Long nexxauthUserId, String dataHash) {
+        if (nexxauthUserId == null) {
+            return Optional.empty();
+        }
+        var existing = companyUserRepository.findById(nexxauthUserId);
+        if (existing.isEmpty()) {
+            log.info("findForIkuriyeSync: user not found in cavgomain, userId={}", nexxauthUserId);
+            return Optional.empty();
+        }
+        var user = existing.get();
+        if (dataHash != null && !dataHash.equals(user.getDataHash())) {
+            user.setDataHash(dataHash);
+            user = companyUserRepository.save(user);
+        }
+        return Optional.of(CompanyUserResponseDto.fromEntity(user));
     }
 
     /**

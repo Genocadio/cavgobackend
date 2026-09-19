@@ -150,7 +150,7 @@ class ConfirmTransferCustomerRequestorTest {
 
         // 2. Worker requests the transfer → status = REQUESTED
         authenticateAs(workerRequestorId, Role.WORKER);
-        var requestResult = transferService.acceptTransfer(workerRequestorId, transferId, null);
+        var requestResult = transferService.acceptTransfer(workerRequestorId, transferId, null, null);
         assertThat(requestResult.transfer().status()).isEqualTo(TransferStatus.REQUESTED);
 
         // 3. Customer (owner) confirms the transfer
@@ -181,7 +181,7 @@ class ConfirmTransferCustomerRequestorTest {
 
         // 2. Driver requests the transfer → status = REQUESTED
         authenticateAs(driverRequestorId, Role.DRIVER);
-        var requestResult = transferService.acceptTransfer(driverRequestorId, transferId, null);
+        var requestResult = transferService.acceptTransfer(driverRequestorId, transferId, null, null);
         assertThat(requestResult.transfer().status()).isEqualTo(TransferStatus.REQUESTED);
 
         // 3. Customer (owner) confirms → driver gets packages as DRIVER custodian
@@ -208,7 +208,7 @@ class ConfirmTransferCustomerRequestorTest {
         var transferId = created.transfers().get(0).id();
 
         authenticateAs(workerRequestorId, Role.WORKER);
-        transferService.acceptTransfer(workerRequestorId, transferId, null);
+        transferService.acceptTransfer(workerRequestorId, transferId, null, null);
 
         authenticateAs(ownerCustomerId, Role.CUSTOMER);
         transferService.confirmTransfer(ownerCustomerId, transferId);
@@ -233,7 +233,7 @@ class ConfirmTransferCustomerRequestorTest {
 
         // Worker requests
         authenticateAs(workerRequestorId, Role.WORKER);
-        transferService.acceptTransfer(workerRequestorId, transferId, null);
+        transferService.acceptTransfer(workerRequestorId, transferId, null, null);
 
         // Another worker (not the owner) tries to confirm → should fail
         authenticateAs(otherWorkerId, Role.WORKER);
@@ -255,7 +255,7 @@ class ConfirmTransferCustomerRequestorTest {
 
         // Worker requests
         authenticateAs(workerRequestorId, Role.WORKER);
-        transferService.acceptTransfer(workerRequestorId, transferId, null);
+        transferService.acceptTransfer(workerRequestorId, transferId, null, null);
 
         // Owner rejects
         authenticateAs(ownerCustomerId, Role.CUSTOMER);
@@ -292,7 +292,7 @@ class ConfirmTransferCustomerRequestorTest {
 
         // Owner (same user) tries to request their own transfer → should fail
         authenticateAs(workerOwnerId, Role.WORKER);
-        assertThatThrownBy(() -> transferService.acceptTransfer(workerOwnerId, transferId, null))
+        assertThatThrownBy(() -> transferService.acceptTransfer(workerOwnerId, transferId, null, null))
                 .isInstanceOf(com.gocavgo.delivary.exception.BusinessValidationException.class)
                 .hasMessageContaining("cannot request their own transfer");
     }

@@ -62,9 +62,10 @@ nexxauth:
   client-id: ${NEXXAUTH_CLIENT_ID:}
   client-token: ${NEXXAUTH_CLIENT_TOKEN:}
 
-# Cavgo Main — internal sync endpoint. When a WORKER or DRIVER authenticates
-# through ikuriyebackend, a fire-and-forget request is sent to cavgomain to
-// ensure it mirrors the same user. Optional: if not set, sync is skipped.
+# Cavgo Main — internal sync. When a WORKER authenticates, an evaluative call
+# is made to cavgomain and the office location id is extracted from the returned
+# user; a DRIVER auth sends a fire-and-forget mirror instead. cavgomain also
+# pushes worker office changes here. Optional: if not set, all sync is skipped.
 cavgomain:
   base-url: ${CAVGOMAIN_BASE_URL:}
 
@@ -100,6 +101,9 @@ rabbitmq:
   naviga:
     exchange: cavgomqt.trip.updates
     queue: ikuriyebackend.naviga-trips
+  cavgotrips:
+    exchange: tripservice.trips.updates
+    queue: ikuriyebackend.cavgotrips-trips
 
 logging:
   level:

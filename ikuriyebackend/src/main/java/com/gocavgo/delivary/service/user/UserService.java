@@ -335,6 +335,65 @@ public class UserService {
         return driver.map(d -> d.getCompanyId()).orElse(null);
     }
 
+    /**
+     * Stores the office location id extracted from cavgomain as the worker's
+     * FK-free company/office reference ({@code worker_profiles.company_id}).
+     *
+     * <p>A {@code null}/{@code blank} value clears the stored id (the worker's
+     * office was unassigned in cavgomain). When there is no local user row yet
+     * the value is skipped — it converges on the next authenticated request via
+     * the cavgomain sync. Stable and error-guarded: invalid ids are ignored.
+     */
+    @Transactional
+    public void applyOfficeLocation(Long userId, String officeLocationId) {
+        UUID locationId = null;
+        if (officeLocationId != null && !officeLocationId.isBlank()) {
+            try {
+                locationId = UUID.fromString(officeLocationId);
+            } catch (IllegalArgumentException e) {
+                log.warn("applyOfficeLocation: invalid officeLocationId '{}' for userId={}, ignoring",
+                        officeLocationId, userId);
+                return;
+            }
+        }
+
+        var existing = workerProfileRepository.findByUserId(userId);
+
+        if (locationId == null) {
+            if (existing.isPresent() && existing.get().getCompanyId() != null) {
+                var profile = existing.get();
+                profile.setCompanyId(null);
+                workerProfileRepository.save(profile);
+                log.info("applyOfficeLocation: cleared office location for userId={}", userId);
+            }
+            return;
+        }
+
+        if (existing.isPresent()) {
+            var profile = existing.get();
+            if (!java.util.Objects.equals(profile.getCompanyId(), locationId)) {
+                profile.setCompanyId(locationId);
+                workerProfileRepository.save(profile);
+                log.info("applyOfficeLocation: updated office location {} for userId={}", locationId, userId);
+            }
+            return;
+        }
+
+        var user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            log.debug("applyOfficeLocation: no local user {} yet, office location will be applied on next auth",
+                    userId);
+            return;
+        }
+        var profile = workerProfileRepository.save(WorkerProfileEntity.builder()
+                .user(user)
+                .companyId(locationId)
+                .createdAt(Instant.now())
+                .build());
+        log.info("applyOfficeLocation: created worker profile {} with office location {} for userId={}",
+                profile.getId(), locationId, userId);
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     private NexxauthClient.OrgUser findInNexxauth(Long userId) {

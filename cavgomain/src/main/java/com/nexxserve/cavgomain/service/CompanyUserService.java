@@ -1,5 +1,6 @@
 package com.nexxserve.cavgomain.service;
 
+import com.nexxserve.cavgomain.config.IkuriyeSyncClient;
 import com.nexxserve.cavgomain.dto.request.CompanyUserRequestDto;
 import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
 import com.nexxserve.cavgomain.dto.response.DriverVehicleResponseDto;
@@ -36,6 +37,7 @@ public class CompanyUserService {
     private final VehicleAssignmentRepository assignmentRepository;
     private final AggregatorSyncService aggregatorSyncService;
     private final EventMessagePublisher eventMessagePublisher;
+    private final IkuriyeSyncClient ikuriyeSyncClient;
 
     public CompanyUserResponseDto createCompanyUser(CompanyUserRequestDto user) {
         Company company = companyRepository.findByCompanyCode(user.getCompanyCode())
@@ -52,6 +54,12 @@ public class CompanyUserService {
         }
         CompanyUser saved = companyUserRepository.save(entity);
         CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(saved);
+
+        // Push the worker's office location id to ikuriye when a non-driver
+        // (WORKER-type) company user is created with an office assigned.
+        if (isWorkerRole(saved.getRole())) {
+            pushOfficeToIkuriye(saved);
+        }
         
         // If user is a driver, populate vehicle information
         if (saved.getRole() == CompanyUserRole.DRIVER) {
@@ -80,6 +88,7 @@ public class CompanyUserService {
     public CompanyUserResponseDto updateCompanyUser(Long id, CompanyUserRequestDto user) {
         CompanyUser existingUser = companyUserRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("Company not found with id: " + id));
         CompanyUserRole oldRole = existingUser.getRole();
+        Long oldOfficeId = existingUser.getOffice() != null ? existingUser.getOffice().getId() : null;
         existingUser.setFirstName(user.getFirstName());
         existingUser.setLastName(user.getLastName());
         existingUser.setEmail(user.getEmail());
@@ -101,6 +110,16 @@ public class CompanyUserService {
         
         CompanyUser saved = companyUserRepository.save(existingUser);
         CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(saved);
+
+        // If a worker's office assignment changed (or they just became a WORKER),
+        // push the new office location id to ikuriye — including the null id when
+        // the office was cleared, so ikuriye drops the old one.
+        boolean officeChanged = !java.util.Objects.equals(
+                oldOfficeId, saved.getOffice() != null ? saved.getOffice().getId() : null);
+        boolean becameWorker = oldRole != null && oldRole == CompanyUserRole.DRIVER && isWorkerRole(saved.getRole());
+        if (isWorkerRole(saved.getRole()) && (officeChanged || becameWorker)) {
+            pushOfficeToIkuriye(saved);
+        }
 
         if (saved.getRole() == CompanyUserRole.DRIVER) {
             eventMessagePublisher.publishDriverEvent("UPDATE", buildDriverEventDto(saved));
@@ -279,5 +298,30 @@ public class CompanyUserService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    /**
+     * A "worker" in cavgomain vocabulary is any non-driver company user
+     * (ADMIN, FLEET_MANAGER, SUPERVISOR). Only workers carry offices and only
+     * workers are pushed to ikuriyebackend with an office location id.
+     */
+    private boolean isWorkerRole(CompanyUserRole role) {
+        return role != null && role != CompanyUserRole.DRIVER;
+    }
+
+    /**
+     * Fires the worker's current office location id to ikuriyebackend
+     * (fire-and-forget, error-guarded). The id may be null when the worker has
+     * no office — ikuriye then clears the stored location id.
+     */
+    private void pushOfficeToIkuriye(CompanyUser worker) {
+        if (!ikuriyeSyncClient.isEnabled()) {
+            return;
+        }
+        Office office = worker.getOffice();
+        ikuriyeSyncClient.pushWorkerOffice(
+                worker.getId(),
+                office != null ? office.getOfficeLocationId() : null
+        );
     }
 }

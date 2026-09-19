@@ -16,6 +16,7 @@ public class OfficeResponseDto {
     private String address;
     private String city;
     private String companyCode;
+    private java.util.UUID officeLocationId;
     private Double latitude;
     private Double longitude;
     private String googlePlaceName;
@@ -37,6 +38,7 @@ public class OfficeResponseDto {
         dto.setAddress(office.getAddress());
         dto.setCity(office.getCity());
         dto.setCompanyCode(office.getCompanyCode());
+        dto.setOfficeLocationId(office.getOfficeLocationId());
         dto.setLatitude(office.getLatitude());
         dto.setLongitude(office.getLongitude());
         dto.setGooglePlaceName(office.getGooglePlaceName());
