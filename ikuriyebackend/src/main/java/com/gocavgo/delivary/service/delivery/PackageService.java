@@ -254,7 +254,7 @@ public class PackageService {
         return acceptSinglePackage(packageId, actorId, custodianRole, null);
     }
 
-    private AcceptOfferResponse acceptSinglePackage(UUID packageId, Long actorId, CustodianRole custodianRole, UUID tripId) {
+    private AcceptOfferResponse acceptSinglePackage(UUID packageId, Long actorId, CustodianRole custodianRole, Long tripId) {
         var pkg = packageRepo.findById(packageId)
                 .orElseThrow(() -> new RuntimeException("Package not found: " + packageId));
 
@@ -345,7 +345,7 @@ public class PackageService {
     }
 
     @Transactional
-    public TransferAcceptResult acceptPackageByTransfer(Long actorId, UUID transferId, String transferCode, UUID tripId) {
+    public TransferAcceptResult acceptPackageByTransfer(Long actorId, UUID transferId, String transferCode, Long tripId) {
         // Find and validate the transfer (with pessimistic lock to prevent race conditions)
         var transferEntity = transferService.getTransferEntityWithLock(transferId);
 
@@ -421,7 +421,7 @@ public class PackageService {
      * The requestor (who previously called requestTransfer) becomes the custodian.
      */
     @Transactional
-    public List<PackageResponse> acceptPackagesForTransferConfirmation(Long requestorId, UUID transferId, UUID tripId) {
+    public List<PackageResponse> acceptPackagesForTransferConfirmation(Long requestorId, UUID transferId, Long tripId) {
         log.info("acceptPackagesForTransferConfirmation: requestorId={}, transferId={}, tripId={}", requestorId, transferId, tripId);
 
         // The requestor must exist and be ACTIVE

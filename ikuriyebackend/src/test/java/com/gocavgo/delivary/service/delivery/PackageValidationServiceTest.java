@@ -101,6 +101,20 @@ class PackageValidationServiceTest {
     }
 
     @Test
+    void validateTransitionAllowsAcceptedToPendingConfirmationForFixedRoute() {
+        // Driver holding accepted package can initiate delivery straight to receiver
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.ACCEPTED, PackageStatus.PENDING_CONFIRMATION, DeliveryType.FIXED_ROUTE));
+    }
+
+    @Test
+    void validateTransitionAllowsAssignedDriverToPendingConfirmationForFixedRoute() {
+        // Driver assigned to package can initiate delivery straight to receiver
+        assertDoesNotThrow(() ->
+                validationService.validateTransition(PackageStatus.ASSIGNED_DRIVER, PackageStatus.PENDING_CONFIRMATION, DeliveryType.FIXED_ROUTE));
+    }
+
+    @Test
     void validateTransitionRejectsInvalidMove() {
         var ex = assertThrows(RuntimeException.class, () ->
                 validationService.validateTransition(PackageStatus.IN_TRANSIT, PackageStatus.ASSIGNED_DRIVER, DeliveryType.FIXED_ROUTE));

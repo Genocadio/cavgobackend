@@ -42,13 +42,13 @@ public class PackageValidationService {
     @SuppressWarnings("unchecked")
     private static final Map<PackageStatus, Set<PackageStatus>> ROUTE_TRANSITIONS = Map.ofEntries(
             Map.entry(PackageStatus.CREATED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.PICKED_UP, PackageStatus.CANCELLED)),
-            Map.entry(PackageStatus.ACCEPTED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.ACCEPTED, Set.of(PackageStatus.ORIGIN_OFFICE, PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.PICKED_UP, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.ORIGIN_OFFICE, Set.of(PackageStatus.ASSIGNED_DRIVER, PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
             // Driver holds the package after accepting from the sender directly (PICKED_UP) —
             // may head in transit, drop at the destination office, or deliver straight to
             // the receiver (initiateDelivery → PENDING_CONFIRMATION).
             Map.entry(PackageStatus.PICKED_UP, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.DESTINATION_OFFICE, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
-            Map.entry(PackageStatus.ASSIGNED_DRIVER, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.CANCELLED)),
+            Map.entry(PackageStatus.ASSIGNED_DRIVER, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.PICKED_UP, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.IN_TRANSIT, Set.of(PackageStatus.DESTINATION_OFFICE, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
             // Office that received the package from a driver can deliver straight from
             // DESTINATION_OFFICE (or stage via READY_FOR_COLLECTION first).

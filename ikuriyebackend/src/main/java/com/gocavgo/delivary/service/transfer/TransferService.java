@@ -222,7 +222,7 @@ public class TransferService {
      * - CONFIRM: set status to REQUESTED with actor as requestor.
      */
     @Transactional
-    public TransferAcceptResult acceptTransfer(Long actorId, UUID transferId, String transferCode, UUID tripId) {
+    public TransferAcceptResult acceptTransfer(Long actorId, UUID transferId, String transferCode, Long tripId) {
         log.info("acceptTransfer: actorId={}, transferId={}, tripId={}, ruleType check", actorId, transferId, tripId);
 
         var transfer = transferRepo.findById(transferId)

@@ -18,7 +18,7 @@ public record PackageResponse(
         PackageStatus status,
         Long creatorId,
         UUID companyId,
-        UUID tripId,
+        Long tripId,
         List<CustodianResponse> custodians,
         List<PersonResponse> people,
         List<LocationResponse> locations,

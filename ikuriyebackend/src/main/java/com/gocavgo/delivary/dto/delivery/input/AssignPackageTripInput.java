@@ -6,6 +6,6 @@ import java.util.UUID;
 
 public record AssignPackageTripInput(
         @NotNull UUID packageId,
-        @NotNull UUID tripId
+        @NotNull Long tripId
 ) {
 }

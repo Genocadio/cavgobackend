@@ -464,7 +464,7 @@ input RegenerateDeliveryCodeInput {
 input AssignPackageTripInput {
     "Package UUID"
     packageId: ID!
-    "Trip UUID"
+    "Trip ID"
     tripId: ID!
 }
 

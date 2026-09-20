@@ -9,6 +9,6 @@ public record AssignDriverInput(
         @NotNull Long driverId,
         @NotNull Long assignedBy,
         String notes,
-        UUID tripId
+        Long tripId
 ) {
 }

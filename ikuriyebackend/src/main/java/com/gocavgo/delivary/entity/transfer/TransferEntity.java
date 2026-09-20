@@ -62,7 +62,7 @@ public class TransferEntity {
     private String transferCodeHash;
 
     @Column(name = "trip_id")
-    private UUID tripId;
+    private Long tripId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
