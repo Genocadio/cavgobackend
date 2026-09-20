@@ -8,6 +8,9 @@ import java.util.List;
 
 @Data
 public class OfficeRequestDto {
+    /** Optional parent company ID */
+    private Long companyId;
+
     /** Company code that owns this office */
     private String companyCode;
 

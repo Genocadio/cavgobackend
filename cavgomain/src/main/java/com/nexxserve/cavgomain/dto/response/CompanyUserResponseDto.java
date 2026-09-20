@@ -12,6 +12,7 @@ public class CompanyUserResponseDto {
     private Long id;
     private Long companyId;
     private String companyName;
+    private String companyCode;
     private String firstName;
     private String lastName;
     private String email;
@@ -33,6 +34,7 @@ public class CompanyUserResponseDto {
         if (entity.getCompany() != null) {
             dto.setCompanyId(entity.getCompany().getId());
             dto.setCompanyName(entity.getCompany().getCompanyName());
+            dto.setCompanyCode(entity.getCompany().getCompanyCode());
         }
         dto.setFirstName(entity.getFirstName());
         dto.setLastName(entity.getLastName());

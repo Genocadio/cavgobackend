@@ -31,8 +31,12 @@ public class OfficeResponseDto {
     public static OfficeResponseDto fromEntity(Office office) {
         OfficeResponseDto dto = new OfficeResponseDto();
         dto.setId(office.getId());
-        // Office IS a Company (joined inheritance) — use inherited fields directly
-        dto.setCompanyName(office.getCompanyName());
+        if (office.getParentCompany() != null) {
+            dto.setCompanyId(office.getParentCompany().getId());
+            dto.setCompanyName(office.getParentCompany().getCompanyName());
+        } else {
+            dto.setCompanyName(office.getCompanyName());
+        }
         dto.setName(office.getCompanyName());
         dto.setEmail(office.getEmail());
         dto.setPhone(office.getPhone());

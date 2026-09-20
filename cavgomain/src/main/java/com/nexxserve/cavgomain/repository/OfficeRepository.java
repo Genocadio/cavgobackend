@@ -6,4 +6,5 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface OfficeRepository extends JpaRepository<Office, Long> {
+    java.util.List<Office> findByParentCompanyId(Long parentCompanyId);
 }

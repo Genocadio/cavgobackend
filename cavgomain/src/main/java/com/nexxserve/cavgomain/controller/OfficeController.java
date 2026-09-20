@@ -31,8 +31,16 @@ public class OfficeController {
     }
 
     @GetMapping
-    public List<OfficeResponseDto> getOfficesByCompany(@RequestParam Long companyId) {
-        return officeService.findByCompanyId(companyId);
+    public List<OfficeResponseDto> getOffices(
+            @RequestParam(required = false) Long companyId,
+            @RequestParam(required = false) String companyCode) {
+        if (companyId != null) {
+            return officeService.findByCompanyId(companyId);
+        }
+        if (companyCode != null && !companyCode.isBlank()) {
+            return officeService.findByCompanyCode(companyCode);
+        }
+        return officeService.findAll();
     }
 
     @DeleteMapping("/{id}")

@@ -29,17 +29,23 @@ public class OfficeService {
         if (request.getLocationId() == null) {
             throw new IllegalArgumentException("locationId is required when creating an office (must be selected from cavgotrips locations)");
         }
-        if (request.getCompanyCode() == null || request.getCompanyCode().isBlank()) {
-            throw new IllegalArgumentException("companyCode is required when creating an office");
-        }
         if (request.getName() == null || request.getName().isBlank()) {
             throw new IllegalArgumentException("name is required when creating an office");
         }
 
-        Company company = companyRepository.findByCompanyCode(request.getCompanyCode())
-                .orElseThrow(() -> new IllegalArgumentException("Company not found with code: " + request.getCompanyCode()));
+        Company company = null;
+        if (request.getCompanyId() != null) {
+            company = companyRepository.findById(request.getCompanyId()).orElse(null);
+        }
+        if (company == null && request.getCompanyCode() != null && !request.getCompanyCode().isBlank()) {
+            company = companyRepository.findByCompanyCode(request.getCompanyCode().trim()).orElse(null);
+        }
+        if (company == null) {
+            throw new IllegalArgumentException("Company not found. Either valid companyId or companyCode is required.");
+        }
 
         Office office = request.toEntity(company);
+        office.setParentCompany(company);
         // Generate a company code for the office (JOINED inheritance — office is also a Company)
         office.setCompanyCode(generateOfficeCode(request.getName(), company.getCompanyCode()));
         Office saved = officeRepository.save(office);
@@ -50,7 +56,7 @@ public class OfficeService {
         Office existing = officeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Office not found with id: " + id));
 
-        if (request.getName() != null) existing.setCompanyName(request.getName());
+        if (request.getName() != null && !request.getName().isBlank()) existing.setCompanyName(request.getName());
         if (request.getEmail() != null) existing.setEmail(request.getEmail());
         if (request.getPhone() != null) existing.setPhone(request.getPhone());
         if (request.getAddress() != null) existing.setAddress(request.getAddress());
@@ -77,13 +83,26 @@ public class OfficeService {
 
     @Transactional(readOnly = true)
     public List<OfficeResponseDto> findByCompanyId(Long companyId) {
-        // Office IS a Company (joined inheritance) — find offices assigned to workers of this company
+        List<Office> byParent = officeRepository.findByParentCompanyId(companyId);
+        if (!byParent.isEmpty()) {
+            return byParent.stream()
+                    .map(OfficeResponseDto::fromEntity)
+                    .collect(Collectors.toList());
+        }
+        // Fallback for legacy rows linked via company users
         return companyUserRepository.findByCompanyId(companyId).stream()
                 .map(CompanyUser::getOffice)
                 .filter(java.util.Objects::nonNull)
                 .distinct()
                 .map(OfficeResponseDto::fromEntity)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<OfficeResponseDto> findByCompanyCode(String companyCode) {
+        Company company = companyRepository.findByCompanyCode(companyCode)
+                .orElseThrow(() -> new EntityNotFoundException("Company not found with code: " + companyCode));
+        return findByCompanyId(company.getId());
     }
 
     @Transactional(readOnly = true)
@@ -97,6 +116,13 @@ public class OfficeService {
         if (!officeRepository.existsById(id)) {
             throw new EntityNotFoundException("Office not found with id: " + id);
         }
+        // Unassign users from this office before deleting
+        companyUserRepository.findAll().stream()
+                .filter(u -> u.getOffice() != null && u.getOffice().getId().equals(id))
+                .forEach(u -> {
+                    u.setOffice(null);
+                    companyUserRepository.save(u);
+                });
         officeRepository.deleteById(id);
     }
 
