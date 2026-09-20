@@ -26,6 +26,16 @@ public class OfficeService {
     private final CompanyUserRepository companyUserRepository;
 
     public OfficeResponseDto createOffice(OfficeRequestDto request) {
+        if (request.getLocationId() == null) {
+            throw new IllegalArgumentException("locationId is required when creating an office (must be selected from cavgotrips locations)");
+        }
+        if (request.getCompanyCode() == null || request.getCompanyCode().isBlank()) {
+            throw new IllegalArgumentException("companyCode is required when creating an office");
+        }
+        if (request.getName() == null || request.getName().isBlank()) {
+            throw new IllegalArgumentException("name is required when creating an office");
+        }
+
         Company company = companyRepository.findByCompanyCode(request.getCompanyCode())
                 .orElseThrow(() -> new IllegalArgumentException("Company not found with code: " + request.getCompanyCode()));
 
@@ -45,6 +55,7 @@ public class OfficeService {
         if (request.getPhone() != null) existing.setPhone(request.getPhone());
         if (request.getAddress() != null) existing.setAddress(request.getAddress());
         if (request.getCity() != null) existing.setCity(request.getCity());
+        if (request.getLocationId() != null) existing.setLocationId(request.getLocationId());
         if (request.getLatitude() != null) existing.setLatitude(request.getLatitude());
         if (request.getLongitude() != null) existing.setLongitude(request.getLongitude());
         if (request.getGooglePlaceName() != null) existing.setGooglePlaceName(request.getGooglePlaceName());

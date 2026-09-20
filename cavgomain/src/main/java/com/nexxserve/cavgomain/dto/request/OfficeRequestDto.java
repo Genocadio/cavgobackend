@@ -19,7 +19,8 @@ public class OfficeRequestDto {
     private String address;
     private String city;
 
-    // ── Location fields (from cavgotrips) ──
+    // ── Location fields (picked from cavgotrips locations) ──
+    private Long locationId;
     private Double latitude;
     private Double longitude;
     private String googlePlaceName;
@@ -39,6 +40,7 @@ public class OfficeRequestDto {
         office.setAddress(this.address);
         office.setCity(this.city);
         // Office-specific fields
+        office.setLocationId(this.locationId);
         office.setLatitude(this.latitude);
         office.setLongitude(this.longitude);
         office.setGooglePlaceName(this.googlePlaceName);

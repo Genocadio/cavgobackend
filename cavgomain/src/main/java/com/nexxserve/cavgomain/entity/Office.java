@@ -32,6 +32,9 @@ import java.util.UUID;
 @ToString(callSuper = true)
 public class Office extends Company {
 
+    @Column(name = "location_id")
+    private Long locationId;
+
     @Column(name = "location_latitude")
     private Double latitude;
 
