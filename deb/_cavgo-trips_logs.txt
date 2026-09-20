@@ -1,0 +1,999 @@
+2026/09/20 08:10:18 Info: .env file not found, using environment variables from container: open .env: no such file or directory
+2026/09/20 08:10:18 [RabbitMQ] Successfully declared fanout exchange 'tripservice.trips.updates' and bound queue '' to it
+2026/09/20 08:10:18 [TripUpdate] Trip update posting enabled with baseURL: http://adminaggregate:4000
+2026/09/20 08:10:18 [search] failed to initialize Meilisearch indexes, falling back to SQL: ensure index "locations": meilisearch PUT /indexes/locations/settings: status 405: 
+2026/09/20 08:10:18 [TripLogService] Cleanup scheduler started
+2026/09/20 08:10:18 [TripSnapshot] 🚀 Initializing trip snapshots consumer...
+2026/09/20 08:10:18 [TripSnapshot] 🔗 Exchange: bookingservice.trip.snapshot | Queue: cavgotrips.trip-snapshots
+Attempting to register with Eureka at URL: http://eurekacavgo:8761/eureka/apps/CAVGOTRIPS
+Instance details: App=CAVGOTRIPS, InstanceID=CAVGOTRIPS:176ad0fe-888a-4485-aed7-390646e337f6, IP=10.0.4.12, Port=6080
+Successfully registered with Eureka. Instance ID: CAVGOTRIPS:176ad0fe-888a-4485-aed7-390646e337f6
+2026/09/20 08:10:18 [Eureka] registration ensured for instance CAVGOTRIPS:176ad0fe-888a-4485-aed7-390646e337f6
+Server starting on port 6080
+2026/09/20 08:10:18 [RabbitMQ] Successfully declared fanout exchange 'bookingservice.trip.snapshot' and bound queue 'cavgotrips.trip-snapshots' to it
+2026/09/20 08:10:18 [TripSnapshot] ✅ Exchange and queue setup successful
+2026/09/20 08:10:18 [TripSnapshot] 📡 Starting snapshot listener...
+2026/09/20 08:10:18 [TripSnapshot MQ] Setting up consumer for queue: cavgotrips.trip-snapshots
+2026/09/20 08:10:18 [RabbitMQ] Successfully declared fanout exchange 'cavgomqt.trip.updates' and bound queue 'cavgotrips.trip-updates' to it
+2026/09/20 08:10:18 [TripSnapshot MQ] ✅ Consumer started for queue: cavgotrips.trip-snapshots
+2026/09/20 08:10:18 [TripSnapshot MQ] ⏳ Waiting for snapshot messages on queue: cavgotrips.trip-snapshots
+2026/09/20 08:10:18 [TripSnapshot] ✅ Snapshot consumer successfully started and listening
+2026/09/20 08:10:18 [TripSnapshot MQ] 🎯 Snapshot consumer goroutine started - listening on queue: cavgotrips.trip-snapshots
+2026/09/20 08:11:08 [Session] ✅ Created session d58a9b9837ee556d2055a57aa2da7e3e with 0 trip IDs
+2026/09/20 08:11:08 [Session] ✅ Created session 90b16e355bd48b7d874b73c5d4ce3e4d with 3 trip IDs
+2026/09/20 08:12:16 [Session] ✅ Created session 829bca327245e6cd000ebe567fd3cc7a with 0 trip IDs
+2026/09/20 08:12:18 [Session] ✅ Created session c45662f09250410be6e21eabaa4a5ceb with 0 trip IDs
+2026/09/20 08:13:11 [Session] ✅ Created session 0888f7285f381d13a18042ae449ff545 with 0 trip IDs
+2026/09/20 08:13:12 [Session] ✅ Created session 0fe6d8d37389bd4e0c9ffcaecb75548f with 0 trip IDs
+2026/09/20 08:13:33 [Session] ✅ Created session 7e8e23e5dae15e618dbee5e6da1c86f3 with 2 trip IDs
+[DEBUG] Vehicle service URL: http://cavgomain:6060/internal/api/vehicles/1
+[DEBUG] Vehicle service response status: 200
+[DEBUG] Vehicle service response body: {"id":1,"companyId":1,"companyName":"Cavgo test","make":"Toyota","model":"Hiace","capacity":1,"licensePlate":"DH12G","vehicleType":"TRUCK","status":"OCCUPIED","createdAt":"2026-09-10T17:38:23.817131","updatedAt":"2026-09-14T05:08:34.402150","driver":{"id":7,"companyId":1,"companyName":"Cavgo test","firstName":"Driver","lastName":"","email":"driver@email.com","phone":"+250784523347","status":"ACTIVE","dateOfBirth":null,"address":null,"role":"DRIVER","licenseNumber":null,"licenseExpiry":null,"createdAt":"2026-09-13T12:57:55.158372","updatedAt":"2026-09-13T13:02:07.146822","vehicle":null,"office":null},"initialPassword":null,"lastLocation":null,"isOnline":false,"lastOnlineAt":null}
+2026/09/20 08:13:45 [TripLogService] Logged trip 15 update: created (log ID: 45)
+2026/09/20 08:13:45 [TripLogService] Logged waypoint 33 update: created for trip 15
+2026/09/20 08:13:45 [TripLogService] Logged waypoint 34 update: created for trip 15
+2026/09/20 08:13:45 [TripLogService] Logged waypoint 35 update: created for trip 15
+2026/09/20 08:13:45 [TripLogService] Logged waypoint 36 update: created for trip 15
+2026/09/20 08:13:45 [TripLogService] Logged waypoint 37 update: created for trip 15
+2026/09/20 08:13:45 [TripLogService] Logged waypoint 38 update: created for trip 15
+2026/09/20 08:13:45 [TripLogService] Logged waypoint 39 update: created for trip 15
+2026/09/20 08:13:45 [RabbitMQ Publish Fanout] Exchange: tripservice.trips.updates, Event: created, Message: {"event":"created","data":{"id":15,"route_id":579,"vehicle_id":1,"vehicle":{"id":1,"company_id":1,"company_name":"Cavgo test","capacity":1,"license_plate":"DH12G","driver":{"id":7,"name":"Driver ","phone":"+250784523347"}},"status":"SCHEDULED","departure_time":1789895625,"completion_time":null,"connection_mode":"ONLINE","notes":null,"seats":1,"remaining_seats":1,"price":700,"remaining_time_to_destination":null,"remaining_distance_to_destination":null,"is_reversed":false,"current_speed":null,"current_latitude":null,"current_longitude":null,"has_custom_waypoints":true,"auto_return":false,"created_at":"2026-09-20T08:13:45.278151Z","updated_at":"2026-09-20T08:13:45.278151Z","route":{"id":579,"name":null,"distance_meters":9600,"estimated_duration_seconds":3600,"google_route_id":null,"origin_id":170,"destination_id":169,"route_price":700,"city_route":true,"created_at":"2026-09-13T21:31:42.930863Z","updated_at":"2026-09-13T21:31:42.930863Z","origin":{"id":170,"latitude":-1.9496166326933349,"code":"11004","longitude":30.125567180998672,"google_place_name":"Kimironko Taxi Park, KG 11 Avenue, Kimironko, Kigali City, Rwanda","custom_name":"Kimironko Gare","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"2026-09-11T11:52:42.554285Z","updated_at":"2026-09-11T11:52:42.554285Z"},"destination":{"id":169,"latitude":-1.9433782,"code":"13002","longitude":30.057300899999998,"google_place_name":"Kigali CBD Bus Station, KN 82 Street, Nyarugenge, Kigali City, Rwanda","custom_name":"Downtown Gare","province":"Kigali","district":"Nyarugenge","place_id":null,"created_at":"2026-09-11T11:51:24.120599Z","updated_at":"2026-09-11T11:51:24.120599Z"},"waypoints":null},"waypoints":[{"id":33,"trip_id":15,"location_id":199,"order":1,"price":60,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:13:45.290039Z","updated_at":"2026-09-20T08:13:45.290039Z","location":{"id":199,"latitude":-1.9514399216575953,"code":"11009","longitude":30.122123248083398,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"KIE Remera 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:27:08.142329Z"}},{"id":34,"trip_id":15,"location_id":197,"order":2,"price":80,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:13:45.292873Z","updated_at":"2026-09-20T08:13:45.292873Z","location":{"id":197,"latitude":-1.9535296342344992,"code":"11007","longitude":30.11917068369476,"google_place_name":"KG 205 Street, Kigali City, Rwanda","custom_name":"Kwa Rwahama 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":"324208661345","created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:53.008951Z"}},{"id":35,"trip_id":15,"location_id":205,"order":3,"price":100,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:13:45.295346Z","updated_at":"2026-09-20T08:13:45.295346Z","location":{"id":205,"latitude":-1.9564669416811284,"code":"11015","longitude":30.115378776744137,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"Sitade Amahoro 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:18.300506Z"}},{"id":36,"trip_id":15,"location_id":208,"order":4,"price":120,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:13:45.297825Z","updated_at":"2026-09-20T08:13:45.297825Z","location":{"id":208,"latitude":-1.9580104538810161,"code":"11018","longitude":30.111503780508144,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"Zariya Court 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:25:11.963882Z"}},{"id":37,"trip_id":15,"location_id":209,"order":5,"price":160,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:13:45.300484Z","updated_at":"2026-09-20T08:13:45.300484Z","location":{"id":209,"latitude":-1.9596731250596804,"code":"11019","longitude":30.10812210721525,"google_place_name":"Hôtel Chez Lando, DR71, Kigali City, Rwanda","custom_name":"Kwa Lando 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:24:55.749845Z"}},{"id":38,"trip_id":15,"location_id":211,"order":6,"price":180,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:13:45.303044Z","updated_at":"2026-09-20T08:13:45.303044Z","location":{"id":211,"latitude":-1.9575128210913277,"code":"11021","longitude":30.104823234802353,"google_place_name":"KN 5 Road, Kigali City, Rwanda","custom_name":"Kami (NPPA) 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-15T17:01:22.419901Z"}},{"id":39,"trip_id":15,"location_id":213,"order":7,"price":220,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:13:45.305468Z","updated_at":"2026-09-20T08:13:45.305468Z","location":{"id":213,"latitude":-1.9531083086434222,"code":"11023","longitude":30.10151351696669,"google_place_name":"KN 5 Road, Kigali City, Rwanda","custom_name":"Gishushu 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:23:58.236024Z"}}]}}
+2026/09/20 08:13:45 [Repository] 🔍 JSONB query found 0 sessions for trip 15
+2026/09/20 08:13:45 [Repository] 🔍 No sessions found with JSONB query, trying alternative approach
+2026/09/20 08:13:45 [Repository] 🔍 Found 7 total active sessions
+2026/09/20 08:13:45 [Repository] 🔍 Alternative approach found 0 sessions for trip 15
+2026/09/20 08:13:45 [Session] 🔍 Found 0 sessions tracking trip 15
+2026/09/20 08:13:45 [SSE] 📡 Broadcasting event 'created' for trip 15 to 0 sessions
+2026/09/20 08:13:45 [SSE] 📊 Event 'created' for trip 15 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:13:45 [Session] ✅ Created session 2d650ac23a2bcb10192d511f6e503e95 with 3 trip IDs
+2026/09/20 08:13:46 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":15,"carId":"1","status":"CREATED","createdAt":1789892026.476341000,"completedAt":null,"waypointProgresses":[{"waypointIndex":1,"waypointId":"33","waypointName":"KIE Remera 1 Kimironko","latitude":-1.949669,"longitude":30.125502,"state":"APPROACHING","arrivedAt":null,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":2,"waypointId":"34","waypointName":"Kwa Rwahama 1 Kimironko","latitude":-1.951458,"longitude":30.122136,"state":"APPROACHING","arrivedAt":null,"remainingDistance":444.5397099205903,"remainingTime":320.1899303199172},{"waypointIndex":3,"waypointId":"35","waypointName":"Sitade Amahoro 1 Kimironko","latitude":-1.953579,"longitude":30.119208,"state":"APPROACHING","arrivedAt":null,"remainingDistance":862.3709891591867,"remainingTime":621.1425003586805},{"waypointIndex":4,"waypointId":"36","waypointName":"Zariya Court 1 Kimironko","latitude":-1.956522,"longitude":30.1154,"state":"APPROACHING","arrivedAt":null,"remainingDistance":1416.7361695627385,"remainingTime":1020.4367467982381},{"waypointIndex":5,"waypointId":"37","waypointName":"Kwa Lando 1 Kimironko","latitude":-1.958076,"longitude":30.111531,"state":"APPROACHING","arrivedAt":null,"remainingDistance":1821.7810724181634,"remainingTime":1312.179635740338},{"waypointIndex":6,"waypointId":"38","waypointName":"Kami (NPPA) 1 Kimironko","latitude":-1.959745,"longitude":30.108104,"state":"APPROACHING","arrivedAt":null,"remainingDistance":2320.0011293569837,"remainingTime":1671.0340682132494},{"waypointIndex":7,"waypointId":"39","waypointName":"Gishushu 1 Kimironko","latitude":-1.957573,"longitude":30.104726,"state":"APPROACHING","arrivedAt":null,"remainingDistance":2768.8737251649013,"remainingTime":1994.3448590533558},{"waypointIndex":8,"waypointId":"169","waypointName":"Downtown Gare","latitude":-1.953183,"longitude":30.101491,"state":"APPROACHING","arrivedAt":null,"remainingDistance":3390.973334829862,"remainingTime":2442.426382987974}],"currentLocation":null},"timestamp":1789892026.517998205,"source":"naviga-trip-create"}
+2026/09/20 08:13:46 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 15,
+    "carId": "1",
+    "status": "CREATED",
+    "createdAt": {},
+    "completedAt": null,
+    "waypointProgresses": [
+      {
+        "waypointIndex": 1,
+        "waypointId": "33",
+        "waypointName": "KIE Remera 1 Kimironko",
+        "latitude": -1.949669,
+        "longitude": 30.125502,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 2,
+        "waypointId": "34",
+        "waypointName": "Kwa Rwahama 1 Kimironko",
+        "latitude": -1.951458,
+        "longitude": 30.122136,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 444.5397099205903,
+        "remainingTime": 320.1899303199172
+      },
+      {
+        "waypointIndex": 3,
+        "waypointId": "35",
+        "waypointName": "Sitade Amahoro 1 Kimironko",
+        "latitude": -1.953579,
+        "longitude": 30.119208,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 862.3709891591867,
+        "remainingTime": 621.1425003586805
+      },
+      {
+        "waypointIndex": 4,
+        "waypointId": "36",
+        "waypointName": "Zariya Court 1 Kimironko",
+        "latitude": -1.956522,
+        "longitude": 30.1154,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 1416.7361695627385,
+        "remainingTime": 1020.4367467982381
+      },
+      {
+        "waypointIndex": 5,
+        "waypointId": "37",
+        "waypointName": "Kwa Lando 1 Kimironko",
+        "latitude": -1.958076,
+        "longitude": 30.111531,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 1821.7810724181634,
+        "remainingTime": 1312.179635740338
+      },
+      {
+        "waypointIndex": 6,
+        "waypointId": "38",
+        "waypointName": "Kami (NPPA) 1 Kimironko",
+        "latitude": -1.959745,
+        "longitude": 30.108104,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 2320.0011293569837,
+        "remainingTime": 1671.0340682132494
+      },
+      {
+        "waypointIndex": 7,
+        "waypointId": "39",
+        "waypointName": "Gishushu 1 Kimironko",
+        "latitude": -1.957573,
+        "longitude": 30.104726,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 2768.8737251649013,
+        "remainingTime": 1994.3448590533558
+      },
+      {
+        "waypointIndex": 8,
+        "waypointId": "169",
+        "waypointName": "Downtown Gare",
+        "latitude": -1.953183,
+        "longitude": 30.101491,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 3390.973334829862,
+        "remainingTime": 2442.426382987974
+      }
+    ],
+    "currentLocation": null
+  },
+  "timestamp": {},
+  "source": "naviga-trip-create"
+}
+2026/09/20 08:13:46 [NavigaUpdate] Inbound trip=15 status=CREATED source=naviga-trip-create ts=1789892026 waypoints=8
+2026/09/20 08:13:46 [NavigaUpdate] Parsed trip=15 mapped_status=SCHEDULED dest_state=APPROACHING remaining_distance=3390.97 remaining_time=2442
+2026/09/20 08:13:46 [TripLogService] Logged trip 15 update: updated (log ID: 46)
+2026/09/20 08:13:46 [Repository] 🔍 JSONB query found 1 sessions for trip 15
+2026/09/20 08:13:46 [Session] 🔍 Found 1 sessions tracking trip 15
+2026/09/20 08:13:46 [Session] 📋 Session 2d650ac23a2bcb10192d511f6e503e95 tracks trip 15 with 3 total trip IDs
+2026/09/20 08:13:46 [SSE] 📡 Broadcasting event 'updated' for trip 15 to 1 sessions
+2026/09/20 08:13:46 [SSE] 📋 Session 2d650ac23a2bcb10192d511f6e503e95 tracks trip 15
+2026/09/20 08:13:46 [SSE] 📊 Event 'updated' for trip 15 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:13:56 [TripLogService] Logged trip 9 update: cancelled (log ID: 47)
+2026/09/20 08:13:56 [RabbitMQ Publish Fanout] Exchange: tripservice.trips.updates, Event: cancelled, Message: {"event":"cancelled","data":{"id":9,"route_id":3,"vehicle_id":1,"vehicle":{"id":1,"company_id":1,"company_name":"Cavgo test","capacity":1,"license_plate":"DH12G","driver":{"id":7,"name":"Driver ","phone":"+250784523347"}},"status":"CANCELLED","departure_time":1789310543,"completion_time":null,"connection_mode":"ONLINE","notes":null,"seats":1,"remaining_seats":1,"price":416,"remaining_time_to_destination":30235,"remaining_distance_to_destination":15117.703319722968,"is_reversed":false,"current_speed":-0.021102437004446983,"current_latitude":2.084917975363075e+53,"current_longitude":-2.8196200493852946e+163,"has_custom_waypoints":false,"auto_return":false,"created_at":"2026-09-13T13:42:26.177348Z","updated_at":"2026-09-20T08:13:56.718815Z","route":{"id":3,"name":null,"distance_meters":21100,"estimated_duration_seconds":14400,"google_route_id":null,"origin_id":8,"destination_id":7,"route_price":416,"city_route":false,"created_at":"2026-09-05T22:41:52.628123Z","updated_at":"2026-09-05T22:41:52.628123Z","origin":{"id":8,"latitude":-1.5751513,"code":"25002","longitude":30.067868999999998,"google_place_name":"NR19, Gicumbi, Rulindo, Northern Province, Rwanda","custom_name":"Gicumbi Gare","province":"North","district":"Gicumbi","place_id":null,"created_at":"2026-09-05T22:40:29.42155Z","updated_at":"2026-09-05T22:40:29.42155Z"},"destination":{"id":7,"latitude":-1.629096,"code":"25001","longitude":30.1037347,"google_place_name":"NR19, Gicumbi, Northern Province, Rwanda","custom_name":"Rukomo","province":"North","district":"Gicumbi","place_id":null,"created_at":"2026-09-05T22:37:35.064938Z","updated_at":"2026-09-05T22:37:35.064938Z"},"waypoints":null},"waypoints":[]}}
+2026/09/20 08:13:56 [Repository] 🔍 JSONB query found 2 sessions for trip 9
+2026/09/20 08:13:56 [Session] 🔍 Found 2 sessions tracking trip 9
+2026/09/20 08:13:56 [Session] 📋 Session 7e8e23e5dae15e618dbee5e6da1c86f3 tracks trip 9 with 2 total trip IDs
+2026/09/20 08:13:56 [Session] 📋 Session 2d650ac23a2bcb10192d511f6e503e95 tracks trip 9 with 3 total trip IDs
+2026/09/20 08:13:56 [SSE] 📡 Broadcasting event 'cancelled' for trip 9 to 2 sessions
+2026/09/20 08:13:56 [SSE] 📋 Session 7e8e23e5dae15e618dbee5e6da1c86f3 tracks trip 9
+2026/09/20 08:13:56 [SSE] 📋 Session 2d650ac23a2bcb10192d511f6e503e95 tracks trip 9
+2026/09/20 08:13:56 [SSE] 📊 Event 'cancelled' for trip 9 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:13:56 [vehicleStatus] vehicle 1 -> AVAILABLE (HTTP 200)
+2026/09/20 08:13:57 [Session] ✅ Created session 9a00d40e6b12e3598cf9bd74618496c4 with 3 trip IDs
+2026/09/20 08:13:57 [Session] ✅ Created session 0a77df6a94b6c7627bdf9b2d92b8c831 with 0 trip IDs
+2026/09/20 08:13:57 [Session] ✅ Created session a0ecc9d3ad1f4e4c9c9f3acdb11e4ee0 with 0 trip IDs
+2026/09/20 08:14:00 [Session] ✅ Created session c019e5934d26d978bce1565b1d3cb770 with 0 trip IDs
+2026/09/20 08:14:01 [Session] ✅ Created session 4ee12776350cee462fc322dabf9b1d16 with 0 trip IDs
+2026/09/20 08:14:08 [Session] ✅ Created session 12909fc52a5914d87ba726382f427055 with 0 trip IDs
+2026/09/20 08:14:08 [Session] ✅ Created session e8ab284b1fade5f730f1c617e44b40b0 with 0 trip IDs
+2026/09/20 08:14:57 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":15,"carId":null,"status":"COMPLETED","createdAt":1789892097.019921282,"completedAt":null,"waypointProgresses":null,"currentLocation":null},"timestamp":1789892097.019922267,"source":"navigation-api-fanout"}
+2026/09/20 08:14:57 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 15,
+    "carId": "",
+    "status": "COMPLETED",
+    "createdAt": {},
+    "completedAt": null,
+    "waypointProgresses": null,
+    "currentLocation": null
+  },
+  "timestamp": {},
+  "source": "navigation-api-fanout"
+}
+2026/09/20 08:14:57 [NavigaUpdate] Inbound trip=15 status=COMPLETED source=navigation-api-fanout ts=1789892097 waypoints=0
+2026/09/20 08:14:57 [TripLogService] Logged trip 15 update: updated (log ID: 48)
+2026/09/20 08:14:57 [Repository] 🔍 JSONB query found 2 sessions for trip 15
+2026/09/20 08:14:57 [Session] 🔍 Found 2 sessions tracking trip 15
+2026/09/20 08:14:57 [Session] 📋 Session 2d650ac23a2bcb10192d511f6e503e95 tracks trip 15 with 3 total trip IDs
+2026/09/20 08:14:57 [Session] 📋 Session 9a00d40e6b12e3598cf9bd74618496c4 tracks trip 15 with 3 total trip IDs
+2026/09/20 08:14:57 [SSE] 📡 Broadcasting event 'updated' for trip 15 to 2 sessions
+2026/09/20 08:14:57 [SSE] 📋 Session 2d650ac23a2bcb10192d511f6e503e95 tracks trip 15
+2026/09/20 08:14:57 [SSE] 📋 Session 9a00d40e6b12e3598cf9bd74618496c4 tracks trip 15
+2026/09/20 08:14:57 [SSE] 📊 Event 'updated' for trip 15 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:14:57 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":15,"carId":"1","status":"COMPLETED","createdAt":1789892026.476341000,"completedAt":1789892097.016301126,"waypointProgresses":[{"waypointIndex":1,"waypointId":"33","waypointName":"KIE Remera 1 Kimironko","latitude":-1.9514399216575953,"longitude":30.122123248083398,"state":"DONE","arrivedAt":1789892097.010247592,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":2,"waypointId":"34","waypointName":"Kwa Rwahama 1 Kimironko","latitude":-1.9535296342344992,"longitude":30.11917068369476,"state":"DONE","arrivedAt":1789892097.010385872,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":3,"waypointId":"35","waypointName":"Sitade Amahoro 1 Kimironko","latitude":-1.9564669416811284,"longitude":30.115378776744137,"state":"DONE","arrivedAt":1789892097.010507510,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":4,"waypointId":"36","waypointName":"Zariya Court 1 Kimironko","latitude":-1.9580104538810161,"longitude":30.111503780508144,"state":"DONE","arrivedAt":1789892097.010629271,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":5,"waypointId":"37","waypointName":"Kwa Lando 1 Kimironko","latitude":-1.9596731250596804,"longitude":30.10812210721525,"state":"DONE","arrivedAt":1789892097.010754378,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":6,"waypointId":"38","waypointName":"Kami (NPPA) 1 Kimironko","latitude":-1.9575128210913277,"longitude":30.104823234802353,"state":"DONE","arrivedAt":1789892097.010878088,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":7,"waypointId":"39","waypointName":"Gishushu 1 Kimironko","latitude":-1.9531083086434222,"longitude":30.10151351696669,"state":"DONE","arrivedAt":1789892097.011003511,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":8,"waypointId":"169","waypointName":"Downtown Gare","latitude":-1.9433782,"longitude":30.057300899999998,"state":"ARRIVED","arrivedAt":1789892097.011149175,"remainingDistance":13.650809962013227,"remainingTime":27.301619924026454}],"currentLocation":{"carId":"1","latitude":2.872391345706094E-288,"longitude":-4.471341273054133E-12,"speed":3.5602053897086914E-20,"heading":9.455686261726086E-38,"timestamp":1789892095.821000000}},"timestamp":1789892097.027520512,"source":"naviga-gps-batch"}
+2026/09/20 08:14:57 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 15,
+    "carId": "1",
+    "status": "COMPLETED",
+    "createdAt": {},
+    "completedAt": {},
+    "waypointProgresses": [
+      {
+        "waypointIndex": 1,
+        "waypointId": "33",
+        "waypointName": "KIE Remera 1 Kimironko",
+        "latitude": -1.9514399216575953,
+        "longitude": 30.122123248083398,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 2,
+        "waypointId": "34",
+        "waypointName": "Kwa Rwahama 1 Kimironko",
+        "latitude": -1.9535296342344992,
+        "longitude": 30.11917068369476,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 3,
+        "waypointId": "35",
+        "waypointName": "Sitade Amahoro 1 Kimironko",
+        "latitude": -1.9564669416811284,
+        "longitude": 30.115378776744137,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 4,
+        "waypointId": "36",
+        "waypointName": "Zariya Court 1 Kimironko",
+        "latitude": -1.9580104538810161,
+        "longitude": 30.111503780508144,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 5,
+        "waypointId": "37",
+        "waypointName": "Kwa Lando 1 Kimironko",
+        "latitude": -1.9596731250596804,
+        "longitude": 30.10812210721525,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 6,
+        "waypointId": "38",
+        "waypointName": "Kami (NPPA) 1 Kimironko",
+        "latitude": -1.9575128210913277,
+        "longitude": 30.104823234802353,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 7,
+        "waypointId": "39",
+        "waypointName": "Gishushu 1 Kimironko",
+        "latitude": -1.9531083086434222,
+        "longitude": 30.10151351696669,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 8,
+        "waypointId": "169",
+        "waypointName": "Downtown Gare",
+        "latitude": -1.9433782,
+        "longitude": 30.057300899999998,
+        "state": "ARRIVED",
+        "arrivedAt": {},
+        "remainingDistance": 13.650809962013227,
+        "remainingTime": 27.301619924026454
+      }
+    ],
+    "currentLocation": {
+      "carId": "1",
+      "latitude": 2.872391345706094e-288,
+      "longitude": -4.471341273054133e-12,
+      "speed": 3.5602053897086914e-20,
+      "heading": 9.455686261726086e-38,
+      "timestamp": {}
+    }
+  },
+  "timestamp": {},
+  "source": "naviga-gps-batch"
+}
+2026/09/20 08:14:57 [NavigaUpdate] Inbound trip=15 status=COMPLETED source=naviga-gps-batch ts=1789892097 waypoints=8
+2026/09/20 08:14:57 [NavigaUpdate] Parsed trip=15 mapped_status=COMPLETED dest_state=ARRIVED remaining_distance=13.65 remaining_time=27
+2026/09/20 08:14:57 [TripLogService] Logged trip 15 update: updated (log ID: 49)
+2026/09/20 08:14:57 [Repository] 🔍 JSONB query found 2 sessions for trip 15
+2026/09/20 08:14:57 [Session] 🔍 Found 2 sessions tracking trip 15
+2026/09/20 08:14:57 [Session] 📋 Session 2d650ac23a2bcb10192d511f6e503e95 tracks trip 15 with 3 total trip IDs
+2026/09/20 08:14:57 [Session] 📋 Session 9a00d40e6b12e3598cf9bd74618496c4 tracks trip 15 with 3 total trip IDs
+2026/09/20 08:14:57 [SSE] 📡 Broadcasting event 'updated' for trip 15 to 2 sessions
+2026/09/20 08:14:57 [SSE] 📋 Session 2d650ac23a2bcb10192d511f6e503e95 tracks trip 15
+2026/09/20 08:14:57 [SSE] 📋 Session 9a00d40e6b12e3598cf9bd74618496c4 tracks trip 15
+2026/09/20 08:14:57 [SSE] 📊 Event 'updated' for trip 15 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:15:18 [Session] 🧹 Cleaned up expired sessions
+2026/09/20 08:16:50 [Session] ✅ Created session 6dbf88789851ce3ecb0ccd79a7a8e336 with 0 trip IDs
+2026/09/20 08:16:50 [Session] ✅ Created session d08d5934a3994567bb8e6fd53c136417 with 1 trip IDs
+2026/09/20 08:16:55 [Session] ✅ Created session b4862476c9eefe1a16031d0c94c3a005 with 0 trip IDs
+2026/09/20 08:16:55 [Session] ✅ Created session 40c46734e9b75b43e0fc24d5fce9eb35 with 1 trip IDs
+2026/09/20 08:17:27 [Session] ✅ Created session de889068c91e2cf56d30ac46c53197d5 with 7 trip IDs
+2026/09/20 08:20:18 [Session] 🧹 Cleaned up expired sessions
+2026/09/20 08:21:19 [Session] ✅ Created session b1f4791e0823cd37aa68687c3ffa7212 with 0 trip IDs
+2026/09/20 08:21:19 [Session] ✅ Created session 149988152fffc2aea2dce145a6db819a with 1 trip IDs
+2026/09/20 08:25:18 [Session] 🧹 Cleaned up expired sessions
+2026/09/20 08:26:20 [Session] ✅ Created session 95e510cf7b3b709114b0fe78428d4c47 with 0 trip IDs
+2026/09/20 08:26:21 [Session] ✅ Created session 4a903a313bc65c02beea1ae5843643cb with 1 trip IDs
+2026/09/20 08:30:18 [Session] 🧹 Cleaned up expired sessions
+2026/09/20 08:31:22 [Session] ✅ Created session d2ca65a95a386a6e5747add263df10c6 with 0 trip IDs
+2026/09/20 08:31:22 [Session] ✅ Created session fed7217a6eed58cd63efa9a55f3d5d43 with 1 trip IDs
+2026/09/20 08:35:18 [Session] 🧹 Cleaned up expired sessions
+2026/09/20 08:36:23 [Session] ✅ Created session 8972a91e23837e2c4c62d60575d9c9c9 with 0 trip IDs
+2026/09/20 08:36:23 [Session] ✅ Created session 6a6f18db1b4fb27f8e958e83b9372878 with 1 trip IDs
+2026/09/20 08:39:28 [Session] ✅ Created session 49cae5ab465c2b084d789df241934e7b with 0 trip IDs
+2026/09/20 08:39:28 [Session] ✅ Created session 73704af7fd26b9b925158b7446c1ac98 with 3 trip IDs
+2026/09/20 08:40:18 [Session] 🧹 Cleaned up expired sessions
+2026/09/20 08:41:25 [Session] ✅ Created session 4753de1fc52c419535da440a7af17fce with 0 trip IDs
+2026/09/20 08:41:25 [Session] ✅ Created session ad772b9b525a089c56dfef8a86fd1a67 with 1 trip IDs
+2026/09/20 08:42:08 [Session] ✅ Created session 3483da1a661cf1567025bd4351818dd2 with 7 trip IDs
+[DEBUG] Vehicle service URL: http://cavgomain:6060/internal/api/vehicles/2
+[DEBUG] Vehicle service response status: 200
+[DEBUG] Vehicle service response body: {"id":2,"companyId":1,"companyName":"Cavgo test","make":"Youtong","model":"Coaster","capacity":29,"licensePlate":"RAD200A","vehicleType":"MINIBUS","status":"OCCUPIED","createdAt":"2026-09-12T06:20:11.972863","updatedAt":"2026-09-13T12:08:21.685494","driver":{"id":6,"companyId":1,"companyName":"Cavgo test","firstName":"Vincit","lastName":"","email":"vincentnkurikiyumukiza@gmail.com","phone":"+250789271268","status":"ACTIVE","dateOfBirth":null,"address":null,"role":"DRIVER","licenseNumber":null,"licenseExpiry":null,"createdAt":"2026-09-12T19:35:38.214119","updatedAt":"2026-09-20T08:39:24.887845","vehicle":null,"office":null},"initialPassword":null,"lastLocation":null,"isOnline":false,"lastOnlineAt":null}
+2026/09/20 08:42:43 [TripLogService] Logged trip 16 update: created (log ID: 50)
+2026/09/20 08:42:43 [TripLogService] Logged waypoint 40 update: created for trip 16
+2026/09/20 08:42:43 [TripLogService] Logged waypoint 41 update: created for trip 16
+2026/09/20 08:42:43 [TripLogService] Logged waypoint 42 update: created for trip 16
+2026/09/20 08:42:43 [TripLogService] Logged waypoint 43 update: created for trip 16
+2026/09/20 08:42:43 [TripLogService] Logged waypoint 44 update: created for trip 16
+2026/09/20 08:42:43 [TripLogService] Logged waypoint 45 update: created for trip 16
+2026/09/20 08:42:43 [TripLogService] Logged waypoint 46 update: created for trip 16
+2026/09/20 08:42:43 [RabbitMQ Publish Fanout] Exchange: tripservice.trips.updates, Event: created, Message: {"event":"created","data":{"id":16,"route_id":579,"vehicle_id":2,"vehicle":{"id":2,"company_id":1,"company_name":"Cavgo test","capacity":29,"license_plate":"RAD200A","driver":{"id":6,"name":"Vincit ","phone":"+250789271268"}},"status":"SCHEDULED","departure_time":1789893720,"completion_time":null,"connection_mode":"ONLINE","notes":null,"seats":29,"remaining_seats":29,"price":700,"remaining_time_to_destination":null,"remaining_distance_to_destination":null,"is_reversed":false,"current_speed":null,"current_latitude":null,"current_longitude":null,"has_custom_waypoints":true,"auto_return":false,"created_at":"2026-09-20T08:42:43.871182Z","updated_at":"2026-09-20T08:42:43.871182Z","route":{"id":579,"name":null,"distance_meters":9600,"estimated_duration_seconds":3600,"google_route_id":null,"origin_id":170,"destination_id":169,"route_price":700,"city_route":true,"created_at":"2026-09-13T21:31:42.930863Z","updated_at":"2026-09-13T21:31:42.930863Z","origin":{"id":170,"latitude":-1.9496166326933349,"code":"11004","longitude":30.125567180998672,"google_place_name":"Kimironko Taxi Park, KG 11 Avenue, Kimironko, Kigali City, Rwanda","custom_name":"Kimironko Gare","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"2026-09-11T11:52:42.554285Z","updated_at":"2026-09-11T11:52:42.554285Z"},"destination":{"id":169,"latitude":-1.9433782,"code":"13002","longitude":30.057300899999998,"google_place_name":"Kigali CBD Bus Station, KN 82 Street, Nyarugenge, Kigali City, Rwanda","custom_name":"Downtown Gare","province":"Kigali","district":"Nyarugenge","place_id":null,"created_at":"2026-09-11T11:51:24.120599Z","updated_at":"2026-09-11T11:51:24.120599Z"},"waypoints":null},"waypoints":[{"id":40,"trip_id":16,"location_id":199,"order":1,"price":60,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:42:43.88072Z","updated_at":"2026-09-20T08:42:43.88072Z","location":{"id":199,"latitude":-1.9514399216575953,"code":"11009","longitude":30.122123248083398,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"KIE Remera 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:27:08.142329Z"}},{"id":41,"trip_id":16,"location_id":197,"order":2,"price":80,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:42:43.881605Z","updated_at":"2026-09-20T08:42:43.881605Z","location":{"id":197,"latitude":-1.9535296342344992,"code":"11007","longitude":30.11917068369476,"google_place_name":"KG 205 Street, Kigali City, Rwanda","custom_name":"Kwa Rwahama 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":"324208661345","created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:53.008951Z"}},{"id":42,"trip_id":16,"location_id":205,"order":3,"price":100,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:42:43.882345Z","updated_at":"2026-09-20T08:42:43.882345Z","location":{"id":205,"latitude":-1.9564669416811284,"code":"11015","longitude":30.115378776744137,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"Sitade Amahoro 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:18.300506Z"}},{"id":43,"trip_id":16,"location_id":208,"order":4,"price":120,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:42:43.883066Z","updated_at":"2026-09-20T08:42:43.883066Z","location":{"id":208,"latitude":-1.9580104538810161,"code":"11018","longitude":30.111503780508144,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"Zariya Court 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:25:11.963882Z"}},{"id":44,"trip_id":16,"location_id":209,"order":5,"price":160,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:42:43.883752Z","updated_at":"2026-09-20T08:42:43.883752Z","location":{"id":209,"latitude":-1.9596731250596804,"code":"11019","longitude":30.10812210721525,"google_place_name":"Hôtel Chez Lando, DR71, Kigali City, Rwanda","custom_name":"Kwa Lando 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:24:55.749845Z"}},{"id":45,"trip_id":16,"location_id":211,"order":6,"price":180,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:42:43.884422Z","updated_at":"2026-09-20T08:42:43.884422Z","location":{"id":211,"latitude":-1.9575128210913277,"code":"11021","longitude":30.104823234802353,"google_place_name":"KN 5 Road, Kigali City, Rwanda","custom_name":"Kami (NPPA) 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-15T17:01:22.419901Z"}},{"id":46,"trip_id":16,"location_id":213,"order":7,"price":220,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:42:43.885107Z","updated_at":"2026-09-20T08:42:43.885107Z","location":{"id":213,"latitude":-1.9531083086434222,"code":"11023","longitude":30.10151351696669,"google_place_name":"KN 5 Road, Kigali City, Rwanda","custom_name":"Gishushu 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:23:58.236024Z"}}]}}
+2026/09/20 08:42:43 [Repository] 🔍 JSONB query found 0 sessions for trip 16
+2026/09/20 08:42:43 [Repository] 🔍 No sessions found with JSONB query, trying alternative approach
+2026/09/20 08:42:43 [Repository] 🔍 Found 7 total active sessions
+2026/09/20 08:42:43 [Repository] 🔍 Alternative approach found 0 sessions for trip 16
+2026/09/20 08:42:43 [Session] 🔍 Found 0 sessions tracking trip 16
+2026/09/20 08:42:43 [SSE] 📡 Broadcasting event 'created' for trip 16 to 0 sessions
+2026/09/20 08:42:43 [SSE] 📊 Event 'created' for trip 16 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:42:43 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":16,"carId":"2","status":"CREATED","createdAt":1789893763.906120000,"completedAt":null,"waypointProgresses":[{"waypointIndex":1,"waypointId":"40","waypointName":"KIE Remera 1 Kimironko","latitude":-1.949669,"longitude":30.125502,"state":"APPROACHING","arrivedAt":null,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":2,"waypointId":"41","waypointName":"Kwa Rwahama 1 Kimironko","latitude":-1.951458,"longitude":30.122136,"state":"APPROACHING","arrivedAt":null,"remainingDistance":444.5397099205903,"remainingTime":320.1899303199172},{"waypointIndex":3,"waypointId":"42","waypointName":"Sitade Amahoro 1 Kimironko","latitude":-1.953579,"longitude":30.119208,"state":"APPROACHING","arrivedAt":null,"remainingDistance":862.3709891591867,"remainingTime":621.1425003586805},{"waypointIndex":4,"waypointId":"43","waypointName":"Zariya Court 1 Kimironko","latitude":-1.956522,"longitude":30.1154,"state":"APPROACHING","arrivedAt":null,"remainingDistance":1416.7361695627385,"remainingTime":1020.4367467982381},{"waypointIndex":5,"waypointId":"44","waypointName":"Kwa Lando 1 Kimironko","latitude":-1.958076,"longitude":30.111531,"state":"APPROACHING","arrivedAt":null,"remainingDistance":1821.7810724181634,"remainingTime":1312.179635740338},{"waypointIndex":6,"waypointId":"45","waypointName":"Kami (NPPA) 1 Kimironko","latitude":-1.959745,"longitude":30.108104,"state":"APPROACHING","arrivedAt":null,"remainingDistance":2320.0011293569837,"remainingTime":1671.0340682132494},{"waypointIndex":7,"waypointId":"46","waypointName":"Gishushu 1 Kimironko","latitude":-1.957573,"longitude":30.104726,"state":"APPROACHING","arrivedAt":null,"remainingDistance":2768.8737251649013,"remainingTime":1994.3448590533558},{"waypointIndex":8,"waypointId":"169","waypointName":"Downtown Gare","latitude":-1.953183,"longitude":30.101491,"state":"APPROACHING","arrivedAt":null,"remainingDistance":3390.973334829862,"remainingTime":2442.426382987974}],"currentLocation":null},"timestamp":1789893763.917572035,"source":"naviga-trip-create"}
+2026/09/20 08:42:43 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 16,
+    "carId": "2",
+    "status": "CREATED",
+    "createdAt": {},
+    "completedAt": null,
+    "waypointProgresses": [
+      {
+        "waypointIndex": 1,
+        "waypointId": "40",
+        "waypointName": "KIE Remera 1 Kimironko",
+        "latitude": -1.949669,
+        "longitude": 30.125502,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 2,
+        "waypointId": "41",
+        "waypointName": "Kwa Rwahama 1 Kimironko",
+        "latitude": -1.951458,
+        "longitude": 30.122136,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 444.5397099205903,
+        "remainingTime": 320.1899303199172
+      },
+      {
+        "waypointIndex": 3,
+        "waypointId": "42",
+        "waypointName": "Sitade Amahoro 1 Kimironko",
+        "latitude": -1.953579,
+        "longitude": 30.119208,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 862.3709891591867,
+        "remainingTime": 621.1425003586805
+      },
+      {
+        "waypointIndex": 4,
+        "waypointId": "43",
+        "waypointName": "Zariya Court 1 Kimironko",
+        "latitude": -1.956522,
+        "longitude": 30.1154,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 1416.7361695627385,
+        "remainingTime": 1020.4367467982381
+      },
+      {
+        "waypointIndex": 5,
+        "waypointId": "44",
+        "waypointName": "Kwa Lando 1 Kimironko",
+        "latitude": -1.958076,
+        "longitude": 30.111531,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 1821.7810724181634,
+        "remainingTime": 1312.179635740338
+      },
+      {
+        "waypointIndex": 6,
+        "waypointId": "45",
+        "waypointName": "Kami (NPPA) 1 Kimironko",
+        "latitude": -1.959745,
+        "longitude": 30.108104,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 2320.0011293569837,
+        "remainingTime": 1671.0340682132494
+      },
+      {
+        "waypointIndex": 7,
+        "waypointId": "46",
+        "waypointName": "Gishushu 1 Kimironko",
+        "latitude": -1.957573,
+        "longitude": 30.104726,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 2768.8737251649013,
+        "remainingTime": 1994.3448590533558
+      },
+      {
+        "waypointIndex": 8,
+        "waypointId": "169",
+        "waypointName": "Downtown Gare",
+        "latitude": -1.953183,
+        "longitude": 30.101491,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 3390.973334829862,
+        "remainingTime": 2442.426382987974
+      }
+    ],
+    "currentLocation": null
+  },
+  "timestamp": {},
+  "source": "naviga-trip-create"
+}
+2026/09/20 08:42:43 [NavigaUpdate] Inbound trip=16 status=CREATED source=naviga-trip-create ts=1789893763 waypoints=8
+2026/09/20 08:42:43 [NavigaUpdate] Parsed trip=16 mapped_status=SCHEDULED dest_state=APPROACHING remaining_distance=3390.97 remaining_time=2442
+2026/09/20 08:42:43 [TripLogService] Logged trip 16 update: updated (log ID: 51)
+2026/09/20 08:42:43 [Repository] 🔍 JSONB query found 0 sessions for trip 16
+2026/09/20 08:42:43 [Repository] 🔍 No sessions found with JSONB query, trying alternative approach
+2026/09/20 08:42:43 [Repository] 🔍 Found 7 total active sessions
+2026/09/20 08:42:43 [Repository] 🔍 Alternative approach found 0 sessions for trip 16
+2026/09/20 08:42:43 [Session] 🔍 Found 0 sessions tracking trip 16
+2026/09/20 08:42:43 [SSE] 📡 Broadcasting event 'updated' for trip 16 to 0 sessions
+2026/09/20 08:42:43 [SSE] 📊 Event 'updated' for trip 16 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:42:44 [Session] ✅ Created session a92618788ce8116773318ebcde095961 with 8 trip IDs
+2026/09/20 08:42:59 [Session] ✅ Created session a128f34162c8d30174a19acec1889efb with 0 trip IDs
+2026/09/20 08:42:59 [Session] ✅ Created session ed0a764af8bcb0fdd57e9bd56b26468b with 3 trip IDs
+2026/09/20 08:43:05 [Session] ✅ Created session d4c3b77792542da73ed393cff1662dcc with 0 trip IDs
+2026/09/20 08:43:05 [Session] ✅ Created session 32778894469faaac80a8fa92b75a9f64 with 3 trip IDs
+2026/09/20 08:43:09 [Session] ✅ Created session c24c986ba2adda123c489a02b33643be with 0 trip IDs
+2026/09/20 08:43:09 [Session] ✅ Created session 0d78a0caf5d379f4797dd760b62389ba with 3 trip IDs
+2026/09/20 08:43:39 [Session] ✅ Created session f4315ae447612313b99d21d63b1babcb with 0 trip IDs
+2026/09/20 08:43:39 [Session] ✅ Created session ded0d48b894585d3fcaec4db5ef78f96 with 3 trip IDs
+2026/09/20 08:43:55 [Session] ✅ Created session e1111754835138a8af3440936cfe1b0a with 8 trip IDs
+[DEBUG] Vehicle service URL: http://cavgomain:6060/internal/api/vehicles/2
+[DEBUG] Vehicle service response status: 200
+[DEBUG] Vehicle service response body: {"id":2,"companyId":1,"companyName":"Cavgo test","make":"Youtong","model":"Coaster","capacity":29,"licensePlate":"RAD200A","vehicleType":"MINIBUS","status":"OCCUPIED","createdAt":"2026-09-12T06:20:11.972863","updatedAt":"2026-09-13T12:08:21.685494","driver":{"id":6,"companyId":1,"companyName":"Cavgo test","firstName":"Vincit","lastName":"","email":"vincentnkurikiyumukiza@gmail.com","phone":"+250789271268","status":"ACTIVE","dateOfBirth":null,"address":null,"role":"DRIVER","licenseNumber":null,"licenseExpiry":null,"createdAt":"2026-09-12T19:35:38.214119","updatedAt":"2026-09-20T08:39:24.887845","vehicle":null,"office":null},"initialPassword":null,"lastLocation":null,"isOnline":false,"lastOnlineAt":null}
+2026/09/20 08:45:12 [TripLogService] Logged trip 17 update: created (log ID: 52)
+2026/09/20 08:45:12 [TripLogService] Logged waypoint 47 update: created for trip 17
+2026/09/20 08:45:12 [TripLogService] Logged waypoint 48 update: created for trip 17
+2026/09/20 08:45:12 [TripLogService] Logged waypoint 49 update: created for trip 17
+2026/09/20 08:45:12 [RabbitMQ Publish Fanout] Exchange: tripservice.trips.updates, Event: created, Message: {"event":"created","data":{"id":17,"route_id":579,"vehicle_id":2,"vehicle":{"id":2,"company_id":1,"company_name":"Cavgo test","capacity":29,"license_plate":"RAD200A","driver":{"id":6,"name":"Vincit ","phone":"+250789271268"}},"status":"SCHEDULED","departure_time":1789894200,"completion_time":null,"connection_mode":"ONLINE","notes":null,"seats":29,"remaining_seats":29,"price":700,"remaining_time_to_destination":null,"remaining_distance_to_destination":null,"is_reversed":false,"current_speed":null,"current_latitude":null,"current_longitude":null,"has_custom_waypoints":true,"auto_return":false,"created_at":"2026-09-20T08:45:12.297046Z","updated_at":"2026-09-20T08:45:12.297046Z","route":{"id":579,"name":null,"distance_meters":9600,"estimated_duration_seconds":3600,"google_route_id":null,"origin_id":170,"destination_id":169,"route_price":700,"city_route":true,"created_at":"2026-09-13T21:31:42.930863Z","updated_at":"2026-09-13T21:31:42.930863Z","origin":{"id":170,"latitude":-1.9496166326933349,"code":"11004","longitude":30.125567180998672,"google_place_name":"Kimironko Taxi Park, KG 11 Avenue, Kimironko, Kigali City, Rwanda","custom_name":"Kimironko Gare","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"2026-09-11T11:52:42.554285Z","updated_at":"2026-09-11T11:52:42.554285Z"},"destination":{"id":169,"latitude":-1.9433782,"code":"13002","longitude":30.057300899999998,"google_place_name":"Kigali CBD Bus Station, KN 82 Street, Nyarugenge, Kigali City, Rwanda","custom_name":"Downtown Gare","province":"Kigali","district":"Nyarugenge","place_id":null,"created_at":"2026-09-11T11:51:24.120599Z","updated_at":"2026-09-11T11:51:24.120599Z"},"waypoints":null},"waypoints":[{"id":47,"trip_id":17,"location_id":199,"order":1,"price":60,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:45:12.298535Z","updated_at":"2026-09-20T08:45:12.298535Z","location":{"id":199,"latitude":-1.9514399216575953,"code":"11009","longitude":30.122123248083398,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"KIE Remera 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:27:08.142329Z"}},{"id":48,"trip_id":17,"location_id":197,"order":2,"price":80,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:45:12.299346Z","updated_at":"2026-09-20T08:45:12.299346Z","location":{"id":197,"latitude":-1.9535296342344992,"code":"11007","longitude":30.11917068369476,"google_place_name":"KG 205 Street, Kigali City, Rwanda","custom_name":"Kwa Rwahama 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":"324208661345","created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:53.008951Z"}},{"id":49,"trip_id":17,"location_id":205,"order":3,"price":120,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:45:12.300158Z","updated_at":"2026-09-20T08:45:12.300158Z","location":{"id":205,"latitude":-1.9564669416811284,"code":"11015","longitude":30.115378776744137,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"Sitade Amahoro 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:18.300506Z"}}]}}
+2026/09/20 08:45:12 [Repository] 🔍 JSONB query found 0 sessions for trip 17
+2026/09/20 08:45:12 [Repository] 🔍 No sessions found with JSONB query, trying alternative approach
+2026/09/20 08:45:12 [Repository] 🔍 Found 17 total active sessions
+2026/09/20 08:45:12 [Repository] 🔍 Alternative approach found 0 sessions for trip 17
+2026/09/20 08:45:12 [Session] 🔍 Found 0 sessions tracking trip 17
+2026/09/20 08:45:12 [SSE] 📡 Broadcasting event 'created' for trip 17 to 0 sessions
+2026/09/20 08:45:12 [SSE] 📊 Event 'created' for trip 17 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:45:12 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":17,"carId":"2","status":"CREATED","createdAt":1789893912.322604000,"completedAt":null,"waypointProgresses":[{"waypointIndex":1,"waypointId":"47","waypointName":"KIE Remera 1 Kimironko","latitude":-1.949669,"longitude":30.125502,"state":"APPROACHING","arrivedAt":null,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":2,"waypointId":"48","waypointName":"Kwa Rwahama 1 Kimironko","latitude":-1.951458,"longitude":30.122136,"state":"APPROACHING","arrivedAt":null,"remainingDistance":444.5397099205903,"remainingTime":320.21477413708584},{"waypointIndex":3,"waypointId":"49","waypointName":"Sitade Amahoro 1 Kimironko","latitude":-1.953579,"longitude":30.119208,"state":"APPROACHING","arrivedAt":null,"remainingDistance":862.3709891591867,"remainingTime":621.1906953493824},{"waypointIndex":4,"waypointId":"169","waypointName":"Downtown Gare","latitude":-1.956522,"longitude":30.1154,"state":"APPROACHING","arrivedAt":null,"remainingDistance":1416.7361695627385,"remainingTime":1020.5159233792888}],"currentLocation":null},"timestamp":1789893912.334989527,"source":"naviga-trip-create"}
+2026/09/20 08:45:12 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 17,
+    "carId": "2",
+    "status": "CREATED",
+    "createdAt": {},
+    "completedAt": null,
+    "waypointProgresses": [
+      {
+        "waypointIndex": 1,
+        "waypointId": "47",
+        "waypointName": "KIE Remera 1 Kimironko",
+        "latitude": -1.949669,
+        "longitude": 30.125502,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 2,
+        "waypointId": "48",
+        "waypointName": "Kwa Rwahama 1 Kimironko",
+        "latitude": -1.951458,
+        "longitude": 30.122136,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 444.5397099205903,
+        "remainingTime": 320.21477413708584
+      },
+      {
+        "waypointIndex": 3,
+        "waypointId": "49",
+        "waypointName": "Sitade Amahoro 1 Kimironko",
+        "latitude": -1.953579,
+        "longitude": 30.119208,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 862.3709891591867,
+        "remainingTime": 621.1906953493824
+      },
+      {
+        "waypointIndex": 4,
+        "waypointId": "169",
+        "waypointName": "Downtown Gare",
+        "latitude": -1.956522,
+        "longitude": 30.1154,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 1416.7361695627385,
+        "remainingTime": 1020.5159233792888
+      }
+    ],
+    "currentLocation": null
+  },
+  "timestamp": {},
+  "source": "naviga-trip-create"
+}
+2026/09/20 08:45:12 [NavigaUpdate] Inbound trip=17 status=CREATED source=naviga-trip-create ts=1789893912 waypoints=4
+2026/09/20 08:45:12 [NavigaUpdate] Parsed trip=17 mapped_status=SCHEDULED dest_state=APPROACHING remaining_distance=1416.74 remaining_time=1021
+2026/09/20 08:45:12 [TripLogService] Logged trip 17 update: updated (log ID: 53)
+2026/09/20 08:45:12 [Repository] 🔍 JSONB query found 0 sessions for trip 17
+2026/09/20 08:45:12 [Repository] 🔍 No sessions found with JSONB query, trying alternative approach
+2026/09/20 08:45:12 [Repository] 🔍 Found 17 total active sessions
+2026/09/20 08:45:12 [Repository] 🔍 Alternative approach found 0 sessions for trip 17
+2026/09/20 08:45:12 [Session] 🔍 Found 0 sessions tracking trip 17
+2026/09/20 08:45:12 [SSE] 📡 Broadcasting event 'updated' for trip 17 to 0 sessions
+2026/09/20 08:45:12 [SSE] 📊 Event 'updated' for trip 17 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:45:12 [Session] ✅ Created session 7d01dc247c2880bd4eb55f60a9adfa9c with 9 trip IDs
+2026/09/20 08:45:18 [Session] 🧹 Cleaned up expired sessions
+2026/09/20 08:45:23 [TripLogService] Logged trip 17 update: cancelled (log ID: 54)
+2026/09/20 08:45:23 [RabbitMQ Publish Fanout] Exchange: tripservice.trips.updates, Event: cancelled, Message: {"event":"cancelled","data":{"id":17,"route_id":579,"vehicle_id":2,"vehicle":{"id":2,"company_id":1,"company_name":"Cavgo test","capacity":29,"license_plate":"RAD200A","driver":{"id":6,"name":"Vincit ","phone":"+250789271268"}},"status":"CANCELLED","departure_time":1789894200,"completion_time":null,"connection_mode":"ONLINE","notes":null,"seats":29,"remaining_seats":29,"price":700,"remaining_time_to_destination":1020,"remaining_distance_to_destination":1416.7361695627385,"is_reversed":false,"current_speed":null,"current_latitude":null,"current_longitude":null,"has_custom_waypoints":true,"auto_return":false,"created_at":"2026-09-20T08:45:12.297046Z","updated_at":"2026-09-20T08:45:23.803006Z","route":{"id":579,"name":null,"distance_meters":9600,"estimated_duration_seconds":3600,"google_route_id":null,"origin_id":170,"destination_id":169,"route_price":700,"city_route":true,"created_at":"2026-09-13T21:31:42.930863Z","updated_at":"2026-09-13T21:31:42.930863Z","origin":{"id":170,"latitude":-1.9496166326933349,"code":"11004","longitude":30.125567180998672,"google_place_name":"Kimironko Taxi Park, KG 11 Avenue, Kimironko, Kigali City, Rwanda","custom_name":"Kimironko Gare","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"2026-09-11T11:52:42.554285Z","updated_at":"2026-09-11T11:52:42.554285Z"},"destination":{"id":169,"latitude":-1.9433782,"code":"13002","longitude":30.057300899999998,"google_place_name":"Kigali CBD Bus Station, KN 82 Street, Nyarugenge, Kigali City, Rwanda","custom_name":"Downtown Gare","province":"Kigali","district":"Nyarugenge","place_id":null,"created_at":"2026-09-11T11:51:24.120599Z","updated_at":"2026-09-11T11:51:24.120599Z"},"waypoints":null},"waypoints":[{"id":47,"trip_id":17,"location_id":199,"order":1,"price":60,"is_pass_through":false,"is_passed":false,"is_next":true,"passed_timestamp":null,"remaining_time":0,"remaining_distance":0,"is_custom":true,"created_at":"2026-09-20T08:45:12.298535Z","updated_at":"2026-09-20T08:45:12.338136Z","location":{"id":199,"latitude":-1.9514399216575953,"code":"11009","longitude":30.122123248083398,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"KIE Remera 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:27:08.142329Z"}},{"id":48,"trip_id":17,"location_id":197,"order":2,"price":80,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":320,"remaining_distance":444.5397099205903,"is_custom":true,"created_at":"2026-09-20T08:45:12.299346Z","updated_at":"2026-09-20T08:45:12.339042Z","location":{"id":197,"latitude":-1.9535296342344992,"code":"11007","longitude":30.11917068369476,"google_place_name":"KG 205 Street, Kigali City, Rwanda","custom_name":"Kwa Rwahama 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":"324208661345","created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:53.008951Z"}},{"id":49,"trip_id":17,"location_id":205,"order":3,"price":120,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":621,"remaining_distance":862.3709891591867,"is_custom":true,"created_at":"2026-09-20T08:45:12.300158Z","updated_at":"2026-09-20T08:45:12.33986Z","location":{"id":205,"latitude":-1.9564669416811284,"code":"11015","longitude":30.115378776744137,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"Sitade Amahoro 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:18.300506Z"}}]}}
+2026/09/20 08:45:23 [Repository] 🔍 JSONB query found 1 sessions for trip 17
+2026/09/20 08:45:23 [Session] 🔍 Found 1 sessions tracking trip 17
+2026/09/20 08:45:23 [Session] 📋 Session 7d01dc247c2880bd4eb55f60a9adfa9c tracks trip 17 with 9 total trip IDs
+2026/09/20 08:45:23 [SSE] 📡 Broadcasting event 'cancelled' for trip 17 to 1 sessions
+2026/09/20 08:45:23 [SSE] 📋 Session 7d01dc247c2880bd4eb55f60a9adfa9c tracks trip 17
+2026/09/20 08:45:23 [SSE] 📊 Event 'cancelled' for trip 17 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:45:24 [Session] ✅ Created session 2d174196fea1b15c204b1befc2f3c0bd with 9 trip IDs
+2026/09/20 08:45:32 [TripLogService] Logged trip 16 update: cancelled (log ID: 55)
+2026/09/20 08:45:32 [RabbitMQ Publish Fanout] Exchange: tripservice.trips.updates, Event: cancelled, Message: {"event":"cancelled","data":{"id":16,"route_id":579,"vehicle_id":2,"vehicle":{"id":2,"company_id":1,"company_name":"Cavgo test","capacity":29,"license_plate":"RAD200A","driver":{"id":6,"name":"Vincit ","phone":"+250789271268"}},"status":"CANCELLED","departure_time":1789893720,"completion_time":null,"connection_mode":"ONLINE","notes":null,"seats":29,"remaining_seats":29,"price":700,"remaining_time_to_destination":2442,"remaining_distance_to_destination":3390.973334829862,"is_reversed":false,"current_speed":null,"current_latitude":null,"current_longitude":null,"has_custom_waypoints":true,"auto_return":false,"created_at":"2026-09-20T08:42:43.871182Z","updated_at":"2026-09-20T08:45:32.874Z","route":{"id":579,"name":null,"distance_meters":9600,"estimated_duration_seconds":3600,"google_route_id":null,"origin_id":170,"destination_id":169,"route_price":700,"city_route":true,"created_at":"2026-09-13T21:31:42.930863Z","updated_at":"2026-09-13T21:31:42.930863Z","origin":{"id":170,"latitude":-1.9496166326933349,"code":"11004","longitude":30.125567180998672,"google_place_name":"Kimironko Taxi Park, KG 11 Avenue, Kimironko, Kigali City, Rwanda","custom_name":"Kimironko Gare","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"2026-09-11T11:52:42.554285Z","updated_at":"2026-09-11T11:52:42.554285Z"},"destination":{"id":169,"latitude":-1.9433782,"code":"13002","longitude":30.057300899999998,"google_place_name":"Kigali CBD Bus Station, KN 82 Street, Nyarugenge, Kigali City, Rwanda","custom_name":"Downtown Gare","province":"Kigali","district":"Nyarugenge","place_id":null,"created_at":"2026-09-11T11:51:24.120599Z","updated_at":"2026-09-11T11:51:24.120599Z"},"waypoints":null},"waypoints":[{"id":46,"trip_id":16,"location_id":213,"order":7,"price":220,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":1994,"remaining_distance":2768.8737251649013,"is_custom":true,"created_at":"2026-09-20T08:42:43.885107Z","updated_at":"2026-09-20T08:42:43.925562Z","location":{"id":213,"latitude":-1.9531083086434222,"code":"11023","longitude":30.10151351696669,"google_place_name":"KN 5 Road, Kigali City, Rwanda","custom_name":"Gishushu 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:23:58.236024Z"}},{"id":40,"trip_id":16,"location_id":199,"order":1,"price":60,"is_pass_through":false,"is_passed":false,"is_next":true,"passed_timestamp":null,"remaining_time":0,"remaining_distance":0,"is_custom":true,"created_at":"2026-09-20T08:42:43.88072Z","updated_at":"2026-09-20T08:42:43.920658Z","location":{"id":199,"latitude":-1.9514399216575953,"code":"11009","longitude":30.122123248083398,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"KIE Remera 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:27:08.142329Z"}},{"id":41,"trip_id":16,"location_id":197,"order":2,"price":80,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":320,"remaining_distance":444.5397099205903,"is_custom":true,"created_at":"2026-09-20T08:42:43.881605Z","updated_at":"2026-09-20T08:42:43.92159Z","location":{"id":197,"latitude":-1.9535296342344992,"code":"11007","longitude":30.11917068369476,"google_place_name":"KG 205 Street, Kigali City, Rwanda","custom_name":"Kwa Rwahama 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":"324208661345","created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:53.008951Z"}},{"id":42,"trip_id":16,"location_id":205,"order":3,"price":100,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":621,"remaining_distance":862.3709891591867,"is_custom":true,"created_at":"2026-09-20T08:42:43.882345Z","updated_at":"2026-09-20T08:42:43.922412Z","location":{"id":205,"latitude":-1.9564669416811284,"code":"11015","longitude":30.115378776744137,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"Sitade Amahoro 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:18.300506Z"}},{"id":43,"trip_id":16,"location_id":208,"order":4,"price":120,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":1020,"remaining_distance":1416.7361695627385,"is_custom":true,"created_at":"2026-09-20T08:42:43.883066Z","updated_at":"2026-09-20T08:42:43.923553Z","location":{"id":208,"latitude":-1.9580104538810161,"code":"11018","longitude":30.111503780508144,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"Zariya Court 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:25:11.963882Z"}},{"id":44,"trip_id":16,"location_id":209,"order":5,"price":160,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":1312,"remaining_distance":1821.7810724181634,"is_custom":true,"created_at":"2026-09-20T08:42:43.883752Z","updated_at":"2026-09-20T08:42:43.924258Z","location":{"id":209,"latitude":-1.9596731250596804,"code":"11019","longitude":30.10812210721525,"google_place_name":"Hôtel Chez Lando, DR71, Kigali City, Rwanda","custom_name":"Kwa Lando 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:24:55.749845Z"}},{"id":45,"trip_id":16,"location_id":211,"order":6,"price":180,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":1671,"remaining_distance":2320.0011293569837,"is_custom":true,"created_at":"2026-09-20T08:42:43.884422Z","updated_at":"2026-09-20T08:42:43.924933Z","location":{"id":211,"latitude":-1.9575128210913277,"code":"11021","longitude":30.104823234802353,"google_place_name":"KN 5 Road, Kigali City, Rwanda","custom_name":"Kami (NPPA) 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-15T17:01:22.419901Z"}}]}}
+2026/09/20 08:45:32 [Repository] 🔍 JSONB query found 4 sessions for trip 16
+2026/09/20 08:45:32 [Session] 🔍 Found 4 sessions tracking trip 16
+2026/09/20 08:45:32 [Session] 📋 Session a92618788ce8116773318ebcde095961 tracks trip 16 with 8 total trip IDs
+2026/09/20 08:45:32 [Session] 📋 Session e1111754835138a8af3440936cfe1b0a tracks trip 16 with 8 total trip IDs
+2026/09/20 08:45:32 [Session] 📋 Session 7d01dc247c2880bd4eb55f60a9adfa9c tracks trip 16 with 9 total trip IDs
+2026/09/20 08:45:32 [Session] 📋 Session 2d174196fea1b15c204b1befc2f3c0bd tracks trip 16 with 9 total trip IDs
+2026/09/20 08:45:32 [SSE] 📡 Broadcasting event 'cancelled' for trip 16 to 4 sessions
+2026/09/20 08:45:32 [SSE] 📋 Session a92618788ce8116773318ebcde095961 tracks trip 16
+2026/09/20 08:45:32 [SSE] 📋 Session e1111754835138a8af3440936cfe1b0a tracks trip 16
+2026/09/20 08:45:32 [SSE] 📋 Session 7d01dc247c2880bd4eb55f60a9adfa9c tracks trip 16
+2026/09/20 08:45:32 [SSE] 📋 Session 2d174196fea1b15c204b1befc2f3c0bd tracks trip 16
+2026/09/20 08:45:32 [SSE] 📊 Event 'cancelled' for trip 16 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:45:33 [Session] ✅ Created session c02c4c1cda05695cc3492b8e62e214b2 with 9 trip IDs
+2026/09/20 08:46:27 [Session] ✅ Created session 0531596786b0461ff6a700b08fdf50f4 with 0 trip IDs
+2026/09/20 08:46:27 [Session] ✅ Created session 0d5fc2f905f945d43294e5a0a3d47a8d with 1 trip IDs
+[DEBUG] Vehicle service URL: http://cavgomain:6060/internal/api/vehicles/2
+[DEBUG] Vehicle service response status: 200
+[DEBUG] Vehicle service response body: {"id":2,"companyId":1,"companyName":"Cavgo test","make":"Youtong","model":"Coaster","capacity":29,"licensePlate":"RAD200A","vehicleType":"MINIBUS","status":"OCCUPIED","createdAt":"2026-09-12T06:20:11.972863","updatedAt":"2026-09-13T12:08:21.685494","driver":{"id":6,"companyId":1,"companyName":"Cavgo test","firstName":"Vincit","lastName":"","email":"vincentnkurikiyumukiza@gmail.com","phone":"+250789271268","status":"ACTIVE","dateOfBirth":null,"address":null,"role":"DRIVER","licenseNumber":null,"licenseExpiry":null,"createdAt":"2026-09-12T19:35:38.214119","updatedAt":"2026-09-20T08:39:24.887845","vehicle":null,"office":null},"initialPassword":null,"lastLocation":null,"isOnline":false,"lastOnlineAt":null}
+2026/09/20 08:46:33 [TripLogService] Logged trip 18 update: created (log ID: 56)
+2026/09/20 08:46:33 [TripLogService] Logged waypoint 50 update: created for trip 18
+2026/09/20 08:46:33 [TripLogService] Logged waypoint 51 update: created for trip 18
+2026/09/20 08:46:33 [TripLogService] Logged waypoint 52 update: created for trip 18
+2026/09/20 08:46:33 [RabbitMQ Publish Fanout] Exchange: tripservice.trips.updates, Event: created, Message: {"event":"created","data":{"id":18,"route_id":579,"vehicle_id":2,"vehicle":{"id":2,"company_id":1,"company_name":"Cavgo test","capacity":29,"license_plate":"RAD200A","driver":{"id":6,"name":"Vincit ","phone":"+250789271268"}},"status":"SCHEDULED","departure_time":1789893960,"completion_time":null,"connection_mode":"ONLINE","notes":null,"seats":29,"remaining_seats":29,"price":700,"remaining_time_to_destination":null,"remaining_distance_to_destination":null,"is_reversed":false,"current_speed":null,"current_latitude":null,"current_longitude":null,"has_custom_waypoints":true,"auto_return":false,"created_at":"2026-09-20T08:46:33.093959Z","updated_at":"2026-09-20T08:46:33.093959Z","route":{"id":579,"name":null,"distance_meters":9600,"estimated_duration_seconds":3600,"google_route_id":null,"origin_id":170,"destination_id":169,"route_price":700,"city_route":true,"created_at":"2026-09-13T21:31:42.930863Z","updated_at":"2026-09-13T21:31:42.930863Z","origin":{"id":170,"latitude":-1.9496166326933349,"code":"11004","longitude":30.125567180998672,"google_place_name":"Kimironko Taxi Park, KG 11 Avenue, Kimironko, Kigali City, Rwanda","custom_name":"Kimironko Gare","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"2026-09-11T11:52:42.554285Z","updated_at":"2026-09-11T11:52:42.554285Z"},"destination":{"id":169,"latitude":-1.9433782,"code":"13002","longitude":30.057300899999998,"google_place_name":"Kigali CBD Bus Station, KN 82 Street, Nyarugenge, Kigali City, Rwanda","custom_name":"Downtown Gare","province":"Kigali","district":"Nyarugenge","place_id":null,"created_at":"2026-09-11T11:51:24.120599Z","updated_at":"2026-09-11T11:51:24.120599Z"},"waypoints":null},"waypoints":[{"id":50,"trip_id":18,"location_id":199,"order":1,"price":70,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:46:33.102961Z","updated_at":"2026-09-20T08:46:33.102961Z","location":{"id":199,"latitude":-1.9514399216575953,"code":"11009","longitude":30.122123248083398,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"KIE Remera 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:27:08.142329Z"}},{"id":51,"trip_id":18,"location_id":197,"order":2,"price":80,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:46:33.10372Z","updated_at":"2026-09-20T08:46:33.10372Z","location":{"id":197,"latitude":-1.9535296342344992,"code":"11007","longitude":30.11917068369476,"google_place_name":"KG 205 Street, Kigali City, Rwanda","custom_name":"Kwa Rwahama 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":"324208661345","created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:53.008951Z"}},{"id":52,"trip_id":18,"location_id":205,"order":3,"price":130,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:46:33.104405Z","updated_at":"2026-09-20T08:46:33.104405Z","location":{"id":205,"latitude":-1.9564669416811284,"code":"11015","longitude":30.115378776744137,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"Sitade Amahoro 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:18.300506Z"}}]}}
+2026/09/20 08:46:33 [Repository] 🔍 JSONB query found 0 sessions for trip 18
+2026/09/20 08:46:33 [Repository] 🔍 No sessions found with JSONB query, trying alternative approach
+2026/09/20 08:46:33 [Repository] 🔍 Found 20 total active sessions
+2026/09/20 08:46:33 [Repository] 🔍 Alternative approach found 0 sessions for trip 18
+2026/09/20 08:46:33 [Session] 🔍 Found 0 sessions tracking trip 18
+2026/09/20 08:46:33 [SSE] 📡 Broadcasting event 'created' for trip 18 to 0 sessions
+2026/09/20 08:46:33 [SSE] 📊 Event 'created' for trip 18 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:46:33 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":18,"carId":"2","status":"CREATED","createdAt":1789893993.119160000,"completedAt":null,"waypointProgresses":[{"waypointIndex":1,"waypointId":"50","waypointName":"KIE Remera 1 Kimironko","latitude":-1.949669,"longitude":30.125502,"state":"APPROACHING","arrivedAt":null,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":2,"waypointId":"51","waypointName":"Kwa Rwahama 1 Kimironko","latitude":-1.951458,"longitude":30.122136,"state":"APPROACHING","arrivedAt":null,"remainingDistance":444.5397099205903,"remainingTime":320.21477413708584},{"waypointIndex":3,"waypointId":"52","waypointName":"Sitade Amahoro 1 Kimironko","latitude":-1.953579,"longitude":30.119208,"state":"APPROACHING","arrivedAt":null,"remainingDistance":862.3709891591867,"remainingTime":621.1906953493824},{"waypointIndex":4,"waypointId":"169","waypointName":"Downtown Gare","latitude":-1.956522,"longitude":30.1154,"state":"APPROACHING","arrivedAt":null,"remainingDistance":1416.7361695627385,"remainingTime":1020.5159233792888}],"currentLocation":null},"timestamp":1789893993.130974470,"source":"naviga-trip-create"}
+2026/09/20 08:46:33 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 18,
+    "carId": "2",
+    "status": "CREATED",
+    "createdAt": {},
+    "completedAt": null,
+    "waypointProgresses": [
+      {
+        "waypointIndex": 1,
+        "waypointId": "50",
+        "waypointName": "KIE Remera 1 Kimironko",
+        "latitude": -1.949669,
+        "longitude": 30.125502,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 2,
+        "waypointId": "51",
+        "waypointName": "Kwa Rwahama 1 Kimironko",
+        "latitude": -1.951458,
+        "longitude": 30.122136,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 444.5397099205903,
+        "remainingTime": 320.21477413708584
+      },
+      {
+        "waypointIndex": 3,
+        "waypointId": "52",
+        "waypointName": "Sitade Amahoro 1 Kimironko",
+        "latitude": -1.953579,
+        "longitude": 30.119208,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 862.3709891591867,
+        "remainingTime": 621.1906953493824
+      },
+      {
+        "waypointIndex": 4,
+        "waypointId": "169",
+        "waypointName": "Downtown Gare",
+        "latitude": -1.956522,
+        "longitude": 30.1154,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 1416.7361695627385,
+        "remainingTime": 1020.5159233792888
+      }
+    ],
+    "currentLocation": null
+  },
+  "timestamp": {},
+  "source": "naviga-trip-create"
+}
+2026/09/20 08:46:33 [NavigaUpdate] Inbound trip=18 status=CREATED source=naviga-trip-create ts=1789893993 waypoints=4
+2026/09/20 08:46:33 [NavigaUpdate] Parsed trip=18 mapped_status=SCHEDULED dest_state=APPROACHING remaining_distance=1416.74 remaining_time=1021
+2026/09/20 08:46:33 [TripLogService] Logged trip 18 update: updated (log ID: 57)
+2026/09/20 08:46:33 [Repository] 🔍 JSONB query found 0 sessions for trip 18
+2026/09/20 08:46:33 [Repository] 🔍 No sessions found with JSONB query, trying alternative approach
+2026/09/20 08:46:33 [Repository] 🔍 Found 20 total active sessions
+2026/09/20 08:46:33 [Repository] 🔍 Alternative approach found 0 sessions for trip 18
+2026/09/20 08:46:33 [Session] 🔍 Found 0 sessions tracking trip 18
+2026/09/20 08:46:33 [SSE] 📡 Broadcasting event 'updated' for trip 18 to 0 sessions
+2026/09/20 08:46:33 [SSE] 📊 Event 'updated' for trip 18 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:46:33 [Session] ✅ Created session 4c8b6110d5f25d04161be5d8ed94e072 with 10 trip IDs
+2026/09/20 08:46:54 [Session] ✅ Created session f7d0063844dfebc5867f8d5ea924306c with 0 trip IDs
+2026/09/20 08:46:54 [Session] ✅ Created session a98cb65479f7b0f08ffe23fa99b545f1 with 3 trip IDs
+2026/09/20 08:46:57 [Session] ✅ Created session 42f838cfc29439480e02e4c693abe255 with 0 trip IDs
+2026/09/20 08:46:57 [Session] ✅ Created session b74cb376f728f2d5ee6684fc3f82c413 with 3 trip IDs
+2026/09/20 08:47:17 [Session] ✅ Created session 90a46d18a152ad4ad6e7e1411feae164 with 0 trip IDs
+2026/09/20 08:47:18 [Session] ✅ Created session c513aaf0e3fa7844c79a0cb4fb1a8aa0 with 3 trip IDs
+2026/09/20 08:47:22 [Session] ✅ Created session 360eb82db47fa6f5795f3c0298c79640 with 0 trip IDs
+2026/09/20 08:47:23 [Session] ✅ Created session 61f8370e95ceb8acdd517814d884882a with 3 trip IDs
+2026/09/20 08:47:46 [Session] ✅ Created session dfaa6295b5303c5e6b9496614b5b7ab7 with 10 trip IDs
+2026/09/20 08:48:04 [Session] ✅ Created session 5979584a36387c6a5b7c245785e3dc95 with 0 trip IDs
+2026/09/20 08:48:04 [Session] ✅ Created session fcd56776ef4b4c6e89939c6d479519a0 with 3 trip IDs
+2026/09/20 08:48:17 [Session] ✅ Created session b0b510675ac21682c5e9c00a243b2831 with 0 trip IDs
+2026/09/20 08:48:17 [Session] ✅ Created session 746d18fe483a786c59af7ca708102983 with 3 trip IDs
+2026/09/20 08:48:23 [Session] ✅ Created session c2dfb23ca0447488d6b61118f8c15bb2 with 0 trip IDs
+2026/09/20 08:48:23 [Session] ✅ Created session 7217999d9efcb0751d876951db6fac59 with 3 trip IDs
+2026/09/20 08:48:37 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":18,"carId":null,"status":"COMPLETED","createdAt":1789894117.501780507,"completedAt":null,"waypointProgresses":null,"currentLocation":null},"timestamp":1789894117.501781294,"source":"navigation-api-fanout"}
+2026/09/20 08:48:37 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 18,
+    "carId": "",
+    "status": "COMPLETED",
+    "createdAt": {},
+    "completedAt": null,
+    "waypointProgresses": null,
+    "currentLocation": null
+  },
+  "timestamp": {},
+  "source": "navigation-api-fanout"
+}
+2026/09/20 08:48:37 [NavigaUpdate] Inbound trip=18 status=COMPLETED source=navigation-api-fanout ts=1789894117 waypoints=0
+2026/09/20 08:48:37 [TripLogService] Logged trip 18 update: updated (log ID: 58)
+2026/09/20 08:48:37 [Repository] 🔍 JSONB query found 2 sessions for trip 18
+2026/09/20 08:48:37 [Session] 🔍 Found 2 sessions tracking trip 18
+2026/09/20 08:48:37 [Session] 📋 Session 4c8b6110d5f25d04161be5d8ed94e072 tracks trip 18 with 10 total trip IDs
+2026/09/20 08:48:37 [Session] 📋 Session dfaa6295b5303c5e6b9496614b5b7ab7 tracks trip 18 with 10 total trip IDs
+2026/09/20 08:48:37 [SSE] 📡 Broadcasting event 'updated' for trip 18 to 2 sessions
+2026/09/20 08:48:37 [SSE] 📋 Session 4c8b6110d5f25d04161be5d8ed94e072 tracks trip 18
+2026/09/20 08:48:37 [SSE] 📋 Session dfaa6295b5303c5e6b9496614b5b7ab7 tracks trip 18
+2026/09/20 08:48:37 [SSE] 📊 Event 'updated' for trip 18 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:48:37 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":18,"carId":"2","status":"COMPLETED","createdAt":1789893993.119160000,"completedAt":1789894117.498907728,"waypointProgresses":[{"waypointIndex":1,"waypointId":"50","waypointName":"KIE Remera 1 Kimironko","latitude":-1.9514399216575953,"longitude":30.122123248083398,"state":"DONE","arrivedAt":1789894117.487654535,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":2,"waypointId":"51","waypointName":"Kwa Rwahama 1 Kimironko","latitude":-1.9535296342344992,"longitude":30.11917068369476,"state":"DONE","arrivedAt":1789894117.487783758,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":3,"waypointId":"52","waypointName":"Sitade Amahoro 1 Kimironko","latitude":-1.9564669416811284,"longitude":30.115378776744137,"state":"DONE","arrivedAt":1789894117.487909265,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":4,"waypointId":"169","waypointName":"Downtown Gare","latitude":-1.9433782,"longitude":30.057300899999998,"state":"ARRIVED","arrivedAt":1789894117.488055028,"remainingDistance":13.650809962013227,"remainingTime":27.301619924026454}],"currentLocation":{"carId":"2","latitude":-2.4589706921055967E-200,"longitude":2.2065693473763876E-260,"speed":-377.3456115722656,"heading":null,"timestamp":1789894108.653000000}},"timestamp":1789894117.505371620,"source":"naviga-gps-batch"}
+2026/09/20 08:48:37 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 18,
+    "carId": "2",
+    "status": "COMPLETED",
+    "createdAt": {},
+    "completedAt": {},
+    "waypointProgresses": [
+      {
+        "waypointIndex": 1,
+        "waypointId": "50",
+        "waypointName": "KIE Remera 1 Kimironko",
+        "latitude": -1.9514399216575953,
+        "longitude": 30.122123248083398,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 2,
+        "waypointId": "51",
+        "waypointName": "Kwa Rwahama 1 Kimironko",
+        "latitude": -1.9535296342344992,
+        "longitude": 30.11917068369476,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 3,
+        "waypointId": "52",
+        "waypointName": "Sitade Amahoro 1 Kimironko",
+        "latitude": -1.9564669416811284,
+        "longitude": 30.115378776744137,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 4,
+        "waypointId": "169",
+        "waypointName": "Downtown Gare",
+        "latitude": -1.9433782,
+        "longitude": 30.057300899999998,
+        "state": "ARRIVED",
+        "arrivedAt": {},
+        "remainingDistance": 13.650809962013227,
+        "remainingTime": 27.301619924026454
+      }
+    ],
+    "currentLocation": {
+      "carId": "2",
+      "latitude": -2.4589706921055967e-200,
+      "longitude": 2.2065693473763876e-260,
+      "speed": -377.3456115722656,
+      "heading": null,
+      "timestamp": {}
+    }
+  },
+  "timestamp": {},
+  "source": "naviga-gps-batch"
+}
+2026/09/20 08:48:37 [NavigaUpdate] Inbound trip=18 status=COMPLETED source=naviga-gps-batch ts=1789894117 waypoints=4
+2026/09/20 08:48:37 [NavigaUpdate] Parsed trip=18 mapped_status=COMPLETED dest_state=ARRIVED remaining_distance=13.65 remaining_time=27
+2026/09/20 08:48:37 [TripLogService] Logged trip 18 update: updated (log ID: 59)
+2026/09/20 08:48:37 [Repository] 🔍 JSONB query found 2 sessions for trip 18
+2026/09/20 08:48:37 [Session] 🔍 Found 2 sessions tracking trip 18
+2026/09/20 08:48:37 [Session] 📋 Session 4c8b6110d5f25d04161be5d8ed94e072 tracks trip 18 with 10 total trip IDs
+2026/09/20 08:48:37 [Session] 📋 Session dfaa6295b5303c5e6b9496614b5b7ab7 tracks trip 18 with 10 total trip IDs
+2026/09/20 08:48:37 [SSE] 📡 Broadcasting event 'updated' for trip 18 to 2 sessions
+2026/09/20 08:48:37 [SSE] 📋 Session 4c8b6110d5f25d04161be5d8ed94e072 tracks trip 18
+2026/09/20 08:48:37 [SSE] 📋 Session dfaa6295b5303c5e6b9496614b5b7ab7 tracks trip 18
+2026/09/20 08:48:37 [SSE] 📊 Event 'updated' for trip 18 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:49:29 [Session] ✅ Created session 3fb16d3e4746d1f92dec8759dfb0331c with 3 trip IDs
+2026/09/20 08:50:18 [Session] 🧹 Cleaned up expired sessions
+[DEBUG] Vehicle service URL: http://cavgomain:6060/internal/api/vehicles/1
+[DEBUG] Vehicle service response status: 200
+[DEBUG] Vehicle service response body: {"id":1,"companyId":1,"companyName":"Cavgo test","make":"Toyota","model":"Hiace","capacity":1,"licensePlate":"DH12G","vehicleType":"TRUCK","status":"AVAILABLE","createdAt":"2026-09-10T17:38:23.817131","updatedAt":"2026-09-20T08:13:56.760381","driver":{"id":7,"companyId":1,"companyName":"Cavgo test","firstName":"Driver","lastName":"","email":"driver@email.com","phone":"+250784523347","status":"ACTIVE","dateOfBirth":null,"address":null,"role":"DRIVER","licenseNumber":null,"licenseExpiry":null,"createdAt":"2026-09-13T12:57:55.158372","updatedAt":"2026-09-13T13:02:07.146822","vehicle":null,"office":null},"initialPassword":null,"lastLocation":null,"isOnline":false,"lastOnlineAt":null}
+2026/09/20 08:50:27 [TripLogService] Logged trip 19 update: created (log ID: 60)
+2026/09/20 08:50:27 [TripLogService] Logged waypoint 53 update: created for trip 19
+2026/09/20 08:50:27 [TripLogService] Logged waypoint 54 update: created for trip 19
+2026/09/20 08:50:27 [TripLogService] Logged waypoint 55 update: created for trip 19
+2026/09/20 08:50:27 [RabbitMQ Publish Fanout] Exchange: tripservice.trips.updates, Event: created, Message: {"event":"created","data":{"id":19,"route_id":579,"vehicle_id":1,"vehicle":{"id":1,"company_id":1,"company_name":"Cavgo test","capacity":1,"license_plate":"DH12G","driver":{"id":7,"name":"Driver ","phone":"+250784523347"}},"status":"SCHEDULED","departure_time":1789897827,"completion_time":null,"connection_mode":"ONLINE","notes":null,"seats":1,"remaining_seats":1,"price":700,"remaining_time_to_destination":null,"remaining_distance_to_destination":null,"is_reversed":false,"current_speed":null,"current_latitude":null,"current_longitude":null,"has_custom_waypoints":true,"auto_return":false,"created_at":"2026-09-20T08:50:27.264724Z","updated_at":"2026-09-20T08:50:27.264724Z","route":{"id":579,"name":null,"distance_meters":9600,"estimated_duration_seconds":3600,"google_route_id":null,"origin_id":170,"destination_id":169,"route_price":700,"city_route":true,"created_at":"2026-09-13T21:31:42.930863Z","updated_at":"2026-09-13T21:31:42.930863Z","origin":{"id":170,"latitude":-1.9496166326933349,"code":"11004","longitude":30.125567180998672,"google_place_name":"Kimironko Taxi Park, KG 11 Avenue, Kimironko, Kigali City, Rwanda","custom_name":"Kimironko Gare","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"2026-09-11T11:52:42.554285Z","updated_at":"2026-09-11T11:52:42.554285Z"},"destination":{"id":169,"latitude":-1.9433782,"code":"13002","longitude":30.057300899999998,"google_place_name":"Kigali CBD Bus Station, KN 82 Street, Nyarugenge, Kigali City, Rwanda","custom_name":"Downtown Gare","province":"Kigali","district":"Nyarugenge","place_id":null,"created_at":"2026-09-11T11:51:24.120599Z","updated_at":"2026-09-11T11:51:24.120599Z"},"waypoints":null},"waypoints":[{"id":53,"trip_id":19,"location_id":199,"order":1,"price":80,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:50:27.266439Z","updated_at":"2026-09-20T08:50:27.266439Z","location":{"id":199,"latitude":-1.9514399216575953,"code":"11009","longitude":30.122123248083398,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"KIE Remera 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:27:08.142329Z"}},{"id":54,"trip_id":19,"location_id":197,"order":2,"price":100,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:50:27.267449Z","updated_at":"2026-09-20T08:50:27.267449Z","location":{"id":197,"latitude":-1.9535296342344992,"code":"11007","longitude":30.11917068369476,"google_place_name":"KG 205 Street, Kigali City, Rwanda","custom_name":"Kwa Rwahama 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":"324208661345","created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:53.008951Z"}},{"id":55,"trip_id":19,"location_id":205,"order":3,"price":120,"is_pass_through":false,"is_passed":false,"is_next":false,"passed_timestamp":null,"remaining_time":null,"remaining_distance":null,"is_custom":true,"created_at":"2026-09-20T08:50:27.268049Z","updated_at":"2026-09-20T08:50:27.268049Z","location":{"id":205,"latitude":-1.9564669416811284,"code":"11015","longitude":30.115378776744137,"google_place_name":"KG 11 Avenue, Kigali City, Rwanda","custom_name":"Sitade Amahoro 1 Kimironko","province":"Kigali","district":"Gasabo","place_id":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"2026-09-13T09:26:18.300506Z"}}]}}
+2026/09/20 08:50:27 [Repository] 🔍 JSONB query found 0 sessions for trip 19
+2026/09/20 08:50:27 [Repository] 🔍 No sessions found with JSONB query, trying alternative approach
+2026/09/20 08:50:27 [Repository] 🔍 Found 35 total active sessions
+2026/09/20 08:50:27 [Repository] 🔍 Alternative approach found 0 sessions for trip 19
+2026/09/20 08:50:27 [Session] 🔍 Found 0 sessions tracking trip 19
+2026/09/20 08:50:27 [SSE] 📡 Broadcasting event 'created' for trip 19 to 0 sessions
+2026/09/20 08:50:27 [SSE] 📊 Event 'created' for trip 19 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:50:27 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":19,"carId":"1","status":"CREATED","createdAt":1789894227.283771000,"completedAt":null,"waypointProgresses":[{"waypointIndex":1,"waypointId":"53","waypointName":"KIE Remera 1 Kimironko","latitude":-1.949669,"longitude":30.125502,"state":"APPROACHING","arrivedAt":null,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":2,"waypointId":"54","waypointName":"Kwa Rwahama 1 Kimironko","latitude":-1.951458,"longitude":30.122136,"state":"APPROACHING","arrivedAt":null,"remainingDistance":444.5397099205903,"remainingTime":320.21477413708584},{"waypointIndex":3,"waypointId":"55","waypointName":"Sitade Amahoro 1 Kimironko","latitude":-1.953579,"longitude":30.119208,"state":"APPROACHING","arrivedAt":null,"remainingDistance":862.3709891591867,"remainingTime":621.1906953493824},{"waypointIndex":4,"waypointId":"169","waypointName":"Downtown Gare","latitude":-1.956522,"longitude":30.1154,"state":"APPROACHING","arrivedAt":null,"remainingDistance":1416.7361695627385,"remainingTime":1020.5159233792888}],"currentLocation":null},"timestamp":1789894227.293174453,"source":"naviga-trip-create"}
+2026/09/20 08:50:27 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 19,
+    "carId": "1",
+    "status": "CREATED",
+    "createdAt": {},
+    "completedAt": null,
+    "waypointProgresses": [
+      {
+        "waypointIndex": 1,
+        "waypointId": "53",
+        "waypointName": "KIE Remera 1 Kimironko",
+        "latitude": -1.949669,
+        "longitude": 30.125502,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 2,
+        "waypointId": "54",
+        "waypointName": "Kwa Rwahama 1 Kimironko",
+        "latitude": -1.951458,
+        "longitude": 30.122136,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 444.5397099205903,
+        "remainingTime": 320.21477413708584
+      },
+      {
+        "waypointIndex": 3,
+        "waypointId": "55",
+        "waypointName": "Sitade Amahoro 1 Kimironko",
+        "latitude": -1.953579,
+        "longitude": 30.119208,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 862.3709891591867,
+        "remainingTime": 621.1906953493824
+      },
+      {
+        "waypointIndex": 4,
+        "waypointId": "169",
+        "waypointName": "Downtown Gare",
+        "latitude": -1.956522,
+        "longitude": 30.1154,
+        "state": "APPROACHING",
+        "arrivedAt": null,
+        "remainingDistance": 1416.7361695627385,
+        "remainingTime": 1020.5159233792888
+      }
+    ],
+    "currentLocation": null
+  },
+  "timestamp": {},
+  "source": "naviga-trip-create"
+}
+2026/09/20 08:50:27 [NavigaUpdate] Inbound trip=19 status=CREATED source=naviga-trip-create ts=1789894227 waypoints=4
+2026/09/20 08:50:27 [NavigaUpdate] Parsed trip=19 mapped_status=SCHEDULED dest_state=APPROACHING remaining_distance=1416.74 remaining_time=1021
+2026/09/20 08:50:27 [TripLogService] Logged trip 19 update: updated (log ID: 61)
+2026/09/20 08:50:27 [Repository] 🔍 JSONB query found 0 sessions for trip 19
+2026/09/20 08:50:27 [Repository] 🔍 No sessions found with JSONB query, trying alternative approach
+2026/09/20 08:50:27 [Repository] 🔍 Found 35 total active sessions
+2026/09/20 08:50:27 [Repository] 🔍 Alternative approach found 0 sessions for trip 19
+2026/09/20 08:50:27 [Session] 🔍 Found 0 sessions tracking trip 19
+2026/09/20 08:50:27 [SSE] 📡 Broadcasting event 'updated' for trip 19 to 0 sessions
+2026/09/20 08:50:27 [SSE] 📊 Event 'updated' for trip 19 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:50:27 [Session] ✅ Created session 97baeb104a16930d85311ef241bad8cf with 4 trip IDs
+2026/09/20 08:50:34 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":19,"carId":null,"status":"COMPLETED","createdAt":1789894234.408672274,"completedAt":null,"waypointProgresses":null,"currentLocation":null},"timestamp":1789894234.408679026,"source":"navigation-api-fanout"}
+2026/09/20 08:50:34 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 19,
+    "carId": "",
+    "status": "COMPLETED",
+    "createdAt": {},
+    "completedAt": null,
+    "waypointProgresses": null,
+    "currentLocation": null
+  },
+  "timestamp": {},
+  "source": "navigation-api-fanout"
+}
+2026/09/20 08:50:34 [NavigaUpdate] Inbound trip=19 status=COMPLETED source=navigation-api-fanout ts=1789894234 waypoints=0
+2026/09/20 08:50:34 [TripLogService] Logged trip 19 update: updated (log ID: 62)
+2026/09/20 08:50:34 [Repository] 🔍 JSONB query found 1 sessions for trip 19
+2026/09/20 08:50:34 [Session] 🔍 Found 1 sessions tracking trip 19
+2026/09/20 08:50:34 [Session] 📋 Session 97baeb104a16930d85311ef241bad8cf tracks trip 19 with 4 total trip IDs
+2026/09/20 08:50:34 [SSE] 📡 Broadcasting event 'updated' for trip 19 to 1 sessions
+2026/09/20 08:50:34 [SSE] 📋 Session 97baeb104a16930d85311ef241bad8cf tracks trip 19
+2026/09/20 08:50:34 [SSE] 📊 Event 'updated' for trip 19 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:50:34 [Trip Fanout] Raw message: {"eventType":"updates","trip":{"id":19,"carId":"1","status":"COMPLETED","createdAt":1789894227.283771000,"completedAt":1789894234.360852486,"waypointProgresses":[{"waypointIndex":1,"waypointId":"53","waypointName":"KIE Remera 1 Kimironko","latitude":-1.9514399216575953,"longitude":30.122123248083398,"state":"DONE","arrivedAt":1789894234.319014287,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":2,"waypointId":"54","waypointName":"Kwa Rwahama 1 Kimironko","latitude":-1.9535296342344992,"longitude":30.11917068369476,"state":"DONE","arrivedAt":1789894234.320156453,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":3,"waypointId":"55","waypointName":"Sitade Amahoro 1 Kimironko","latitude":-1.9564669416811284,"longitude":30.115378776744137,"state":"DONE","arrivedAt":1789894234.321542813,"remainingDistance":0.0,"remainingTime":0.0},{"waypointIndex":4,"waypointId":"169","waypointName":"Downtown Gare","latitude":-1.9433782,"longitude":30.057300899999998,"state":"ARRIVED","arrivedAt":1789894234.322824519,"remainingDistance":13.650809962013227,"remainingTime":27.301619924026454}],"currentLocation":{"carId":"1","latitude":-1.6669111136094515E-54,"longitude":-3.933281026807262E-88,"speed":4.5977163443922686E-17,"heading":-1.4112617695390728E30,"timestamp":1789894223.726000000}},"timestamp":1789894234.474451835,"source":"naviga-gps-batch"}
+2026/09/20 08:50:34 [Trip Fanout] Parsed event: {
+  "eventType": "updates",
+  "trip": {
+    "id": 19,
+    "carId": "1",
+    "status": "COMPLETED",
+    "createdAt": {},
+    "completedAt": {},
+    "waypointProgresses": [
+      {
+        "waypointIndex": 1,
+        "waypointId": "53",
+        "waypointName": "KIE Remera 1 Kimironko",
+        "latitude": -1.9514399216575953,
+        "longitude": 30.122123248083398,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 2,
+        "waypointId": "54",
+        "waypointName": "Kwa Rwahama 1 Kimironko",
+        "latitude": -1.9535296342344992,
+        "longitude": 30.11917068369476,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 3,
+        "waypointId": "55",
+        "waypointName": "Sitade Amahoro 1 Kimironko",
+        "latitude": -1.9564669416811284,
+        "longitude": 30.115378776744137,
+        "state": "DONE",
+        "arrivedAt": {},
+        "remainingDistance": 0,
+        "remainingTime": 0
+      },
+      {
+        "waypointIndex": 4,
+        "waypointId": "169",
+        "waypointName": "Downtown Gare",
+        "latitude": -1.9433782,
+        "longitude": 30.057300899999998,
+        "state": "ARRIVED",
+        "arrivedAt": {},
+        "remainingDistance": 13.650809962013227,
+        "remainingTime": 27.301619924026454
+      }
+    ],
+    "currentLocation": {
+      "carId": "1",
+      "latitude": -1.6669111136094515e-54,
+      "longitude": -3.933281026807262e-88,
+      "speed": 4.5977163443922686e-17,
+      "heading": -1.4112617695390728e+30,
+      "timestamp": {}
+    }
+  },
+  "timestamp": {},
+  "source": "naviga-gps-batch"
+}
+2026/09/20 08:50:34 [NavigaUpdate] Inbound trip=19 status=COMPLETED source=naviga-gps-batch ts=1789894234 waypoints=4
+2026/09/20 08:50:34 [NavigaUpdate] Parsed trip=19 mapped_status=COMPLETED dest_state=ARRIVED remaining_distance=13.65 remaining_time=27
+2026/09/20 08:50:34 [TripLogService] Logged trip 19 update: updated (log ID: 63)
+2026/09/20 08:50:34 [Repository] 🔍 JSONB query found 1 sessions for trip 19
+2026/09/20 08:50:34 [Session] 🔍 Found 1 sessions tracking trip 19
+2026/09/20 08:50:34 [Session] 📋 Session 97baeb104a16930d85311ef241bad8cf tracks trip 19 with 4 total trip IDs
+2026/09/20 08:50:34 [SSE] 📡 Broadcasting event 'updated' for trip 19 to 1 sessions
+2026/09/20 08:50:34 [SSE] 📋 Session 97baeb104a16930d85311ef241bad8cf tracks trip 19
+2026/09/20 08:50:34 [SSE] 📊 Event 'updated' for trip 19 - Total clients: 0, Delivered: 0, Filtered: 0, Failed: 0
+2026/09/20 08:51:28 [Session] ✅ Created session 09492a00362d3e2c225362984ef8b5c9 with 0 trip IDs
+2026/09/20 08:51:29 [Session] ✅ Created session c3e248f22115d633452317c9f49e99e4 with 2 trip IDs

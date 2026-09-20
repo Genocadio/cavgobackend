@@ -99,6 +99,7 @@ public class NavigationService {
         // Validate GPS coordinates
         if (Double.isNaN(gpsLat) || Double.isInfinite(gpsLat) ||
             Double.isNaN(gpsLon) || Double.isInfinite(gpsLon) ||
+            (gpsLat == 0.0 && gpsLon == 0.0) ||
             gpsLat < -90.0 || gpsLat > 90.0 ||
             gpsLon < -180.0 || gpsLon > 180.0) {
             log.warn("Rejecting GPS update with invalid coordinates for carId: {}, lat: {}, lon: {}", carId, gpsLat, gpsLon);

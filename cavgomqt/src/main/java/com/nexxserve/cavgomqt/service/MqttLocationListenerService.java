@@ -106,6 +106,7 @@ public class MqttLocationListenerService {
                     // Check for valid WGS-84 coordinates
                     if (Double.isNaN(point.getLat()) || Double.isInfinite(point.getLat()) ||
                         Double.isNaN(point.getLng()) || Double.isInfinite(point.getLng()) ||
+                        (point.getLat() == 0.0 && point.getLng() == 0.0) ||
                         point.getLat() < -90.0 || point.getLat() > 90.0 ||
                         point.getLng() < -180.0 || point.getLng() > 180.0) {
                         logger.error("    ❌ Invalid WGS-84 coordinates: lat={}, lng={}. Skipping point! (Check GPS client Protobuf encoding: lat/lng must be 64-bit double)", 
