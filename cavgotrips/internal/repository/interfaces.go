@@ -64,6 +64,7 @@ type TripRepository interface {
 	GetTripsByVehicleIDPaginated(vehicleID int64, statuses []string, limit, offset int) ([]models.Trip, int64, error)
 	GetLatestTripByVehicleID(vehicleID int64) (*models.Trip, error)
 	GetTripsByDriverID(driverID int64) ([]models.Trip, error)
+	GetTripsByDriverIDPaginated(driverID int64, statuses []string, limit, offset int) ([]models.Trip, int64, error)
 	GetTripsByCityRoute(cityRoute bool) ([]models.Trip, error)
 	GetTripsByFiltersWithCityRoute(origin, destination, company string, cityRoute bool, limit, offset int) ([]models.Trip, int64, error)
 	GetTripsByCompanyID(companyID int64, driverID *int64, vehicleID *int64, fromDate *time.Time, afterTripID *int64, limit, offset int) ([]models.Trip, int64, error)

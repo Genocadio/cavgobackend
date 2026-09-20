@@ -213,6 +213,38 @@ func (r *tripRepository) GetTripsByDriverID(driverID int64) ([]models.Trip, erro
 	return trips, err
 }
 
+func (r *tripRepository) GetTripsByDriverIDPaginated(driverID int64, statuses []string, limit, offset int) ([]models.Trip, int64, error) {
+	var trips []models.Trip
+	db := driverIDCondition(r.db.Preload("Route.Origin").
+		Preload("Route.Destination").
+		Preload("Waypoints.Location"), driverID).
+		Order("created_at DESC")
+
+	if len(statuses) > 0 {
+		db = db.Where("status IN ?", statuses)
+	}
+
+	var total int64
+	err := db.Session(&gorm.Session{}).Model(&models.Trip{}).Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if limit > 0 {
+		db = db.Limit(limit)
+	}
+	if offset > 0 {
+		db = db.Offset(offset)
+	}
+
+	err = db.Find(&trips).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return trips, total, nil
+}
+
 func (r *tripRepository) GetTripsByCompanyID(companyID int64, driverID *int64, vehicleID *int64, fromDate *time.Time, afterTripID *int64, limit, offset int) ([]models.Trip, int64, error) {
 	var trips []models.Trip
 	db := r.db.Preload("Route.Origin").

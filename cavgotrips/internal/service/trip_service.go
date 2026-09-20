@@ -943,6 +943,18 @@ func (s *TripService) GetTripsByDriverID(driverID int64) ([]models.Trip, error) 
 	return trips, nil
 }
 
+func (s *TripService) GetTripsByDriverIDPaginated(driverID int64, statuses []string, limit, offset int) ([]models.Trip, int64, error) {
+	trips, total, err := s.tripRepo.GetTripsByDriverIDPaginated(driverID, statuses, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range trips {
+		trips[i].Route.Waypoints = nil
+		adjustRouteForReversed(&trips[i])
+	}
+	return trips, total, nil
+}
+
 func (s *TripService) GetTripsByCompanyID(companyID int64, driverID *int64, vehicleID *int64, fromDate *time.Time, afterTripID *int64, limit, offset int) ([]models.Trip, int64, error) {
 	trips, total, err := s.tripRepo.GetTripsByCompanyID(companyID, driverID, vehicleID, fromDate, afterTripID, limit, offset)
 	if err != nil {

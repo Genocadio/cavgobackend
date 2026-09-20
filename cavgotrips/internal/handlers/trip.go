@@ -489,7 +489,11 @@ func (h *TripHandler) GetTripsByDriverID(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Check for optional query parameters
-	status := r.URL.Query().Get("status")
+	statusFilters, err := parseStatusFilters(r)
+	if err != nil {
+		utils.ErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 
@@ -512,59 +516,10 @@ func (h *TripHandler) GetTripsByDriverID(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	var trips []models.Trip
-	var total int64
-
-	if status != "" {
-		// Filter by both driver ID and status
-		allTrips, err := h.service.GetTripsByDriverID(driverID)
-		if err != nil {
-			utils.ErrorResponse(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Filter by status in memory
-		filteredTrips := make([]models.Trip, 0)
-		for _, trip := range allTrips {
-			if trip.Status == status {
-				filteredTrips = append(filteredTrips, trip)
-			}
-		}
-
-		// Set total to the count of filtered trips (before pagination)
-		total = int64(len(filteredTrips))
-
-		// Apply pagination
-		if offset < len(filteredTrips) {
-			end := offset + limit
-			if end > len(filteredTrips) {
-				end = len(filteredTrips)
-			}
-			trips = filteredTrips[offset:end]
-		} else {
-			trips = []models.Trip{}
-		}
-	} else {
-		// Just get all trips for the driver
-		allTrips, err := h.service.GetTripsByDriverID(driverID)
-		if err != nil {
-			utils.ErrorResponse(w, "Invalid driver ID", http.StatusInternalServerError)
-			return
-		}
-
-		// Set total to the count of all trips (before pagination)
-		total = int64(len(allTrips))
-
-		// Apply pagination
-		if offset < len(allTrips) {
-			end := offset + limit
-			if end > len(allTrips) {
-				end = len(allTrips)
-			}
-			trips = allTrips[offset:end]
-		} else {
-			trips = []models.Trip{}
-		}
+	trips, total, err := h.service.GetTripsByDriverIDPaginated(driverID, statusFilters, limit, offset)
+	if err != nil {
+		utils.ErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	// Extract trip IDs for session
