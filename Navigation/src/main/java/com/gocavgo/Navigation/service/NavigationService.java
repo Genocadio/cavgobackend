@@ -96,6 +96,16 @@ public class NavigationService {
             }
         }
 
+        // Validate GPS coordinates
+        if (Double.isNaN(gpsLat) || Double.isInfinite(gpsLat) ||
+            Double.isNaN(gpsLon) || Double.isInfinite(gpsLon) ||
+            gpsLat < -90.0 || gpsLat > 90.0 ||
+            gpsLon < -180.0 || gpsLon > 180.0) {
+            log.warn("Rejecting GPS update with invalid coordinates for carId: {}, lat: {}, lon: {}", carId, gpsLat, gpsLon);
+            throw new IllegalArgumentException("INVALID_COORDINATES: carId=" + carId + ", tripId=" + tripId +
+                    ", lat=" + gpsLat + ", lon=" + gpsLon);
+        }
+
         // Snap GPS to route (always needed for internal progress tracking/distance
         // calculation)
         GeoMath.SnapResult snapResult = GeoMath.snapToRoute(gpsLat, gpsLon, route, state.getLastSnappedIndex());
