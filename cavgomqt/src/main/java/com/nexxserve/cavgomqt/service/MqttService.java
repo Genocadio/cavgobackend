@@ -33,7 +33,8 @@ public class MqttService {
     @Autowired
     private MessageChannel vehicleSettingsOutboundChannel;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    @Autowired
+    private ObjectMapper objectMapper;
 
 
     /**
