@@ -455,13 +455,18 @@ public class MqttConfiguration {
     @ServiceActivator(inputChannel = "tripUpdatesChannel")
     public MessageHandler tripUpdatesHandler() {
         return message -> {
-            logger.info("🚗 ✅ MQTT MESSAGE ARRIVED: car/+/trip/updates");
-            
             String payload = (String) message.getPayload();
             String topic = (String) message
                     .getHeaders()
                     .get("mqtt_receivedTopic");
 
+            // Loop guard: ignore server-generated Naviga progress updates
+            if (payload != null && (payload.contains("\"waypointProgresses\"") || payload.contains("\"currentLocation\""))) {
+                logger.debug("ℹ️ Ignoring server-generated Naviga progress echo on topic: {}", topic);
+                return;
+            }
+
+            logger.info("🚗 ✅ MQTT MESSAGE ARRIVED: car/+/trip/updates");
             System.out.println("🔍 MQTT Handler Debug:");
             System.out.println("  - Topic: " + topic);
             System.out.println("  - Payload length: " + (payload != null ? payload.length() : "null"));

@@ -105,15 +105,15 @@ public class RabbitMQListenerService {
             Trip trip = message.getData();
             String event = message.getEvent();
 
-            // Only handle the two canonical Trip Service events:
-            // - created: create/register trip in Naviga
-            // - cancelled: delete trip in Naviga and cleanup registry
             if ("created".equalsIgnoreCase(event)) {
                 handleTripStartedEvent(message, trip);
+                mqttService.publishTrip(message);
             } else if ("cancelled".equalsIgnoreCase(event)) {
                 handleTripCancelledEvent(message, trip);
+                mqttService.publishTrip(message);
             } else {
-                logger.info("ℹ️ Ignoring non-core trip event from Trip Service: {}", event);
+                logger.info("ℹ️ Forwarding trip event from Trip Service to MQTT: {}", event);
+                mqttService.publishTrip(message);
             }
 
         } catch (Exception e) {

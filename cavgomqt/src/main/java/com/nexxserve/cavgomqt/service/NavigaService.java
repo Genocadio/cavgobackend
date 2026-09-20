@@ -56,6 +56,10 @@ public class NavigaService {
     @Autowired
     private RabbitMQNavigaTripUpdatePublisher rabbitMQNavigaTripUpdatePublisher;
 
+    @Autowired
+    @org.springframework.context.annotation.Lazy
+    private MqttService mqttService;
+
     /**
      * Check if Naviga integration is enabled
      * 
@@ -401,10 +405,13 @@ public class NavigaService {
                             logger.info("📝 Naviga trip response: status={} tripId={} carId={}", status, tripId,
                                     normalizedCarId);
 
-                            // Publish GPS update event to RabbitMQ fanout exchange
+                            // Publish GPS update event to RabbitMQ fanout exchange and MQTT
                             try {
                                 NavigaTripUpdateEvent event = new NavigaTripUpdateEvent(tripDto, "naviga-gps-batch");
                                 rabbitMQNavigaTripUpdatePublisher.publishTripUpdateEvent(event);
+                                if (mqttService != null) {
+                                    mqttService.publishTripProgress(normalizedCarId, tripDto);
+                                }
                             } catch (Exception pubError) {
                                 logger.warn("⚠️ Failed to publish GPS batch event: {}", pubError.getMessage());
                             }

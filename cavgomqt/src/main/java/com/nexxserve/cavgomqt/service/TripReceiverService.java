@@ -39,6 +39,16 @@ public class TripReceiverService {
      */
     public void processTripEventMessage(String topic, String payload) {
         try {
+            if (payload == null || payload.trim().isEmpty()) {
+                return;
+            }
+
+            // Loop guard: ignore server-generated Naviga progress updates
+            if (payload.contains("\"waypointProgresses\"") || payload.contains("\"currentLocation\"")) {
+                logger.debug("ℹ️ Ignoring server-generated Naviga progress echo on topic: {}", topic);
+                return;
+            }
+
             logger.info("=== TRIP UPDATE ===");
             logger.info("Topic: {}", topic);
             logger.info("Payload: {}", payload);

@@ -93,8 +93,17 @@ public class MqttService {
 
     public void publishTrip(TripEventMessage message) {
         try {
-            String carId = message.getData().getVehicleId().toString();
-            String topic = "car/" + carId+ "/trip";
+            if (message == null || message.getData() == null) return;
+            Long vid = message.getData().getVehicleId() != null ? message.getData().getVehicleId().longValue() : null;
+            if (vid == null && message.getData().getVehicle() != null && message.getData().getVehicle().getId() != null) {
+                vid = message.getData().getVehicle().getId().longValue();
+            }
+            if (vid == null) {
+                System.err.println("❌ Cannot publish trip event: vehicleId is null");
+                return;
+            }
+            String carId = vid.toString();
+            String topic = "car/" + carId + "/trip";
             String jsonPayload = objectMapper.writeValueAsString(message);
             tripAssignmentChannel.send(
                     MessageBuilder.withPayload(jsonPayload)
@@ -103,9 +112,26 @@ public class MqttService {
                             .setHeader("mqtt_retained", false) // Don't retain trip events
                             .build()
             );
-            System.out.println("🚗 Trip event published for trip " + carId);
+            System.out.println("🚗 Trip event published to MQTT: " + topic + " (event=" + message.getEvent() + ")");
         } catch (JsonProcessingException e) {
             System.err.println("❌ Failed to serialize trip event: " + e.getMessage());
+        }
+    }
+
+    public void publishTripProgress(String carId, Object progress) {
+        try {
+            String topic = "car/" + carId + "/trip/updates";
+            String jsonPayload = objectMapper.writeValueAsString(progress);
+            tripAssignmentChannel.send(
+                    MessageBuilder.withPayload(jsonPayload)
+                            .setHeader("mqtt_topic", topic)
+                            .setHeader("mqtt_qos", 1)
+                            .setHeader("mqtt_retained", false)
+                            .build()
+            );
+            System.out.println("📍 Trip progress update published to MQTT: " + topic);
+        } catch (JsonProcessingException e) {
+            System.err.println("❌ Failed to serialize trip progress: " + e.getMessage());
         }
     }
 
