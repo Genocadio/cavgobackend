@@ -51,7 +51,7 @@ public class VehicleRegistryService {
     }
 
     public List<VehicleDto> fetchAllVehicles() {
-        String url = vehicleBackendUrl + "/main/vehicles";
+        String url = vehicleBackendUrl + "/internal/api/vehicles";
         try {
             ResponseEntity<List<VehicleDto>> response = restTemplate.exchange(
                     url,
