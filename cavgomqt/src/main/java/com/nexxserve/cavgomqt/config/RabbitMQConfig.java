@@ -31,6 +31,20 @@ public class RabbitMQConfig {
     // Navigation API fanout exchange for completed trips
     public static final String NAVIGATION_TRIP_UPDATE_EXCHANGE = "navigation.trip.update";
     public static final String NAVIGATION_TRIP_UPDATE_QUEUE = "navigation.trip.update.queue";
+    public static final String CAVGOMQT_LOCATION_UPDATES_EXCHANGE = "cavgomqt.location.updates";
+    public static final String CAVGOMQT_TRIP_UPDATES_EXCHANGE = "cavgomqt.trip.updates";
+
+    @Bean
+    public FanoutExchange cavgomqtLocationUpdatesExchange() {
+        logger.info("Declaring CavgoMQT Location Updates fanout exchange: {}", CAVGOMQT_LOCATION_UPDATES_EXCHANGE);
+        return new FanoutExchange(CAVGOMQT_LOCATION_UPDATES_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public FanoutExchange cavgomqtTripUpdatesExchange() {
+        logger.info("Declaring CavgoMQT Trip Updates fanout exchange: {}", CAVGOMQT_TRIP_UPDATES_EXCHANGE);
+        return new FanoutExchange(CAVGOMQT_TRIP_UPDATES_EXCHANGE, true, false);
+    }
 
     @Bean
     public FanoutExchange bookingsFanoutExchange() {

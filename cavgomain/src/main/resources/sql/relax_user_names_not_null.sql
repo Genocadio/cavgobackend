@@ -16,3 +16,7 @@
 -- to re-run on every boot.
 ALTER TABLE IF EXISTS users ALTER COLUMN first_name DROP NOT NULL;
 ALTER TABLE IF EXISTS users ALTER COLUMN last_name DROP NOT NULL;
+
+-- Drop legacy check constraint on company_user.role (created by older Hibernate versions)
+-- so new roles like WORKER are accepted without violating the static check constraint.
+ALTER TABLE IF EXISTS company_user DROP CONSTRAINT IF EXISTS company_user_role_check;
