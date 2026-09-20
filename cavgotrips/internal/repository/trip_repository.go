@@ -10,12 +10,11 @@ import (
 	"gorm.io/gorm"
 )
 
-// driverIDCondition creates a WHERE condition that handles both integer and string driver IDs in JSON
-// Excludes trips with driver ID 0 (no driver assigned)
+// driverIDCondition creates a WHERE condition that safely handles 64-bit int, string, and UUID driver IDs in JSON
+// Excludes trips with empty or unassigned (0) driver IDs
 func driverIDCondition(db *gorm.DB, driverID int64) *gorm.DB {
-	// Try integer cast first, if that fails, try string comparison
-	// Also exclude trips with driver ID 0 (no driver assigned)
-	return db.Where("((vehicle->'driver'->>'id')::int = ? OR vehicle->'driver'->>'id' = ?) AND (vehicle->'driver'->>'id')::int > 0", driverID, strconv.FormatInt(driverID, 10))
+	driverIDStr := strconv.FormatInt(driverID, 10)
+	return db.Where("vehicle->'driver'->>'id' = ? AND vehicle->'driver'->>'id' NOT IN ('', '0') AND vehicle->'driver'->>'id' IS NOT NULL", driverIDStr)
 }
 
 type tripRepository struct {
@@ -219,7 +218,7 @@ func (r *tripRepository) GetTripsByCompanyID(companyID int64, driverID *int64, v
 	db := r.db.Preload("Route.Origin").
 		Preload("Route.Destination").
 		Preload("Waypoints.Location").
-		Where("(trips.vehicle->>'company_id')::int = ?", companyID).
+		Where("trips.vehicle->>'company_id' = ?", strconv.FormatInt(companyID, 10)).
 		Where("DATE_TRUNC('month', trips.created_at) = DATE_TRUNC('month', CURRENT_DATE)").
 		Order("trips.updated_at DESC, trips.created_at DESC")
 
@@ -244,12 +243,12 @@ func (r *tripRepository) GetTripsByCompanyID(companyID int64, driverID *int64, v
 		err := r.db.First(&afterTrip, *afterTripID).Error
 		if err == nil {
 			// Only apply filter if the trip exists and belongs to the same company
-			var afterTripCompanyID int64
+			var afterTripCompanyID string
 			err = r.db.Model(&models.Trip{}).
-				Select("(vehicle->>'company_id')::int").
+				Select("vehicle->>'company_id'").
 				Where("id = ?", *afterTripID).
 				Scan(&afterTripCompanyID).Error
-			if err == nil && afterTripCompanyID == companyID {
+			if err == nil && afterTripCompanyID == strconv.FormatInt(companyID, 10) {
 				// Get the updated_at timestamp of the reference trip
 				var afterTripUpdatedAt time.Time
 				err = r.db.Model(&models.Trip{}).
