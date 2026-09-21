@@ -9,6 +9,7 @@ import com.nexxserve.cavgomain.entity.DriverRequest;
 import com.nexxserve.cavgomain.enums.CompanyAccessRequestStatus;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.DriverRequestStatus;
+import com.nexxserve.cavgomain.enums.UserStatus;
 import com.nexxserve.cavgomain.repository.CompanyAccessRequestRepository;
 import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
@@ -113,11 +114,41 @@ public class DriverRequestService {
      * Returns the authenticated user's most recent driver request, or null
      * if they have never requested. Used by ikuriye to show the current
      * status (pending/approved/rejected) and prevent duplicate requests.
+     *
+     * <p>Drivers who already belong to a company but were never created through
+     * the driver-request flow (e.g. added directly as staff in the console, or
+     * approved before this feature shipped) have no {@code DriverRequest} row.
+     * So when no request exists we fall back to the live {@code CompanyUser}
+     * membership: an active DRIVER with a company is reported as APPROVED so the
+     * app's gate opens instead of re-asking for a company code.
      */
     @Transactional(readOnly = true)
     public DriverRequestResponseDto getMyLatestRequest(Long nexxauthUserId) {
         var request = driverRequestRepository.findByNexxauthUserId(nexxauthUserId);
-        return request.map(DriverRequestResponseDto::fromEntity).orElse(null);
+        if (request.isPresent()) {
+            return DriverRequestResponseDto.fromEntity(request.get());
+        }
+
+        var companyUser = companyUserRepository.findById(nexxauthUserId);
+        if (companyUser.isPresent()) {
+            var user = companyUser.get();
+            if (user.getCompany() != null
+                    && user.getRole() == CompanyUserRole.DRIVER
+                    && user.getStatus() == UserStatus.ACTIVE) {
+                DriverRequestResponseDto dto = new DriverRequestResponseDto();
+                dto.setNexxauthUserId(nexxauthUserId);
+                dto.setFirstName(user.getFirstName());
+                dto.setLastName(user.getLastName());
+                dto.setEmail(user.getEmail());
+                dto.setPhone(user.getPhone());
+                dto.setCompanyId(user.getCompany().getId());
+                dto.setCompanyName(user.getCompany().getCompanyName());
+                dto.setCompanyCode(user.getCompany().getCompanyCode());
+                dto.setStatus(DriverRequestStatus.APPROVED);
+                return dto;
+            }
+        }
+        return null;
     }
 
     /**

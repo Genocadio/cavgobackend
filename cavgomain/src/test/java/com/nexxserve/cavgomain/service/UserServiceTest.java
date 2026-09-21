@@ -6,6 +6,7 @@ import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.UserStatus;
 import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
+import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
 import com.nexxserve.cavgomain.security.NexxauthClient;
 import com.nexxserve.cavgomain.security.NexxauthRoles;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,8 @@ class UserServiceTest {
     private CompanyUserRepository companyUserRepository;
     @Mock
     private CompanyRepository companyRepository;
+    @Mock
+    private VehicleAssignmentRepository vehicleAssignmentRepository;
     @Mock
     private NexxauthClient nexxauthClient;
 
@@ -57,10 +60,10 @@ class UserServiceTest {
 
         var result = userService.syncUser(100L);
 
-        assertEquals(100L, result.getId());
-        assertEquals("John", result.getFirstName());
-        assertEquals(CompanyUserRole.ADMIN, result.getRole());
-        assertEquals(UserStatus.ACTIVE, result.getStatus());
+        assertEquals(100L, result.getUser().getId());
+        assertEquals("John", result.getUser().getFirstName());
+        assertEquals(CompanyUserRole.ADMIN, result.getUser().getRole());
+        assertEquals(UserStatus.ACTIVE, result.getUser().getStatus());
         // New CompanyUser has a pre-assigned (Nexxauth) id — saveAndFlush()
         // inserts the row with the requested id (persist() with a preset id
         // would throw "detached entity passed to persist").
@@ -95,8 +98,8 @@ class UserServiceTest {
 
         var result = userService.syncUser(100L);
 
-        assertEquals("John", result.getFirstName());
-        assertEquals("Doe", result.getLastName());
+        assertEquals("John", result.getUser().getFirstName());
+        assertEquals("Doe", result.getUser().getLastName());
         verify(companyUserRepository).save(any(CompanyUser.class));
     }
 
@@ -127,7 +130,7 @@ class UserServiceTest {
 
         var result = userService.syncUser(100L);
 
-        assertEquals("John", result.getFirstName());
+        assertEquals("John", result.getUser().getFirstName());
         verify(companyUserRepository, never()).save(any());
     }
 
@@ -159,7 +162,7 @@ class UserServiceTest {
 
         var result = userService.syncUser(100L);
 
-        assertEquals(UserStatus.INACTIVE, result.getStatus());
+        assertEquals(UserStatus.INACTIVE, result.getUser().getStatus());
     }
 
     @Test
@@ -180,7 +183,7 @@ class UserServiceTest {
 
         var result = userService.syncUser(100L);
 
-        assertEquals(CompanyUserRole.DRIVER, result.getRole());
+        assertEquals(CompanyUserRole.DRIVER, result.getUser().getRole());
         verify(companyUserRepository).saveAndFlush(any(CompanyUser.class));
     }
 
@@ -216,7 +219,7 @@ class UserServiceTest {
         // Nexxauth should have been called because hash mismatch
         verify(nexxauthClient).getUser(100L);
         // User should be synced with updated fields
-        assertEquals("John", result.getFirstName());
+        assertEquals("John", result.getUser().getFirstName());
     }
 
     @Test
@@ -241,7 +244,7 @@ class UserServiceTest {
         var result = userService.syncUser(100L, "same-hash");
 
         verify(nexxauthClient, never()).getUser(any());
-        assertEquals("John", result.getFirstName());
+        assertEquals("John", result.getUser().getFirstName());
     }
 
     @Test
@@ -266,8 +269,8 @@ class UserServiceTest {
         var result = userService.syncUser(100L);
 
         // firstName is kept, null lastName is persisted as ""
-        assertEquals("Hajyengimana", result.getFirstName());
-        assertEquals("", result.getLastName());
+        assertEquals("Hajyengimana", result.getUser().getFirstName());
+        assertEquals("", result.getUser().getLastName());
     }
 
     @Test

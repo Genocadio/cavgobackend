@@ -2,12 +2,14 @@ package com.nexxserve.cavgomain.service;
 
 import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
 import com.nexxserve.cavgomain.dto.response.UserResponseDto;
+import com.nexxserve.cavgomain.dto.response.UserSyncResponseDto;
 import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.entity.User;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.UserStatus;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.UserRepository;
+import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
 import com.nexxserve.cavgomain.security.NexxauthClient;
 import com.nexxserve.cavgomain.security.NexxauthRoles;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +37,24 @@ public class UserService {
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
     private final UserRepository userRepository;
     private final CompanyUserRepository companyUserRepository;
+    private final VehicleAssignmentRepository vehicleAssignmentRepository;
     private final NexxauthClient nexxauthClient;
+
+    /**
+     * Builds the nested sync payload ({@code user} + {@code company} with its
+     * optional {@code office} and active {@code vehicle}).
+     */
+    private UserSyncResponseDto toSyncResponse(CompanyUser user) {
+        com.nexxserve.cavgomain.dto.response.VehicleResponseDto vehicle = null;
+        if (user.getRole() == CompanyUserRole.DRIVER) {
+            var activeAssignments = vehicleAssignmentRepository.findActiveAssignmentsByDriver(user.getId());
+            if (activeAssignments != null && !activeAssignments.isEmpty()) {
+                vehicle = com.nexxserve.cavgomain.dto.response.VehicleResponseDto
+                        .fromEntity(activeAssignments.get(0).getVehicle(), null);
+            }
+        }
+        return UserSyncResponseDto.fromCompanyUser(user, vehicle);
+    }
 
     /**
      * Mirrors the authenticated user from Nexxauth into the local DB. Creates
@@ -43,7 +62,7 @@ public class UserService {
      * Pure identity sync — no company or role assignment.
      */
     @Transactional
-    public CompanyUserResponseDto syncUser(Long nexxauthUserId) {
+    public UserSyncResponseDto syncUser(Long nexxauthUserId) {
         return syncUser(nexxauthUserId, null);
     }
 
@@ -63,7 +82,7 @@ public class UserService {
      *                 the stored hash the Nexxauth call is skipped
      */
     @Transactional
-    public CompanyUserResponseDto syncUser(Long nexxauthUserId, String dataHash) {
+    public UserSyncResponseDto syncUser(Long nexxauthUserId, String dataHash) {
         var existing = companyUserRepository.findById(nexxauthUserId);
 
         // Fast path: if the user exists locally and the dataHash matches, skip the
@@ -71,7 +90,7 @@ public class UserService {
         if (dataHash != null && existing.isPresent()) {
             if (dataHash.equals(existing.get().getDataHash())) {
                 log.debug("syncUser: dataHash matches for userId={}, skipping Nexxauth call", nexxauthUserId);
-                return CompanyUserResponseDto.fromEntity(existing.get());
+                return toSyncResponse(existing.get());
             }
         }
 
@@ -126,10 +145,10 @@ public class UserService {
 
             if (changed) {
                 log.info("syncUser: saving updated user id={}", user.getId());
-                return CompanyUserResponseDto.fromEntity(companyUserRepository.save(user));
+                return toSyncResponse(companyUserRepository.save(user));
             }
             log.info("syncUser: no changes detected for user id={}", user.getId());
-            return CompanyUserResponseDto.fromEntity(user);
+            return toSyncResponse(user);
         }
 
         // Create new user
@@ -156,7 +175,7 @@ public class UserService {
         // the requested id. saveAndFlush() additionally forces the INSERT now
         // so creation timestamps are populated before the response is built.
         var saved = companyUserRepository.saveAndFlush(user);
-        return CompanyUserResponseDto.fromEntity(saved);
+        return toSyncResponse(saved);
     }
 
     /**

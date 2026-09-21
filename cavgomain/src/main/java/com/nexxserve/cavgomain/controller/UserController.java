@@ -1,7 +1,7 @@
 package com.nexxserve.cavgomain.controller;
 
-import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
 import com.nexxserve.cavgomain.dto.response.UserResponseDto;
+import com.nexxserve.cavgomain.dto.response.UserSyncResponseDto;
 import com.nexxserve.cavgomain.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -54,7 +54,7 @@ public class UserController {
      */
     @PostMapping("/sync")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<CompanyUserResponseDto> syncUser() {
+    public ResponseEntity<UserSyncResponseDto> syncUser() {
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
         log.info("syncUser called with userId={}", userId);
@@ -62,7 +62,7 @@ public class UserController {
             throw new IllegalStateException("Missing user id on authenticated request");
         }
         var response = userService.syncUser(userId);
-        log.info("syncUser returning userId={}", response.getId());
+        log.info("syncUser returning userId={}", response.getUser().getId());
         return ResponseEntity.ok(response);
     }
 }

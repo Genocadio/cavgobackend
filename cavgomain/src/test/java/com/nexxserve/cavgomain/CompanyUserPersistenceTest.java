@@ -1,6 +1,6 @@
 package com.nexxserve.cavgomain;
 
-import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
+import com.nexxserve.cavgomain.dto.response.UserSyncResponseDto;
 import com.nexxserve.cavgomain.entity.Company;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.UserStatus;
@@ -52,12 +52,12 @@ class CompanyUserPersistenceTest {
                 "johndoe", true, List.of("admin"), List.of("password"));
         when(nexxauthClient.getUser(nexxauthUserId)).thenReturn(nexxauthUser);
 
-        CompanyUserResponseDto result = userService.syncUser(nexxauthUserId);
+        UserSyncResponseDto result = userService.syncUser(nexxauthUserId);
 
-        assertThat(result.getId()).isEqualTo(nexxauthUserId);
-        assertThat(result.getFirstName()).isEqualTo("John");
-        assertThat(result.getRole()).isEqualTo(CompanyUserRole.ADMIN);
-        assertThat(result.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(result.getUser().getId()).isEqualTo(nexxauthUserId);
+        assertThat(result.getUser().getFirstName()).isEqualTo("John");
+        assertThat(result.getUser().getRole()).isEqualTo(CompanyUserRole.ADMIN);
+        assertThat(result.getUser().getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(companyUserRepository.findById(nexxauthUserId)).isPresent();
     }
 
