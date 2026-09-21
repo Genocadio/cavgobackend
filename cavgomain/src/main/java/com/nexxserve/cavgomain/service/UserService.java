@@ -7,6 +7,7 @@ import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.entity.User;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.UserStatus;
+import com.nexxserve.cavgomain.repository.CompanyAccessRequestRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.UserRepository;
 import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
@@ -38,11 +39,13 @@ public class UserService {
     private final UserRepository userRepository;
     private final CompanyUserRepository companyUserRepository;
     private final VehicleAssignmentRepository vehicleAssignmentRepository;
+    private final CompanyAccessRequestRepository companyAccessRequestRepository;
     private final NexxauthClient nexxauthClient;
 
     /**
      * Builds the nested sync payload ({@code user} + {@code company} with its
-     * optional {@code office} and active {@code vehicle}).
+     * optional {@code office} and active {@code vehicle}, plus the latest
+     * {@code accessRequest}).
      */
     private UserSyncResponseDto toSyncResponse(CompanyUser user) {
         com.nexxserve.cavgomain.dto.response.VehicleResponseDto vehicle = null;
@@ -53,7 +56,9 @@ public class UserService {
                         .fromEntity(activeAssignments.get(0).getVehicle(), null);
             }
         }
-        return UserSyncResponseDto.fromCompanyUser(user, vehicle);
+        com.nexxserve.cavgomain.entity.CompanyAccessRequest accessRequest =
+                companyAccessRequestRepository.findTopByNexxauthUserIdOrderByCreatedAtDesc(user.getId()).orElse(null);
+        return UserSyncResponseDto.fromCompanyUser(user, vehicle, accessRequest);
     }
 
     /**

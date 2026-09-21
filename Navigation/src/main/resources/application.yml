@@ -54,6 +54,10 @@ navigation:
     max-age-seconds: 30
     min-accuracy-meters: 100
     validate-age: true  # Set to false to disable GPS age validation (too old check)
+    # GPS snap further than this from the route is treated as implausible
+    # (e.g. fake/emulator coordinates) — waypoint progress and distanceTravelled
+    # are frozen until the vehicle is back near the route.
+    max-progress-offset-meters: 200
     map-matching:
       enabled: false  # Set to false to use raw GPS coordinates instead of snapping to route
       post-match: false # If true, returns snapped location in API but keeps raw GPS for internal state (if enabled is false)

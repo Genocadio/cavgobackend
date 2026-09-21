@@ -1008,6 +1008,11 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 
 	log.Printf("[NavigaUpdate] Inbound trip=%d status=%s source=%s ts=%d waypoints=%d", tripID, evt.Trip.Status, evt.Source, evt.Timestamp.Unix(), len(evt.Trip.WaypointProgresses))
 
+	// Plausibility guard: a waypoint whose state is DONE/ARRIVED but still reports a
+	// large remaining distance (well beyond Navigation's arrival radius ~20m) is a bad
+	// event (e.g. bogus far-away GPS snap) — do not mark it as passed.
+	const passedRemainingMaxMeters = 200.0
+
 	// Do not update trip if already cancelled in database
 	if trip.Status == "CANCELLED" {
 		log.Printf("[NavigaUpdate] Trip %d is CANCELLED, skipping status update from Naviga", tripID)
@@ -1095,17 +1100,17 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 					"remaining_distance": prog.RemainingDistance,
 					"remaining_time":     int64(prog.RemainingTime),
 				}
-				// Passed logic: mark DONE or ARRIVED as passed
-				if prog.State == "DONE" || prog.State == "ARRIVED" {
-					wupd["is_passed"] = true
-					wupd["is_next"] = false // ensure not marked as next if passed
-					// Use arrivedAt if valid, otherwise use event timestamp
-					if prog.ArrivedAt != nil && !prog.ArrivedAt.IsZero() {
-						wupd["passed_timestamp"] = prog.ArrivedAt.Unix()
-					} else {
-						wupd["passed_timestamp"] = evt.Timestamp.Unix()
-					}
-				} else if prog.State == "APPROACHING" {
+// Passed logic: mark DONE or ARRIVED as passed
+			if (prog.State == "DONE" || prog.State == "ARRIVED") && prog.RemainingDistance <= passedRemainingMaxMeters {
+				wupd["is_passed"] = true
+				wupd["is_next"] = false // ensure not marked as next if passed
+				// Use arrivedAt if valid, otherwise use event timestamp
+				if prog.ArrivedAt != nil && !prog.ArrivedAt.IsZero() {
+					wupd["passed_timestamp"] = prog.ArrivedAt.Unix()
+				} else {
+					wupd["passed_timestamp"] = evt.Timestamp.Unix()
+				}
+			} else if prog.State == "APPROACHING" {
 					// APPROACHING waypoints are not passed
 					wupd["is_passed"] = false
 					// Mark as next only if this is the first non-passed waypoint
@@ -1127,8 +1132,9 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 					"remaining_distance": destProg.RemainingDistance,
 					"remaining_time":     int64(destProg.RemainingTime),
 				}
-				// ARRIVED state marks the destination as reached
-				if destProg.State == "ARRIVED" {
+				// ARRIVED state marks the destination as reached (guard against bogus
+				// far-away GPS events: only when the reported remaining distance is sane)
+				if destProg.State == "ARRIVED" && destProg.RemainingDistance <= passedRemainingMaxMeters {
 					destUpd["is_passed"] = true
 					destUpd["is_next"] = false
 					// Use arrivedAt if valid, otherwise use event timestamp

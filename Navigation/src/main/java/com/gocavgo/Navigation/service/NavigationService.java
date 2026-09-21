@@ -49,6 +49,9 @@ public class NavigationService {
     @Value("${navigation.gps.map-matching.enabled:true}")
     private boolean mapMatchingEnabled;
 
+    @Value("${navigation.gps.max-progress-offset-meters:200}")
+    private double maxProgressOffsetMeters;
+
     /**
      * Process GPS update and update navigation state
      */
@@ -122,9 +125,22 @@ public class NavigationService {
         List<WaypointProgress> previousProgresses = getPreviousWaypointProgresses(state, route, originalWaypoints,
                 includeOrigin);
 
+        // A GPS reading that is implausibly far from the route (e.g. a fake/emulator
+        // coordinate on the other side of the planet) must not be allowed to advance
+        // waypoint progress or travel distance. Without this guard, a single bogus
+        // snapshot could mark every remaining waypoint DONE in one event because the
+        // snapped cumulative distance jumps far past them.
+        boolean progressAllowed = snapResult.distanceFromRoute <= maxProgressOffsetMeters;
+        if (!progressAllowed) {
+            log.warn("GPS {}m from route (>{}m) for carId: {} — holding waypoint progress and distanceTravelled",
+                    String.format("%.1f", snapResult.distanceFromRoute), maxProgressOffsetMeters, carId);
+        }
+
         // Update navigation state
-        state.setLastSnappedIndex(snapResult.index);
-        state.setDistanceTravelled(snapResult.totalDistance);
+        if (progressAllowed) {
+            state.setLastSnappedIndex(snapResult.index);
+            state.setDistanceTravelled(snapResult.totalDistance);
+        }
         state.setLastUpdateTime(timestamp);
         state.setTripId(tripId); // Ensure tripId is set (in case it wasn't initialized)
 
@@ -138,8 +154,12 @@ public class NavigationService {
         // Update average speed (simple moving average)
         updateAverageSpeed(state, speed);
 
-        // Check for leg completion (advance leg index if we passed the stop)
-        checkLegCompletion(route, state);
+        // Check for leg completion (advance leg index if we passed the stop).
+        // Only advance when progress is allowed — a bogus far-away snap must not
+        // jump the leg pointer ahead of the real vehicle position.
+        if (progressAllowed) {
+            checkLegCompletion(route, state);
+        }
 
         // Check for off-route and reroute if needed
         boolean reroutingOccurred = false;
@@ -173,6 +193,10 @@ public class NavigationService {
             snapResult = GeoMath.snapToRoute(gpsLat, gpsLon, route, 0);
             snappedLocation = calculateSnappedLocation(route, snapResult);
 
+            // Recompute progress guard against the new route — after a legit reroute
+            // the vehicle is again near the route, so progress may advance.
+            progressAllowed = snapResult.distanceFromRoute <= maxProgressOffsetMeters;
+
             // Recalculate display location for new route
             // If map matching enabled, snap to new route. If disabled, keep raw GPS.
             displayLocation = mapMatchingEnabled ? snappedLocation : new double[] { gpsLat, gpsLon };
@@ -184,7 +208,7 @@ public class NavigationService {
 
         // Update waypoint progress based on original trip waypoints
         List<WaypointProgress> waypointProgresses = updateWaypointProgress(
-                route, state, originalWaypoints, includeOrigin);
+                route, state, originalWaypoints, includeOrigin, progressAllowed);
 
         // Log detailed reroute snapshot if occurred
         if (reroutingOccurred) {
@@ -336,7 +360,7 @@ public class NavigationService {
      */
     private List<WaypointProgress> updateWaypointProgress(Route route, NavigationState state,
             List<com.gocavgo.Navigation.model.dto.Waypoint> originalWaypoints,
-            boolean includeOrigin) {
+            boolean includeOrigin, boolean progressAllowed) {
         List<WaypointProgress> progresses = new ArrayList<>();
 
         // Load previous waypoint states from stored JSON
@@ -387,31 +411,33 @@ public class NavigationService {
             Instant arrivedAt = previousArrivedAt.get(i);
 
             // Enforce monotonic progress: APPROACHING → ARRIVED → DONE (no backward
-            // transitions)
+            // transitions). When the GPS is implausibly far from the route we freeze
+            // all forward transitions so a bogus coordinate can never mark waypoints
+            // as passed/arrived early.
             if (previousState == WaypointState.DONE) {
                 // Once DONE, always DONE
                 waypointState = WaypointState.DONE;
             } else if (previousState == WaypointState.ARRIVED) {
                 // If previously ARRIVED, check if we've passed through
-                if (remainingDistance <= -passThreshold) {
+                if (progressAllowed && remainingDistance <= -passThreshold) {
                     waypointState = WaypointState.DONE;
                 } else {
                     waypointState = WaypointState.ARRIVED; // Stay ARRIVED
                 }
             } else {
                 // Previously APPROACHING - check if we've arrived or passed
-                if (remainingDistance <= -passThreshold) {
+                if (progressAllowed && remainingDistance <= -passThreshold) {
                     // Passed through (clearly past waypoint)
                     waypointState = WaypointState.DONE;
                     arrivedAt = Instant.now();
-                } else if (remainingDistance <= arrivalRadius || remainingDistance <= 0) {
+                } else if (progressAllowed && (remainingDistance <= arrivalRadius || remainingDistance <= 0)) {
                     // At or near waypoint
                     waypointState = WaypointState.ARRIVED;
                     if (arrivedAt == null) {
                         arrivedAt = Instant.now();
                     }
                 } else {
-                    // Still approaching
+                    // Still approaching (or progress frozen due to off-route GPS)
                     waypointState = WaypointState.APPROACHING;
                 }
             }

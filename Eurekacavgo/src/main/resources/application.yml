@@ -1,10 +1,10 @@
-sprin:
+spring:
   application:
-   name: Eurekacavgo
+    name: Eurekacavgo
 server:
   port: 8761
 eureka:
     client:
         register-with-eureka: false
-        fetch-registry: true
+        fetch-registry: false
 

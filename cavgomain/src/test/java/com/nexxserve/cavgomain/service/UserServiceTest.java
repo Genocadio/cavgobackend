@@ -4,6 +4,7 @@ import com.nexxserve.cavgomain.entity.Company;
 import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.UserStatus;
+import com.nexxserve.cavgomain.repository.CompanyAccessRequestRepository;
 import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
@@ -32,6 +33,8 @@ class UserServiceTest {
     private CompanyRepository companyRepository;
     @Mock
     private VehicleAssignmentRepository vehicleAssignmentRepository;
+    @Mock
+    private CompanyAccessRequestRepository companyAccessRequestRepository;
     @Mock
     private NexxauthClient nexxauthClient;
 
