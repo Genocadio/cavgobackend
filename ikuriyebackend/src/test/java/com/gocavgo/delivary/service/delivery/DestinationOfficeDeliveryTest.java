@@ -13,8 +13,11 @@ import com.gocavgo.delivary.enums.delivery.PersonRole;
 import com.gocavgo.delivary.enums.transfer.TransferRuleType;
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
+import com.gocavgo.delivary.repository.notification.NoticeViewerRepository;
 import com.gocavgo.delivary.repository.user.UserJpaRepository;
 import com.gocavgo.delivary.service.transfer.TransferService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -36,7 +39,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * package at the office (DESTINATION_OFFICE, custody role OFFICE) and office
  * staff then run the whole delivery — visibility (myPackages), initiateDelivery
  * and confirmDelivery all work without being the recorded custodian user, and
- * DELIVERED is terminal (no COMPLETED step).
+ * DELIVERED is terminal (no COMPLETED step). The delivery code is NEVER
+ * returned to the worker/driver — it is delivered to the sender/receiver via
+ * their notice feed, and confirmation needs the code the recipient shares.
  */
 @SpringBootTest
 @Transactional
@@ -51,7 +56,38 @@ class DestinationOfficeDeliveryTest {
     @Autowired
     private UserJpaRepository userRepo;
 
+    @Autowired
+    private NoticeViewerRepository noticeViewerRepo;
+
+    @Autowired
+    private com.gocavgo.delivary.repository.notification.NoticeRepository noticeRepo;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     private long nextUserId = 4_000_000L;
+
+    /**
+     * Retrieves the delivery code the way the SENDER/RECEIVER does — from the
+     * PACKAGE_DELIVERY_INITIATED notice in their feed. The worker/driver never
+     * gets it from the mutation response; they can only confirm when this
+     * code is shared with them by the recipient.
+     */
+    private String recipientDeliveryCode(Long recipientUserId) {
+        return noticeViewerRepo.findByUserIdOrderByCreatedAtDesc(recipientUserId).stream()
+                .map(v -> noticeRepo.findById(v.getNoticeId()).orElse(null))
+                .filter(n -> n != null && n.getEventType() == com.gocavgo.delivary.enums.notification.NoticeEventType.PACKAGE_DELIVERY_INITIATED)
+                .findFirst()
+                .map(com.gocavgo.delivary.entity.notification.NoticeEntity::getPayload)
+                .map(payload -> {
+                    try {
+                        JsonNode node = objectMapper.readTree(payload);
+                        return node.get("deliveryCode") != null ? node.get("deliveryCode").asText() : null;
+                    } catch (Exception e) {
+                        return null;
+                    }
+                })
+                .orElseThrow(() -> new AssertionError("No delivery code notice found for recipient " + recipientUserId));
+    }
 
     private void authenticateAs(Long userId, Role role) {
         var authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
@@ -122,10 +158,14 @@ class DestinationOfficeDeliveryTest {
         authenticateAs(officeWorkerId, Role.WORKER);
         var initiated = packageService.initiateDelivery(officeWorkerId, pkgId);
         assertThat(initiated.deliveryPackage().status()).isEqualTo(PackageStatus.PENDING_CONFIRMATION);
-        assertThat(initiated.deliveryCode()).isNotBlank();
+        // The worker NEVER receives the code from the mutation — it goes to the people only
+        assertThat(initiated.deliveryCode()).isNull();
 
-        // 6. The office confirms with the code presented by the (walk-in) receiver → DELIVERED, terminal
-        var confirmed = packageService.confirmDelivery(officeWorkerId, pkgId, initiated.deliveryCode());
+        // 6. The sender/receiver got the code in their notice feed; the (walk-in) receiver
+        //    shares it with the office, who confirms → DELIVERED, terminal
+        var recipientCode = recipientDeliveryCode(customerId);
+        assertThat(recipientCode).isNotBlank();
+        var confirmed = packageService.confirmDelivery(officeWorkerId, pkgId, recipientCode);
         assertThat(confirmed.status()).isEqualTo(PackageStatus.DELIVERED);
 
         // 7. No COMPLETED step — DELIVERED is the end of the line
@@ -157,10 +197,13 @@ class DestinationOfficeDeliveryTest {
         // Deliver straight from PICKED_UP (no IN_TRANSIT / office leg needed)
         var initiated = packageService.initiateDelivery(driverId, pkgId);
         assertThat(initiated.deliveryPackage().status()).isEqualTo(PackageStatus.PENDING_CONFIRMATION);
-        assertThat(initiated.deliveryCode()).isNotBlank();
+        // The driver NEVER receives the code from the mutation — the sender does
+        assertThat(initiated.deliveryCode()).isNull();
 
-        // Confirm with the code → DELIVERED (terminal)
-        var confirmed = packageService.confirmDelivery(driverId, pkgId, initiated.deliveryCode());
+        // The sender got the code in their notice feed and shares it at handover
+        var recipientCode = recipientDeliveryCode(customerId);
+        assertThat(recipientCode).isNotBlank();
+        var confirmed = packageService.confirmDelivery(driverId, pkgId, recipientCode);
         assertThat(confirmed.status()).isEqualTo(PackageStatus.DELIVERED);
 
         // The receiver's view (myPackages for the sender) shows it delivered
@@ -204,7 +247,10 @@ class DestinationOfficeDeliveryTest {
         // The office then runs the delivery leg straight from DESTINATION_OFFICE
         var initiated = packageService.initiateDelivery(officeWorkerId, pkgId);
         assertThat(initiated.deliveryPackage().status()).isEqualTo(PackageStatus.PENDING_CONFIRMATION);
-        var confirmed = packageService.confirmDelivery(officeWorkerId, pkgId, initiated.deliveryCode());
+        assertThat(initiated.deliveryCode()).isNull();
+        var recipientCode = recipientDeliveryCode(customerId);
+        assertThat(recipientCode).isNotBlank();
+        var confirmed = packageService.confirmDelivery(officeWorkerId, pkgId, recipientCode);
         assertThat(confirmed.status()).isEqualTo(PackageStatus.DELIVERED);
     }
 

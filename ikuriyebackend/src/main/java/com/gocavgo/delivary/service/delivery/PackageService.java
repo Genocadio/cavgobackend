@@ -486,10 +486,13 @@ public class PackageService {
     /**
      * Initiates delivery for a package: transitions it to PENDING_CONFIRMATION,
      * generates a one-time delivery code, and publishes that code to the
-     * package's people (sender/receiver) and custodians via their notice feed.
-     * Only the current custodian (an active WORKER/DRIVER) or trusted office
-     * staff can initiate — the office must be able to run the delivery leg for
-     * packages it received from a driver (custody row is role OFFICE).
+     * package's people (sender/receiver) ONLY via their notice feed. Custodians
+     * (workers/drivers) never receive the code — the mutation returns a null
+     * code so confirmation can only be completed by the party the code was
+     * issued to (or by someone they shared it with). Only the current
+     * custodian (an active WORKER/DRIVER) or trusted office staff can initiate
+     * — the office must be able to run the delivery leg for packages it
+     * received from a driver (custody row is role OFFICE).
      */
     @Transactional
     public DeliveryCodeResult initiateDelivery(Long actorId, UUID packageId) {
@@ -514,7 +517,9 @@ public class PackageService {
         noticeService.notifyDeliveryCodeIssued(pkg, rawCode, actorId, previousStatus);
 
         log.info("initiateDelivery: package={}, delivery code issued", packageId);
-        return new DeliveryCodeResult(toResponse(pkg), rawCode);
+        // The code is NOT returned to the initiating custodian — it is delivered
+        // to the sender/receiver through the notice feed only.
+        return new DeliveryCodeResult(toResponse(pkg), null);
     }
 
     /**
@@ -561,7 +566,7 @@ public class PackageService {
         noticeService.notifyDeliveryCodeIssued(pkg, rawCode, actorId, previousStatus);
 
         log.info("regenerateDeliveryCode: package={}, delivery code reissued", packageId);
-        return new DeliveryCodeResult(toResponse(pkg), rawCode);
+        return new DeliveryCodeResult(toResponse(pkg), null);
     }
 
     @Transactional
