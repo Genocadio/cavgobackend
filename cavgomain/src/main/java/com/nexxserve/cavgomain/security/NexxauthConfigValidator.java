@@ -27,7 +27,10 @@ import java.util.List;
 public class NexxauthConfigValidator implements InitializingBean {
 
     private static final Logger log = LoggerFactory.getLogger(NexxauthConfigValidator.class);
+    private static final int MAX_ATTEMPTS = 3;
     private static final HttpClient httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(java.time.Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.ALWAYS)
             .build();
 
@@ -71,39 +74,88 @@ public class NexxauthConfigValidator implements InitializingBean {
 
         // Organisation is resolved from X-Client-Id — no numeric org id needed.
         String orgBaseUrl = baseUrl.replaceAll("/+$", "") + "/organisations";
+        URI rolesUri = URI.create(orgBaseUrl + "/roles");
 
         // ── Check 1: authenticated roles endpoint (validates client credentials + org access) ──
-        log.info("  Checking SERVER client credentials (roles endpoint)...");
-        try {
-            HttpRequest rolesRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(orgBaseUrl + "/roles"))
-                    .header("Authorization", "Bearer " + clientToken)
-                    .header("X-Client-Id", clientId)
-                    .header("Accept", "application/json")
-                    .GET()
-                    .build();
-            HttpResponse<String> rolesResponse = httpClient.send(rolesRequest, HttpResponse.BodyHandlers.ofString());
-            if (rolesResponse.statusCode() == 200) {
-                log.info("  [OK]      SERVER client authenticated — roles endpoint accessible");
-            } else if (rolesResponse.statusCode() == 401) {
-                fail("SERVER client authentication failed (HTTP 401): invalid client-id or client-token",
-                        "Check NEXXAUTH_CLIENT_ID and NEXXAUTH_CLIENT_TOKEN — the token may have been rotated");
-            } else if (rolesResponse.statusCode() == 403) {
-                fail("SERVER client has no access to its organisation (HTTP 403)",
-                        "Check NEXXAUTH_CLIENT_ID — this client may belong to a different organisation");
-            } else {
-                fail("Roles endpoint returned HTTP " + rolesResponse.statusCode(),
-                        "Response: " + rolesResponse.body());
+        log.info("  Checking SERVER client credentials (roles endpoint: {})...", rolesUri);
+
+        HttpRequest rolesRequest = HttpRequest.newBuilder()
+                .uri(rolesUri)
+                .header("Authorization", "Bearer " + clientToken)
+                .header("X-Client-Id", clientId)
+                .header("Accept", "application/json")
+                .timeout(java.time.Duration.ofSeconds(8))
+                .GET()
+                .build();
+
+        Exception lastException = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                HttpResponse<String> rolesResponse = httpClient.send(rolesRequest, HttpResponse.BodyHandlers.ofString());
+                if (rolesResponse.statusCode() == 200) {
+                    log.info("  [OK]      SERVER client authenticated — roles endpoint accessible (attempt {}/{})",
+                            attempt, MAX_ATTEMPTS);
+                    lastException = null;
+                    break;
+                } else if (rolesResponse.statusCode() == 401) {
+                    fail("SERVER client authentication failed (HTTP 401): invalid client-id or client-token",
+                            "Check NEXXAUTH_CLIENT_ID and NEXXAUTH_CLIENT_TOKEN — the token may have been rotated");
+                } else if (rolesResponse.statusCode() == 403) {
+                    fail("SERVER client has no access to its organisation (HTTP 403)",
+                            "Check NEXXAUTH_CLIENT_ID — this client may belong to a different organisation");
+                } else if (rolesResponse.statusCode() >= 500 && attempt < MAX_ATTEMPTS) {
+                    log.warn("  [RETRY]   Roles endpoint returned HTTP {} (attempt {}/{}) — retrying...",
+                            rolesResponse.statusCode(), attempt, MAX_ATTEMPTS);
+                    Thread.sleep(1000L * attempt);
+                } else {
+                    fail("Roles endpoint returned HTTP " + rolesResponse.statusCode(),
+                            "Response: " + rolesResponse.body());
+                }
+            } catch (IllegalStateException e) {
+                throw e;
+            } catch (Exception e) {
+                lastException = e;
+                if (attempt < MAX_ATTEMPTS) {
+                    log.warn("  [RETRY]   Cannot reach roles endpoint (attempt {}/{}): {} — retrying in {}s...",
+                            attempt, MAX_ATTEMPTS, formatException(e), attempt);
+                    try {
+                        Thread.sleep(1000L * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
             }
-        } catch (IllegalStateException e) {
-            throw e;
-        } catch (Exception e) {
-            fail("Cannot reach roles endpoint: " + e.getMessage(), null);
+        }
+
+        if (lastException != null) {
+            log.error("Failed to reach roles endpoint after {} attempts: {}", MAX_ATTEMPTS, formatException(lastException), lastException);
+            fail("Cannot reach roles endpoint (" + rolesUri + ") after " + MAX_ATTEMPTS + " attempts: "
+                    + formatException(lastException),
+                    "Verify network/DNS connectivity and firewall settings for " + baseUrl);
         }
 
         log.info("─────────────────────────────────────────────────────────────");
         log.info("  Nexxauth configuration OK — all checks passed");
         log.info("─────────────────────────────────────────────────────────────");
+    }
+
+    private static String formatException(Throwable t) {
+        if (t == null) return "unknown error";
+        StringBuilder sb = new StringBuilder();
+        sb.append(t.getClass().getSimpleName());
+        if (t.getMessage() != null && !t.getMessage().isBlank()) {
+            sb.append(": ").append(t.getMessage());
+        }
+        Throwable cause = t.getCause();
+        if (cause != null && cause != t) {
+            sb.append(" (cause: ").append(cause.getClass().getSimpleName());
+            if (cause.getMessage() != null && !cause.getMessage().isBlank()) {
+                sb.append(": ").append(cause.getMessage());
+            }
+            sb.append(")");
+        }
+        return sb.toString();
     }
 
     private void fail(String error, String hint) {
