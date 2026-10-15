@@ -10,6 +10,7 @@ import com.gocavgo.delivary.enums.user.DriverType;
 import com.gocavgo.delivary.enums.user.EmploymentType;
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
+import com.gocavgo.delivary.exception.BusinessValidationException;
 import com.gocavgo.delivary.mapper.user.UserMapper;
 import com.gocavgo.delivary.repository.delivery.PackageMediaJpaRepository;
 import com.gocavgo.delivary.repository.user.DriverProfileRepository;
@@ -162,7 +163,7 @@ public class UserService {
                     var role = resolveRoleFromNexxauth(id);
                     return toUserResponse(user, role);
                 })
-                .orElseThrow(() -> new RuntimeException("User not found: " + id));
+                .orElseThrow(() -> new BusinessValidationException("User not found: " + id));
     }
 
     @Transactional(readOnly = true)
@@ -246,7 +247,7 @@ public class UserService {
         if (user == null) {
             var nexxauthUser = findInNexxauth(userId);
             if (nexxauthUser == null) {
-                throw new RuntimeException("User not found in Nexxauth: " + userId);
+                throw new BusinessValidationException("User not found in Nexxauth: " + userId);
             }
             log.info("assignRole: mirroring existing Nexxauth user id={}", userId);
             user = userRepository.save(toEntity(nexxauthUser));
@@ -298,7 +299,7 @@ public class UserService {
     @Transactional
     public UserResponse disableUser(Long userId) {
         var user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found: " + userId));
+                .orElseThrow(() -> new BusinessValidationException("User not found: " + userId));
         // Disable in Nexxauth first (source of truth), then mirror locally.
         nexxauthClient.setUserEnabled(userId, false);
         user.setStatus(UserStatus.DISABLED);
@@ -309,15 +310,15 @@ public class UserService {
     @Transactional
     public UserResponse updateAvatarByMediaId(Long userId, String mediaId) {
         var user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found: " + userId));
+                .orElseThrow(() -> new BusinessValidationException("User not found: " + userId));
         UUID mediaUuid;
         try {
             mediaUuid = UUID.fromString(mediaId);
         } catch (IllegalArgumentException e) {
-            throw new RuntimeException("Invalid mediaId format: " + mediaId);
+            throw new BusinessValidationException("Invalid mediaId format: " + mediaId);
         }
         var media = mediaRepo.findById(mediaUuid)
-                .orElseThrow(() -> new RuntimeException("Media not found: " + mediaId));
+                .orElseThrow(() -> new BusinessValidationException("Media not found: " + mediaId));
         user.setAvatarStoragePath(media.getStoragePath());
         user.setAvatarBucket(media.getBucket());
         user.setAvatarStorageMode(media.getStorageMode());

@@ -3,6 +3,7 @@ package com.gocavgo.delivary.controller.user;
 import com.gocavgo.delivary.service.user.UserService;
 import com.gocavgo.delivary.dto.user.input.AssignRoleInput;
 import com.gocavgo.delivary.dto.user.output.UserResponse;
+import com.gocavgo.delivary.exception.BusinessValidationException;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -64,7 +65,7 @@ public class UserResolver {
         var userId = (Long) request.getAttribute("nexxauthUserId");
         var dataHash = (String) request.getAttribute("nexxauthDataHash");
         if (userId == null) {
-            throw new IllegalStateException("Missing user id on authenticated request");
+            throw new BusinessValidationException("Missing user id on authenticated request");
         }
         // Pass null as tokenDataHash to force a re-fetch from Nexxauth.
         return userService.syncUser(userId, null);

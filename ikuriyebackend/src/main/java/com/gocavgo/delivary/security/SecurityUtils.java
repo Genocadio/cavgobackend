@@ -44,13 +44,24 @@ public final class SecurityUtils {
     }
 
     /**
+     * Returns {@code true} if the current authenticated user's authorities include the given role.
+     */
+    public static boolean hasAuthorityRole(Role role) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || role == null) return false;
+        String expected = "ROLE_" + role.name();
+        return auth.getAuthorities().stream().anyMatch(a -> expected.equals(a.getAuthority()));
+    }
+
+    /**
      * Returns {@code true} if the current user holds any of the given roles.
      */
     public static boolean hasAnyRole(Role... roles) {
-        Role current = getCurrentUserRole();
-        if (current == null) return false;
+        if (roles == null || roles.length == 0) return false;
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) return false;
         for (Role r : roles) {
-            if (current == r) return true;
+            if (hasAuthorityRole(r)) return true;
         }
         return false;
     }

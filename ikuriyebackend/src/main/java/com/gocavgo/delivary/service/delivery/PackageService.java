@@ -2,6 +2,7 @@ package com.gocavgo.delivary.service.delivery;
 
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.delivery.CustodianRole;
+import com.gocavgo.delivary.exception.BusinessValidationException;
 import com.gocavgo.delivary.security.SecurityUtils;
 import com.gocavgo.delivary.security.NexxauthRoles;
 import com.gocavgo.delivary.enums.delivery.DeliveryType;
@@ -48,6 +49,7 @@ import com.gocavgo.delivary.service.notification.NoticeService;
 import com.gocavgo.delivary.service.storage.StorageService;
 import com.gocavgo.delivary.service.subscription.PackageTransferPublisher;
 import com.gocavgo.delivary.service.transfer.TransferService;
+import com.gocavgo.delivary.enums.transfer.TransferAcceptorType;
 import com.gocavgo.delivary.enums.transfer.TransferRuleType;
 import com.gocavgo.delivary.enums.transfer.TransferStatus;
 import com.gocavgo.delivary.dto.transfer.input.CreateTransferInput;
@@ -204,10 +206,11 @@ public class PackageService {
 
         // === Optional: auto-create a transfer with this package ===
         TransferResponse transferResponse = null;
-        if (input.transferRuleType() != null) {
+        var ruleType = input.transferRuleType();
+        if (ruleType != null) {
             var createTransferInput = new CreateTransferInput(
                     List.of(pkg.getId()),
-                    input.transferRuleType(),
+                    ruleType,
                     null, // acceptorType defaults to BOTH in TransferService
                     input.transferMatchCompanyId(),
                     input.transferMatchUserId()
@@ -256,7 +259,7 @@ public class PackageService {
 
     private AcceptOfferResponse acceptSinglePackage(UUID packageId, Long actorId, CustodianRole custodianRole, Long tripId) {
         var pkg = packageRepo.findById(packageId)
-                .orElseThrow(() -> new RuntimeException("Package not found: " + packageId));
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + packageId));
 
         if (tripId != null) {
             pkg.setTripId(tripId);
@@ -266,7 +269,7 @@ public class PackageService {
         // where the package status was changed (e.g. cancelled) after
         // pre-validation but before the actual status update.
         if (pkg.getStatus() == PackageStatus.COMPLETED || pkg.getStatus() == PackageStatus.CANCELLED) {
-            throw new RuntimeException("Cannot accept a package with status: " + pkg.getStatus());
+            throw new BusinessValidationException("Cannot accept a package with status: " + pkg.getStatus());
         }
 
         var previousStatus = pkg.getStatus();
@@ -314,12 +317,11 @@ public class PackageService {
         packageRepo.save(pkg);
 
         // Notify previous custodian (if any) that they've been replaced
-        custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId())
-                .ifPresent(prev -> {
-                    if (!prev.getUserId().equals(actorId)) {
-                        noticeService.notifyPackageCustodianRemoved(pkg, prev.getUserId(), actorId);
-                    }
-                });
+        priorCustodian.ifPresent(prev -> {
+            if (!prev.getUserId().equals(actorId)) {
+                noticeService.notifyPackageCustodianRemoved(pkg, prev.getUserId(), actorId);
+            }
+        });
 
         saveCustodian(pkg.getId(), actorId, custodianRole);
 
@@ -328,8 +330,7 @@ public class PackageService {
         noticeService.notifyPackageEvent(pkg, NoticeEventMapper.fromPackageStatus(notifyStatus), actorId, previousStatus);
         noticeService.notifyPackageEvent(pkg, NoticeEventType.PACKAGE_CUSTODIAN_ASSIGNED, actorId, previousStatus);
 
-        var currentCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId());
-        var fromEntity = currentCustodian
+        var fromEntity = priorCustodian
                 .map(c -> c.getRole().name())
                 .orElse("SENDER");
         saveCustody(pkg.getId(), fromEntity, custodianRole.name(),
@@ -350,25 +351,32 @@ public class PackageService {
         var transferEntity = transferService.getTransferEntityWithLock(transferId);
 
         if (transferEntity.getRuleType() == TransferRuleType.CONFIRM) {
-            throw new RuntimeException("CONFIRM transfers must use acceptTransfer (CONFIRM mode) then confirmTransfer");
+            throw new BusinessValidationException("CONFIRM transfers must use acceptTransfer (CONFIRM mode) then confirmTransfer");
         }
         if (transferEntity.getStatus() != TransferStatus.PENDING) {
-            throw new RuntimeException("Transfer is not open for acceptance (status=" + transferEntity.getStatus() + ")");
+            throw new BusinessValidationException("Transfer is not open for acceptance (status=" + transferEntity.getStatus() + ")");
         }
 
         // If SECURE, verify the transfer code
         if (transferEntity.getRuleType() == TransferRuleType.SECURE) {
             if (transferCode == null || transferCode.isBlank()) {
-                throw new RuntimeException("Transfer code is required for SECURE transfers");
+                throw new BusinessValidationException("Transfer code is required for SECURE transfers");
             }
             var hash = hashCode(transferCode);
             if (!hash.equals(transferEntity.getTransferCodeHash())) {
-                throw new RuntimeException("Invalid transfer code");
+                throw new BusinessValidationException("Invalid transfer code");
             }
         }
 
         // Determine role from the JWT token
         var actorRole = SecurityUtils.getCurrentUserRole();
+        if (transferEntity.getAcceptorType() == TransferAcceptorType.DRIVER && SecurityUtils.hasAuthorityRole(Role.DRIVER)) {
+            actorRole = Role.DRIVER;
+        } else if (transferEntity.getAcceptorType() == TransferAcceptorType.WORKER && SecurityUtils.hasAuthorityRole(Role.WORKER)) {
+            actorRole = Role.WORKER;
+        } else if (tripId != null && SecurityUtils.hasAuthorityRole(Role.DRIVER)) {
+            actorRole = Role.DRIVER;
+        }
         validationService.validateAcceptor(actorId, actorRole);
 
         // Validate that the acceptor's role matches the transfer's acceptorType
@@ -379,7 +387,7 @@ public class PackageService {
         // Get all packages in the transfer
         var transferPackages = transferPackageRepo.findByTransferId(transferId);
         if (transferPackages.isEmpty()) {
-            throw new RuntimeException("Transfer has no packages");
+            throw new BusinessValidationException("Transfer has no packages");
         }
 
         // ★ Pre-validate ALL packages before accepting any (fail-fast)
@@ -497,7 +505,7 @@ public class PackageService {
     @Transactional
     public DeliveryCodeResult initiateDelivery(Long actorId, UUID packageId) {
         var pkg = packageRepo.findById(packageId)
-                .orElseThrow(() -> new RuntimeException("Package not found: " + packageId));
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + packageId));
 
         var role = SecurityUtils.getCurrentUserRole();
         validationService.validateAcceptor(actorId, role);
@@ -530,10 +538,10 @@ public class PackageService {
     @Transactional
     public PackageResponse confirmDelivery(Long actorId, UUID packageId, String deliveryCode) {
         var pkg = packageRepo.findById(packageId)
-                .orElseThrow(() -> new RuntimeException("Package not found: " + packageId));
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + packageId));
 
         if (pkg.getStatus() != PackageStatus.PENDING_CONFIRMATION) {
-            throw new RuntimeException("Package is not awaiting delivery confirmation (status=" + pkg.getStatus() + ")");
+            throw new BusinessValidationException("Package is not awaiting delivery confirmation (status=" + pkg.getStatus() + ")");
         }
 
         validateConfirmingActor(pkg, actorId);
@@ -550,10 +558,10 @@ public class PackageService {
     @Transactional
     public DeliveryCodeResult regenerateDeliveryCode(Long actorId, UUID packageId) {
         var pkg = packageRepo.findById(packageId)
-                .orElseThrow(() -> new RuntimeException("Package not found: " + packageId));
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + packageId));
 
         if (pkg.getStatus() != PackageStatus.PENDING_CONFIRMATION) {
-            throw new RuntimeException("Delivery code can only be regenerated while the package is PENDING_CONFIRMATION (status=" + pkg.getStatus() + ")");
+            throw new BusinessValidationException("Delivery code can only be regenerated while the package is PENDING_CONFIRMATION (status=" + pkg.getStatus() + ")");
         }
 
         var role = SecurityUtils.getCurrentUserRole();
@@ -572,11 +580,11 @@ public class PackageService {
     @Transactional
     public PackageResponse assignDriver(AssignDriverInput input) {
         var pkg = packageRepo.findById(input.packageId())
-                .orElseThrow(() -> new RuntimeException("Package not found: " + input.packageId()));
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + input.packageId()));
 
         // Guard: cannot assign a driver to a package that is already completed or cancelled
         if (pkg.getStatus() == PackageStatus.COMPLETED || pkg.getStatus() == PackageStatus.CANCELLED) {
-            throw new RuntimeException("Cannot assign a driver to a package with status: " + pkg.getStatus());
+            throw new BusinessValidationException("Cannot assign a driver to a package with status: " + pkg.getStatus());
         }
 
         // The assigner must be a WORKER/ADMIN/SUPER_ADMIN or the driver assigning themselves
@@ -601,13 +609,14 @@ public class PackageService {
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);
 
+        var priorCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId());
+
         // Notify previous custodian (if any) that they've been replaced
-        custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId())
-                .ifPresent(prev -> {
-                    if (!prev.getUserId().equals(input.driverId())) {
-                        noticeService.notifyPackageCustodianRemoved(pkg, prev.getUserId(), input.assignedBy());
-                    }
-                });
+        priorCustodian.ifPresent(prev -> {
+            if (!prev.getUserId().equals(input.driverId())) {
+                noticeService.notifyPackageCustodianRemoved(pkg, prev.getUserId(), input.assignedBy());
+            }
+        });
 
         saveCustodian(pkg.getId(), input.driverId(), CustodianRole.DRIVER);
 
@@ -626,9 +635,8 @@ public class PackageService {
                 .build();
         assignmentRepo.save(assignment);
 
-        // fromEntity: use the current custodian's role; if none yet, use SENDER
-        var currentCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId());
-        var fromEntity = currentCustodian
+        // fromEntity: use the prior custodian's role; if none yet, use SENDER
+        var fromEntity = priorCustodian
                 .map(c -> c.getRole().name())
                 .orElse("SENDER");
         saveCustody(pkg.getId(), fromEntity, CustodianRole.DRIVER.name(), "Driver assigned");
@@ -641,15 +649,15 @@ public class PackageService {
     @Transactional
     public PackageResponse updateStatus(UpdatePackageStatusInput input) {
         var pkg = packageRepo.findById(input.packageId())
-                .orElseThrow(() -> new RuntimeException("Package not found: " + input.packageId()));
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + input.packageId()));
 
         validationService.validateTransition(pkg.getStatus(), input.status(), pkg.getDeliveryType());
 
         if (input.status() == PackageStatus.PENDING_CONFIRMATION) {
-            throw new RuntimeException("PENDING_CONFIRMATION must be set via the initiateDelivery mutation");
+            throw new BusinessValidationException("PENDING_CONFIRMATION must be set via the initiateDelivery mutation");
         }
         if (input.status() == PackageStatus.DELIVERED) {
-            throw new RuntimeException("DELIVERED must be set via the confirmDelivery mutation with the delivery code");
+            throw new BusinessValidationException("DELIVERED must be set via the confirmDelivery mutation with the delivery code");
         }
 
         // The actor must hold current custody (or be trusted office staff) —
@@ -813,7 +821,7 @@ public class PackageService {
         var role = SecurityUtils.getCurrentUserRole();
         if (role == Role.WORKER || role == Role.ADMIN || role == Role.SUPER_ADMIN) return;
 
-        throw new RuntimeException("Only the current custodian or office staff can update this package's status");
+        throw new BusinessValidationException("Only the current custodian or office staff can update this package's status");
     }
 
     /**
@@ -832,19 +840,19 @@ public class PackageService {
         deliveryCodeRateLimiter.checkRateLimit(packageId);
 
         if (rawCode == null || rawCode.isBlank()) {
-            throw new RuntimeException("Delivery code is required");
+            throw new BusinessValidationException("Delivery code is required");
         }
         var code = deliveryCodeRepo.findByPackageId(packageId)
-                .orElseThrow(() -> new RuntimeException("Delivery code not found for package: " + packageId));
+                .orElseThrow(() -> new BusinessValidationException("Delivery code not found for package: " + packageId));
         if (code.getUsedAt() != null) {
-            throw new RuntimeException("Delivery code already used");
+            throw new BusinessValidationException("Delivery code already used");
         }
         if (code.getExpiresAt() != null && code.getExpiresAt().isBefore(Instant.now())) {
-            throw new RuntimeException("Delivery code has expired");
+            throw new BusinessValidationException("Delivery code has expired");
         }
         if (!verifyCode(rawCode, code.getCodeHash())) {
             deliveryCodeRateLimiter.recordFailedAttempt(packageId);
-            throw new RuntimeException("Invalid delivery code");
+            throw new BusinessValidationException("Invalid delivery code");
         }
         deliveryCodeRateLimiter.recordSuccess(packageId);
         code.setUsedAt(Instant.now());
@@ -876,7 +884,7 @@ public class PackageService {
     private void validateCurrentCustodian(UUID packageId, Long actorId) {
         custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(packageId)
                 .filter(c -> c.getUserId().equals(actorId))
-                .orElseThrow(() -> new RuntimeException("Only the current custodian can perform this action"));
+                .orElseThrow(() -> new BusinessValidationException("Only the current custodian can perform this action"));
     }
 
     /**
@@ -898,7 +906,7 @@ public class PackageService {
         var role = SecurityUtils.getCurrentUserRole();
         if (role == Role.WORKER || role == Role.ADMIN || role == Role.SUPER_ADMIN) return;
 
-        throw new RuntimeException("Only the current custodian or office staff can initiate delivery");
+        throw new BusinessValidationException("Only the current custodian or office staff can initiate delivery");
     }
 
     /**
@@ -922,7 +930,7 @@ public class PackageService {
         var role = SecurityUtils.getCurrentUserRole();
         if (role == Role.WORKER || role == Role.ADMIN || role == Role.SUPER_ADMIN) return;
 
-        throw new RuntimeException("Only the sender, receiver, or current custodian can confirm delivery");
+        throw new BusinessValidationException("Only the sender, receiver, or current custodian can confirm delivery");
     }
 
     /**
@@ -933,7 +941,7 @@ public class PackageService {
     @Transactional
     public boolean deletePackage(Long actorId, UUID packageId) {
         var pkg = packageRepo.findById(packageId)
-                .orElseThrow(() -> new RuntimeException("Package not found: " + packageId));
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + packageId));
 
         // Only creator, admin/super_admin, or current custodian can delete
         var role = SecurityUtils.getCurrentUserRole();
@@ -943,7 +951,7 @@ public class PackageService {
                 .map(c -> c.getUserId().equals(actorId)).orElse(false);
 
         if (!isCreator && !isAdmin && !isCustodian) {
-            throw new RuntimeException("Only the creator, admin, or current custodian can delete this package");
+            throw new BusinessValidationException("Only the creator, admin, or current custodian can delete this package");
         }
 
         // 1. Delete media files from storage (Supabase or local disk)
@@ -1098,7 +1106,6 @@ public class PackageService {
                                                     java.util.UUID currentCompanyId) {
         var status = statusFilter != null ? statusFilter : PackageStatus.CREATED;
         var pageable = resolvePageRequest(order, page, size);
-        var paged = packageRepo.findByStatus(status, pageable);
 
         // Exclude packages in PENDING transfers — UNLESS the transfer targets
         // the current user (via matchUserId, acceptorType, or matchCompanyId).
@@ -1106,18 +1113,25 @@ public class PackageService {
         // sees the package in their "Transfers" tab, and other workers should not
         // see it as an available offer since someone already claimed it.
         var pendingTransfers = transferRepo.findByStatus(TransferStatus.PENDING);
+        var requestedTransfers = transferRepo.findByStatus(TransferStatus.REQUESTED);
 
         var unavailablePackageIds = pendingTransfers.stream()
                 .filter(t -> !transferTargetsUser(t, currentUserId, currentRole, currentCompanyId))
                 .flatMap(t -> transferPackageRepo.findPackageIdsByTransferId(t.getId()).stream())
                 .collect(java.util.stream.Collectors.toSet());
 
-        var filtered = paged.getContent().stream()
-                .filter(pkg -> !unavailablePackageIds.contains(pkg.getId()))
-                .toList();
+        requestedTransfers.stream()
+                .flatMap(t -> transferPackageRepo.findPackageIdsByTransferId(t.getId()).stream())
+                .forEach(unavailablePackageIds::add);
 
-        // The repo already applied page/size — map without slicing again.
-        return toPageMapped(filtered, page, size);
+        org.springframework.data.domain.Page<PackageEntity> paged;
+        if (unavailablePackageIds.isEmpty()) {
+            paged = packageRepo.findByStatus(status, pageable);
+        } else {
+            paged = packageRepo.findByStatusAndIdNotIn(status, unavailablePackageIds, pageable);
+        }
+
+        return toPage(paged);
     }
 
     @Transactional(readOnly = true)
@@ -1132,7 +1146,7 @@ public class PackageService {
      */
     private boolean transferTargetsUser(TransferEntity transfer,
                                          Long userId, Role role, UUID companyId) {
-        if (userId == null || role == null) return false;
+        if (userId == null) return false;
 
         // matchUserId filter — only the specified user receives it
         if (transfer.getMatchUserId() != null
@@ -1140,13 +1154,15 @@ public class PackageService {
             return false;
         }
 
-        // acceptorType filter
+        // acceptorType filter - check primary role and all granted authorities
         if (transfer.getAcceptorType() != null) {
+            boolean isDriver = role == Role.DRIVER || SecurityUtils.hasAuthorityRole(Role.DRIVER);
+            boolean isWorker = role == Role.WORKER || SecurityUtils.hasAuthorityRole(Role.WORKER);
             switch (transfer.getAcceptorType()) {
-                case DRIVER -> { if (role != Role.DRIVER) return false; }
-                case WORKER -> { if (role != Role.WORKER) return false; }
+                case DRIVER -> { if (!isDriver) return false; }
+                case WORKER -> { if (!isWorker) return false; }
                 case BOTH -> {
-                    if (role != Role.DRIVER && role != Role.WORKER) return false;
+                    if (!isDriver && !isWorker) return false;
                 }
             }
         }

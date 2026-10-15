@@ -17,4 +17,5 @@ public interface PackageJpaRepository extends JpaRepository<PackageEntity, UUID>
     Page<PackageEntity> findByCreatorId(Long creatorId, Pageable pageable);
     List<PackageEntity> findByStatus(PackageStatus status, Sort sort);
     Page<PackageEntity> findByStatus(PackageStatus status, Pageable pageable);
+    Page<PackageEntity> findByStatusAndIdNotIn(PackageStatus status, java.util.Collection<UUID> ids, Pageable pageable);
 }

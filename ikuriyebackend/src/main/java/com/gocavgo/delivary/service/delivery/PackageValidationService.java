@@ -82,7 +82,7 @@ public class PackageValidationService {
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new BusinessValidationException("Acceptor is not ACTIVE");
         }
-        if (!ACCEPTOR_ROLES.contains(role)) {
+        if (!ACCEPTOR_ROLES.contains(role) && !com.gocavgo.delivary.security.SecurityUtils.hasAnyRole(Role.WORKER, Role.DRIVER)) {
             throw new BusinessValidationException("User role cannot accept packages: " + role);
         }
     }
@@ -126,10 +126,10 @@ public class PackageValidationService {
      */
     public void validateAcceptorType(TransferAcceptorType acceptorType, Role actorRole, UUID transferId) {
         var ctx = transferId != null ? "Transfer " + transferId : "This transfer";
-        if (acceptorType == TransferAcceptorType.WORKER && actorRole != Role.WORKER) {
+        if (acceptorType == TransferAcceptorType.WORKER && actorRole != Role.WORKER && !com.gocavgo.delivary.security.SecurityUtils.hasAuthorityRole(Role.WORKER)) {
             throw new BusinessValidationException(ctx + " requires WORKER role, but actor has " + actorRole);
         }
-        if (acceptorType == TransferAcceptorType.DRIVER && actorRole != Role.DRIVER) {
+        if (acceptorType == TransferAcceptorType.DRIVER && actorRole != Role.DRIVER && !com.gocavgo.delivary.security.SecurityUtils.hasAuthorityRole(Role.DRIVER)) {
             throw new BusinessValidationException(ctx + " requires DRIVER role, but actor has " + actorRole);
         }
         // BOTH allows both WORKER and DRIVER — no validation needed

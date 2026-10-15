@@ -1,5 +1,6 @@
 package com.gocavgo.delivary.service.delivery;
 
+import com.gocavgo.delivary.exception.BusinessValidationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -35,7 +36,7 @@ public class DeliveryCodeRateLimiter {
             if (now < record.lockedUntilMs()) {
                 long remainingSec = (record.lockedUntilMs() - now + 999) / 1000;
                 log.warn("confirmDelivery rate limit active for packageId={}, remainingSec={}", packageId, remainingSec);
-                throw new RuntimeException("Too many failed attempts. Please wait " + remainingSec + "s before trying again.");
+                throw new BusinessValidationException("Too many failed attempts. Please wait " + remainingSec + "s before trying again.");
             }
         }
     }

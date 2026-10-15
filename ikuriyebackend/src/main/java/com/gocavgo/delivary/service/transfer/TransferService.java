@@ -225,8 +225,7 @@ public class TransferService {
     public TransferAcceptResult acceptTransfer(Long actorId, UUID transferId, String transferCode, Long tripId) {
         log.info("acceptTransfer: actorId={}, transferId={}, tripId={}, ruleType check", actorId, transferId, tripId);
 
-        var transfer = transferRepo.findById(transferId)
-                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + transferId));
+        var transfer = getTransferEntityWithLock(transferId);
 
         if (transfer.getStatus() != TransferStatus.PENDING) {
             throw new BusinessValidationException("Transfer is not open for acceptance (status=" + transfer.getStatus() + ")");
@@ -245,6 +244,11 @@ public class TransferService {
 
             // Validate actor is a WORKER or DRIVER
             var actorRole = packageService.validateAndGetAcceptorRole(actorId);
+            if (transfer.getAcceptorType() == TransferAcceptorType.DRIVER && com.gocavgo.delivary.security.SecurityUtils.hasAuthorityRole(com.gocavgo.delivary.enums.user.Role.DRIVER)) {
+                actorRole = com.gocavgo.delivary.enums.user.Role.DRIVER;
+            } else if (transfer.getAcceptorType() == TransferAcceptorType.WORKER && com.gocavgo.delivary.security.SecurityUtils.hasAuthorityRole(com.gocavgo.delivary.enums.user.Role.WORKER)) {
+                actorRole = com.gocavgo.delivary.enums.user.Role.WORKER;
+            }
 
             // Validate that the requestor's role matches the transfer's acceptorType
             validationService.validateAcceptorType(transfer.getAcceptorType(), actorRole, transfer.getId());
@@ -274,8 +278,7 @@ public class TransferService {
     public TransferResponse confirmTransfer(Long actorId, UUID transferId) {
         log.info("confirmTransfer: actorId={}, transferId={}", actorId, transferId);
 
-        var transfer = transferRepo.findById(transferId)
-                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + transferId));
+        var transfer = getTransferEntityWithLock(transferId);
 
         assertOwner(transfer, actorId);
 
@@ -311,8 +314,7 @@ public class TransferService {
     public TransferResponse rejectTransfer(Long actorId, UUID transferId) {
         log.info("rejectTransfer: actorId={}, transferId={}", actorId, transferId);
 
-        var transfer = transferRepo.findById(transferId)
-                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + transferId));
+        var transfer = getTransferEntityWithLock(transferId);
 
         assertOwner(transfer, actorId);
 
@@ -342,8 +344,7 @@ public class TransferService {
     public TransferResponse cancelTransfer(Long actorId, UUID transferId) {
         log.info("cancelTransfer: actorId={}, transferId={}", actorId, transferId);
 
-        var transfer = transferRepo.findById(transferId)
-                .orElseThrow(() -> new BusinessValidationException("Transfer not found: " + transferId));
+        var transfer = getTransferEntityWithLock(transferId);
 
         assertOwner(transfer, actorId);
 

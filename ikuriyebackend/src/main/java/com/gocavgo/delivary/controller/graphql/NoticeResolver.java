@@ -2,6 +2,7 @@ package com.gocavgo.delivary.controller.graphql;
 
 import com.gocavgo.delivary.entity.notification.NoticeEntity;
 import com.gocavgo.delivary.entity.notification.NoticeViewerEntity;
+import com.gocavgo.delivary.exception.BusinessValidationException;
 import com.gocavgo.delivary.repository.notification.NoticeRepository;
 import com.gocavgo.delivary.repository.notification.NoticeViewerRepository;
 import lombok.RequiredArgsConstructor;
@@ -48,9 +49,9 @@ public class NoticeResolver {
     @PreAuthorize("isAuthenticated()")
     public NoticeViewerEntity markNoticeRead(@Argument UUID viewerId) {
         var viewer = viewerRepo.findById(viewerId)
-                .orElseThrow(() -> new RuntimeException("Notice viewer not found: " + viewerId));
+                .orElseThrow(() -> new BusinessValidationException("Notice viewer not found: " + viewerId));
         if (!viewer.getUserId().equals(getCurrentUserId())) {
-            throw new RuntimeException("Cannot mark another user's notice as read");
+            throw new BusinessValidationException("Cannot mark another user's notice as read");
         }
         viewer.setReadAt(Instant.now());
         return viewerRepo.save(viewer);

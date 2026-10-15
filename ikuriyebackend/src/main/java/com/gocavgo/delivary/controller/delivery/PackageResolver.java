@@ -20,6 +20,7 @@ import com.gocavgo.delivary.dto.delivery.output.DeliveryCodeResult;
 import com.gocavgo.delivary.dto.delivery.output.DeliveryPackagePage;
 import com.gocavgo.delivary.dto.delivery.output.PackageCreationResponse;
 import com.gocavgo.delivary.dto.delivery.output.PackageResponse;
+import com.gocavgo.delivary.exception.BusinessValidationException;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.graphql.data.method.annotation.Argument;
@@ -168,7 +169,7 @@ public class PackageResolver {
             if (role == Role.CUSTOMER) {
                 sender = buildPersonFromUser(creatorId, PersonRole.SENDER);
             } else {
-                throw new RuntimeException("Sender information is required");
+                throw new BusinessValidationException("Sender information is required");
             }
         } else {
             sender = enrichPerson(sender);
