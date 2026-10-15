@@ -33,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -346,7 +347,9 @@ public class TransferService {
 
         var transfer = getTransferEntityWithLock(transferId);
 
-        assertOwner(transfer, actorId);
+        if (!transfer.getCreatorId().equals(actorId) && !actorId.equals(transfer.getRequestorId())) {
+            throw new BusinessValidationException("Only the transfer owner or requestor can cancel this transfer");
+        }
 
         if (transfer.getStatus() == TransferStatus.DONE) {
             throw new BusinessValidationException("Cannot cancel a completed transfer");
@@ -356,6 +359,21 @@ public class TransferService {
         }
 
         var previousStatus = transfer.getStatus();
+
+        // If the requestor cancels (withdraws their request), revert back to PENDING
+        if (actorId.equals(transfer.getRequestorId()) && !actorId.equals(transfer.getCreatorId())) {
+            transfer.setRequestorId(null);
+            transfer.setStatus(TransferStatus.PENDING);
+            transfer.setUpdatedAt(Instant.now());
+            transferRepo.save(transfer);
+
+            noticeService.notifyTransferEvent(transfer, NoticeEventMapper.fromTransferStatus(TransferStatus.PENDING), actorId, previousStatus);
+            var packages = transferPackageRepo.findByTransferId(transfer.getId());
+            log.info("cancelTransfer: requestor withdrew request, transfer reverted to PENDING");
+            return toResponse(transfer, packages, null);
+        }
+
+        // Creator cancels the offer: packages are instantly unlocked and returned to active custody
         transfer.setStatus(TransferStatus.CANCELED);
         transfer.setUpdatedAt(Instant.now());
         transferRepo.save(transfer);
@@ -364,8 +382,44 @@ public class TransferService {
         noticeService.notifyTransferEvent(transfer, NoticeEventMapper.fromTransferStatus(TransferStatus.CANCELED), actorId, previousStatus);
 
         var packages = transferPackageRepo.findByTransferId(transfer.getId());
-        log.info("cancelTransfer: done");
+        log.info("cancelTransfer: done, packages released back to active custody for creator={}", transfer.getCreatorId());
         return toResponse(transfer, packages, null);
+    }
+
+    /**
+     * Automatic Time-To-Live (TTL): Expires unconfirmed transfer offers older than maxAge
+     * (e.g. 2 hours) to prevent custodian deadlock.
+     */
+    @Transactional
+    public int expireStaleTransfers(Duration maxAge) {
+        Instant threshold = Instant.now().minus(maxAge);
+        var staleTransfers = transferRepo.findStaleTransfers(
+                List.of(TransferStatus.PENDING, TransferStatus.REQUESTED), threshold);
+
+        if (staleTransfers.isEmpty()) {
+            return 0;
+        }
+
+        int count = 0;
+        for (var t : staleTransfers) {
+            try {
+                var lockedTransfer = getTransferEntityWithLock(t.getId());
+                if (lockedTransfer.getStatus() == TransferStatus.PENDING || lockedTransfer.getStatus() == TransferStatus.REQUESTED) {
+                    var prevStatus = lockedTransfer.getStatus();
+                    lockedTransfer.setStatus(TransferStatus.CANCELED);
+                    lockedTransfer.setUpdatedAt(Instant.now());
+                    transferRepo.save(lockedTransfer);
+
+                    noticeService.notifyTransferEvent(lockedTransfer, NoticeEventMapper.fromTransferStatus(TransferStatus.CANCELED), lockedTransfer.getCreatorId(), prevStatus);
+                    count++;
+                    log.info("expireStaleTransfers: transfer {} auto-cancelled due to TTL expiry (>{} hours)",
+                            lockedTransfer.getId(), maxAge.toHours());
+                }
+            } catch (Exception e) {
+                log.warn("Failed to expire stale transfer {}: {}", t.getId(), e.getMessage());
+            }
+        }
+        return count;
     }
 
     // ──────────────────────────────────────────────

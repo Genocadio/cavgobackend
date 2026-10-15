@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -29,4 +30,10 @@ public interface TransferJpaRepository extends JpaRepository<TransferEntity, UUI
     List<TransferEntity> findByMatchUserIdAndStatus(Long matchUserId, TransferStatus status);
 
     List<TransferEntity> findByRequestorIdAndStatus(Long requestorId, TransferStatus status);
+
+    @Query("SELECT t FROM TransferEntity t WHERE t.status IN :statuses AND t.createdAt < :threshold")
+    List<TransferEntity> findStaleTransfers(
+            @Param("statuses") List<TransferStatus> statuses,
+            @Param("threshold") Instant threshold
+    );
 }

@@ -376,6 +376,8 @@ input MediaInput {
     mediaId: ID!
 }
 input CreatePackageInput {
+    "Optional client-generated idempotency key to prevent duplicate creation on network retries"
+    idempotencyKey: String
     "Type of delivery (OPEN or FIXED_ROUTE)"
     deliveryType: DeliveryType!
     "Sender information (optional for authenticated CUSTOMER users — auto-filled from profile)"
@@ -448,6 +450,8 @@ input InitiateDeliveryInput {
 
 "Input: confirm delivery of a package that is PENDING_CONFIRMATION. Requires the delivery code. Sets the package to DELIVERED."
 input ConfirmDeliveryInput {
+    "Optional client-generated idempotency key to prevent duplicate confirmation"
+    idempotencyKey: String
     "Package UUID"
     packageId: ID!
     "Six-digit delivery code received via the notice feed"
@@ -870,7 +874,7 @@ type Mutation {
     "Cancel a transfer. Only the transfer owner can cancel."
     cancelTransfer(transferId: ID!): Transfer!
     "Confirm a REQUESTED CONFIRM transfer. Only the transfer owner can confirm. Auto-accepts packages for the requestor and completes the transfer."
-    confirmTransfer(transferId: ID!): Transfer!
+    confirmTransfer(transferId: ID!, idempotencyKey: String): Transfer!
     "Reject a REQUESTED CONFIRM transfer. Only the transfer owner can reject. Resets status back to PENDING and clears requestor."
     rejectTransfer(transferId: ID!): Transfer!
     "Mark a notice as read for the authenticated user. Pass the viewer id returned by myNotices."

@@ -26,6 +26,7 @@ import java.util.UUID;
 public class TransferResolver {
 
     private final TransferService transferService;
+    private final com.gocavgo.delivary.service.idempotency.IdempotencyService idempotencyService;
 
     // ──────────────────────────────────────────────
     // Queries
@@ -121,10 +122,19 @@ public class TransferResolver {
 
     @MutationMapping
     @PreAuthorize("isAuthenticated()")
-    public TransferResponse confirmTransfer(@Argument UUID transferId) {
+    public TransferResponse confirmTransfer(@Argument UUID transferId, @Argument String idempotencyKey) {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         var actorId = Long.parseLong(authentication.getName());
-        return transferService.confirmTransfer(actorId, transferId);
+
+        var cached = idempotencyService.getCachedResponse(
+                idempotencyKey, actorId, "confirmTransfer", TransferResponse.class);
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
+        var response = transferService.confirmTransfer(actorId, transferId);
+        idempotencyService.recordResponse(idempotencyKey, actorId, "confirmTransfer", response);
+        return response;
     }
 
     @MutationMapping

@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.UUID;
 
 public record CreatePackageInput(
+        String idempotencyKey,
         DeliveryType deliveryType,
         PersonInput sender,
         PersonInput receiver,
@@ -20,6 +21,19 @@ public record CreatePackageInput(
         UUID transferMatchCompanyId,
         Long transferMatchUserId
 ) {
+    public CreatePackageInput(
+            DeliveryType deliveryType,
+            PersonInput sender,
+            PersonInput receiver,
+            LocationInput origin,
+            LocationInput destination,
+            DetailInput details,
+            TransferRuleType transferRuleType,
+            UUID transferMatchCompanyId,
+            Long transferMatchUserId
+    ) {
+        this(null, deliveryType, sender, receiver, origin, destination, details, transferRuleType, transferMatchCompanyId, transferMatchUserId);
+    }
     public record PersonInput(
             PersonRole role,
             Long userId,

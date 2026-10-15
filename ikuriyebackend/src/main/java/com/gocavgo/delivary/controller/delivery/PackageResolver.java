@@ -39,6 +39,7 @@ public class PackageResolver {
 
     private final PackageService packageService;
     private final UserService userService;
+    private final com.gocavgo.delivary.service.idempotency.IdempotencyService idempotencyService;
 
     @QueryMapping("package")
     public PackageResponse packageQuery(@Argument UUID id) {
@@ -162,6 +163,13 @@ public class PackageResolver {
         var creatorId = Long.parseLong(authentication.getName());
         var role = NexxauthRoles.primaryRole(authentication.getAuthorities());
 
+        // Check idempotency cache first
+        var cached = idempotencyService.getCachedResponse(
+                input.idempotencyKey(), creatorId, "createPackage", PackageCreationResponse.class);
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
         // Resolve sender: auto-fill from creator profile when omitted (CUSTOMER only),
         // or enrich with profile data if userId provided but name/phone missing.
         CreatePackageInput.PersonInput sender = input.sender();
@@ -181,6 +189,7 @@ public class PackageResolver {
         UUID companyId = null;
 
         var resolvedInput = new CreatePackageInput(
+                input.idempotencyKey(),
                 input.deliveryType(),
                 sender,
                 receiver,
@@ -192,7 +201,9 @@ public class PackageResolver {
                 input.transferMatchUserId()
         );
 
-        return packageService.createPackage(creatorId, role, companyId, resolvedInput);
+        var response = packageService.createPackage(creatorId, role, companyId, resolvedInput);
+        idempotencyService.recordResponse(input.idempotencyKey(), creatorId, "createPackage", response);
+        return response;
     }
 
     /**
@@ -308,7 +319,16 @@ public class PackageResolver {
     public PackageResponse confirmDelivery(@Argument @Valid ConfirmDeliveryInput input) {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         var authenticatedUserId = Long.parseLong(authentication.getName());
-        return packageService.confirmDelivery(authenticatedUserId, input.packageId(), input.deliveryCode());
+
+        var cached = idempotencyService.getCachedResponse(
+                input.idempotencyKey(), authenticatedUserId, "confirmDelivery", PackageResponse.class);
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
+        var response = packageService.confirmDelivery(authenticatedUserId, input.packageId(), input.deliveryCode());
+        idempotencyService.recordResponse(input.idempotencyKey(), authenticatedUserId, "confirmDelivery", response);
+        return response;
     }
 
     @MutationMapping
