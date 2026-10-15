@@ -45,6 +45,25 @@ public class NoticeResolver {
         return viewerRepo.countByUserIdAndReadAtIsNull(userId);
     }
 
+    public List<NoticeResponse> getNoticesSince(Long userId, Instant since) {
+        var viewers = viewerRepo.findByUserIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDesc(userId, since);
+        if (viewers.isEmpty()) {
+            return List.of();
+        }
+        var noticeIds = viewers.stream().map(NoticeViewerEntity::getNoticeId).toList();
+        var noticesById = noticeRepo.findAllById(noticeIds).stream()
+                .collect(java.util.stream.Collectors.toMap(NoticeEntity::getId, java.util.function.Function.identity()));
+
+        return viewers.stream()
+                .map(v -> {
+                    var notice = noticesById.get(v.getNoticeId());
+                    if (notice == null) return null;
+                    return new NoticeResponse(notice, v);
+                })
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
     @MutationMapping
     @PreAuthorize("isAuthenticated()")
     public NoticeViewerEntity markNoticeRead(@Argument UUID viewerId) {

@@ -16,6 +16,7 @@ import com.gocavgo.delivary.dto.delivery.input.CreatePackageInput;
 import com.gocavgo.delivary.dto.delivery.input.InitiateDeliveryInput;
 import com.gocavgo.delivary.dto.delivery.input.RegenerateDeliveryCodeInput;
 import com.gocavgo.delivary.dto.delivery.input.UpdatePackageStatusInput;
+import com.gocavgo.delivary.dto.delivery.output.CatchupSyncResult;
 import com.gocavgo.delivary.dto.delivery.output.DeliveryCodeResult;
 import com.gocavgo.delivary.dto.delivery.output.DeliveryPackagePage;
 import com.gocavgo.delivary.dto.delivery.output.PackageCreationResponse;
@@ -40,6 +41,7 @@ public class PackageResolver {
     private final PackageService packageService;
     private final UserService userService;
     private final com.gocavgo.delivary.service.idempotency.IdempotencyService idempotencyService;
+    private final com.gocavgo.delivary.controller.graphql.NoticeResolver noticeResolver;
 
     @QueryMapping("package")
     public PackageResponse packageQuery(@Argument UUID id) {
@@ -144,6 +146,28 @@ public class PackageResolver {
         var role = NexxauthRoles.primaryRole(authentication.getAuthorities());
         var phone = role == Role.CUSTOMER ? userService.getUserById(userId).phone() : null;
         return packageService.getMyPackages(userId, phone, role, status, order != null ? order : SortOrder.ASC, page, size);
+    }
+
+    @QueryMapping
+    @PreAuthorize("isAuthenticated()")
+    public CatchupSyncResult syncSince(@Argument String since) {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        var userId = Long.parseLong(authentication.getName());
+        var role = NexxauthRoles.primaryRole(authentication.getAuthorities());
+        var phone = role == Role.CUSTOMER ? userService.getUserById(userId).phone() : null;
+        UUID companyId = null;
+
+        java.time.Instant sinceInstant;
+        try {
+            sinceInstant = java.time.Instant.parse(since);
+        } catch (Exception e) {
+            sinceInstant = java.time.Instant.now().minus(24, java.time.temporal.ChronoUnit.HOURS);
+        }
+
+        var packages = packageService.getPackagesModifiedSince(userId, phone, role, companyId, sinceInstant);
+        var notices = noticeResolver.getNoticesSince(userId, sinceInstant);
+
+        return new CatchupSyncResult(packages, notices, java.time.Instant.now().toString());
     }
 
     @QueryMapping

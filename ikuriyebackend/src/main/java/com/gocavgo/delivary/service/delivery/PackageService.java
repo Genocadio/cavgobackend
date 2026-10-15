@@ -1045,6 +1045,52 @@ public class PackageService {
     }
 
     @Transactional(readOnly = true)
+    public List<PackageResponse> getPackagesModifiedSince(Long userId, String phone, Role role,
+                                                         UUID companyId, Instant since) {
+        var packageIds = new LinkedHashSet<UUID>();
+
+        if (userId != null) {
+            packageRepo.findByCreatorId(userId, Sort.unsorted()).stream()
+                    .map(PackageEntity::getId)
+                    .forEach(packageIds::add);
+
+            custodianRepo.findByUserId(userId).stream()
+                    .map(PackageCustodianEntity::getPackageId)
+                    .forEach(packageIds::add);
+
+            personRepo.findByUserId(userId).stream()
+                    .map(PackagePersonEntity::getPackageId)
+                    .forEach(packageIds::add);
+
+            addPackageIdsFromRequestedTransfers(userId, packageIds);
+        }
+
+        if (phone != null && !phone.isBlank()) {
+            personRepo.findByPhone(phone).stream()
+                    .map(PackagePersonEntity::getPackageId)
+                    .forEach(packageIds::add);
+        }
+
+        if (role == Role.WORKER || role == Role.ADMIN || role == Role.SUPER_ADMIN) {
+            packageIds.addAll(custodianRepo.findCurrentCustodianPackageIdsByRole(CustodianRole.OFFICE));
+        }
+
+        if (role == Role.DRIVER || role == Role.WORKER || role == Role.ADMIN || role == Role.SUPER_ADMIN) {
+            var createdSince = packageRepo.findByStatusAndUpdatedAtGreaterThanEqual(PackageStatus.CREATED, since);
+            for (var pkg : createdSince) {
+                packageIds.add(pkg.getId());
+            }
+        }
+
+        if (packageIds.isEmpty()) {
+            return List.of();
+        }
+
+        var modified = packageRepo.findByIdInAndUpdatedAtGreaterThanEqual(packageIds, since);
+        return toResponses(modified);
+    }
+
+    @Transactional(readOnly = true)
     public DeliveryPackagePage getPackagesByCreator(Long creatorId, PackageStatus statusFilter,
                                                     SortOrder order, int page, int size) {
         if (statusFilter != null) {

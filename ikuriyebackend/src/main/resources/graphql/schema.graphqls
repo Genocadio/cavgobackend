@@ -762,6 +762,15 @@ type Query {
     myNotices: [Notice!]!
     "Count of unread notices for the authenticated user. Requires authentication."
     unreadNoticeCount: Int!
+    "Fetch packages and notices modified or created since the given ISO-8601 timestamp. Used for reconnect catch-up delta sync."
+    syncSince(since: String!): CatchupSyncResult!
+}
+
+"Result of a catch-up delta sync query."
+type CatchupSyncResult {
+    packages: [DeliveryPackage!]!
+    notices: [Notice!]!
+    syncedAt: String!
 }
 
 "A notice — one event that multiple recipients can view."

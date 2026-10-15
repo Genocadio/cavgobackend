@@ -13,4 +13,6 @@ public interface NoticeViewerRepository extends JpaRepository<NoticeViewerEntity
     long countByUserIdAndReadAtIsNull(Long userId);
 
     List<NoticeViewerEntity> findByNoticeId(UUID noticeId);
+
+    List<NoticeViewerEntity> findByUserIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDesc(Long userId, java.time.Instant createdAt);
 }
