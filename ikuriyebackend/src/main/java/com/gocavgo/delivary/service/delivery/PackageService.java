@@ -47,6 +47,8 @@ import com.gocavgo.delivary.enums.notification.NoticeEventType;
 import com.gocavgo.delivary.service.notification.NoticeEventMapper;
 import com.gocavgo.delivary.service.notification.NoticeService;
 import com.gocavgo.delivary.service.storage.StorageService;
+import com.gocavgo.delivary.dto.delivery.output.OfferClaimedEvent;
+import com.gocavgo.delivary.service.subscription.OfferClaimedPublisher;
 import com.gocavgo.delivary.service.subscription.PackageTransferPublisher;
 import com.gocavgo.delivary.service.transfer.TransferService;
 import com.gocavgo.delivary.enums.transfer.TransferAcceptorType;
@@ -102,6 +104,7 @@ public class PackageService {
     private final UserRepository userRepository;
     private final NoticeService noticeService;
     private final PackageTransferPublisher packageTransferPublisher;
+    private final OfferClaimedPublisher offerClaimedPublisher;
     private final TransferService transferService;
     private final TransferJpaRepository transferRepo;
     private final TransferPackageJpaRepository transferPackageRepo;
@@ -412,6 +415,19 @@ public class PackageService {
         noticeService.notifyTransferEvent(transferEntity,
                 NoticeEventMapper.fromTransferStatus(TransferStatus.DONE), actorId, TransferStatus.PENDING);
 
+        // Broadcast OfferClaimedEvent for each package so other drivers/workers watching the open pool see it marked taken
+        for (var acceptResult : acceptResults) {
+            var pkgResp = acceptResult.deliveryPackage();
+            offerClaimedPublisher.publish(new OfferClaimedEvent(
+                    pkgResp.id(),
+                    pkgResp.trackingCode(),
+                    transferId,
+                    actorId,
+                    actorRole.name(),
+                    Instant.now().toString()
+            ));
+        }
+
         var allPackages = transferPackageRepo.findByTransferId(transferId);
         var transferResp = transferService.toResponse(transferEntity, allPackages, null);
 
@@ -456,7 +472,18 @@ public class PackageService {
         for (var tp : transferPackages) {
             acceptSinglePackage(tp.getPackageId(), requestorId, custodianRole, tripId);
             var pkg = packageRepo.findById(tp.getPackageId()).orElseThrow();
-            results.add(toResponse(pkg));
+            var pkgResp = toResponse(pkg);
+            results.add(pkgResp);
+
+            // Broadcast OfferClaimedEvent so all drivers/workers see it marked taken
+            offerClaimedPublisher.publish(new OfferClaimedEvent(
+                    pkgResp.id(),
+                    pkgResp.trackingCode(),
+                    transferId,
+                    requestorId,
+                    custodianRole.name(),
+                    Instant.now().toString()
+            ));
         }
 
         return results;

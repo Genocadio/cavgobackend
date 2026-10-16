@@ -836,6 +836,29 @@ type Subscription {
     them (filtered by the notice_viewers.user_id row).
     """
     noticeCreated: Notice!
+
+    """
+    Real-time notification when a package or transfer offer is accepted / claimed by someone.
+    Broadcast to drivers and workers watching the offers pool so they can instantly remove
+    or mark the card as taken before attempting to accept it.
+    """
+    offerClaimed: OfferClaimedEvent!
+}
+
+"Event emitted when an offer or package is claimed / accepted by a driver or worker."
+type OfferClaimedEvent {
+    "Package internal UUID"
+    packageId: ID!
+    "Public tracking code (e.g. CAV-XXXXXXXX)"
+    trackingCode: String!
+    "Transfer internal UUID, if accepted via transfer"
+    transferId: ID
+    "User ID of the person who claimed/accepted the package"
+    claimedByUserId: ID!
+    "Role of the claimant (DRIVER or WORKER)"
+    claimedByRole: String!
+    "ISO-8601 timestamp when claimed"
+    claimedAt: String!
 }
 
 "Write operations."

@@ -13,6 +13,8 @@ import com.gocavgo.delivary.dto.transfer.input.UpdateTransferInput;
 import com.gocavgo.delivary.dto.delivery.output.TransferAcceptResult;
 import com.gocavgo.delivary.dto.transfer.output.TransferEvent;
 import com.gocavgo.delivary.dto.transfer.output.TransferResponse;
+import com.gocavgo.delivary.dto.delivery.output.OfferClaimedEvent;
+import com.gocavgo.delivary.service.subscription.OfferClaimedPublisher;
 import com.gocavgo.delivary.service.subscription.TransferCreatedPublisher;
 import com.gocavgo.delivary.entity.transfer.TransferEntity;
 import com.gocavgo.delivary.service.delivery.PackageValidationService;
@@ -57,6 +59,7 @@ public class TransferService {
     private final NoticeService noticeService;
     private final PackageJpaRepository packageRepo;
     private final TransferCreatedPublisher transferCreatedPublisher;
+    private final OfferClaimedPublisher offerClaimedPublisher;
 
     @Autowired @Lazy
     private com.gocavgo.delivary.service.delivery.PackageService packageService;
@@ -267,6 +270,21 @@ public class TransferService {
             noticeService.notifyTransferEvent(transfer, NoticeEventMapper.fromTransferStatus(TransferStatus.REQUESTED), actorId, previousStatus);
 
             var packages = transferPackageRepo.findByTransferId(transfer.getId());
+
+            // Broadcast OfferClaimedEvent so other drivers/workers see it immediately marked taken
+            for (var tp : packages) {
+                var pkgOpt = packageRepo.findById(tp.getPackageId());
+                var trackingCode = pkgOpt.map(PackageEntity::getTrackingCode).orElse("");
+                offerClaimedPublisher.publish(new OfferClaimedEvent(
+                        tp.getPackageId(),
+                        trackingCode,
+                        transfer.getId(),
+                        actorId,
+                        actorRole.name(),
+                        Instant.now().toString()
+                ));
+            }
+
             var transferResp = toResponse(transfer, packages, null);
             log.info("acceptTransfer: CONFIRM mode, status=REQUESTED");
             return new TransferAcceptResult(transferResp, List.of());
