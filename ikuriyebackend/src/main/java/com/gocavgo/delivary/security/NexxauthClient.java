@@ -9,12 +9,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Client for the Nexxauth organisation API, authenticated as the SERVER client
@@ -41,14 +44,21 @@ import java.util.List;
 public class NexxauthClient {
 
     private static final Logger log = LoggerFactory.getLogger(NexxauthClient.class);
+    private static final long USER_CACHE_TTL_MS = 60_000L;
+    private static final int MAX_RETRIES = 2;
 
     private final String orgBaseUrl;
     private final String clientId;
     private final String clientToken;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.ALWAYS)
             .build();
+    private final ConcurrentHashMap<Long, CachedOrgUser> userCache = new ConcurrentHashMap<>();
+
+    private record CachedOrgUser(OrgUser user, long cachedAtMs) {}
 
     public NexxauthClient(
             @Value("${nexxauth.base-url}") String baseUrl,
@@ -76,8 +86,35 @@ public class NexxauthClient {
     // ── Public API ────────────────────────────────────────────────────────────
 
     public OrgUser getUser(Long userId) {
-        var json = request("GET", orgBaseUrl + "/users/" + userId, null);
-        return parseUser(json);
+        if (userId != null) {
+            var cached = userCache.get(userId);
+            if (cached != null && (System.currentTimeMillis() - cached.cachedAtMs()) < USER_CACHE_TTL_MS) {
+                return cached.user();
+            }
+        }
+        try {
+            var json = request("GET", orgBaseUrl + "/users/" + userId, null);
+            var parsed = parseUser(json);
+            if (userId != null && parsed != null) {
+                userCache.put(userId, new CachedOrgUser(parsed, System.currentTimeMillis()));
+            }
+            return parsed;
+        } catch (NexxauthApiException e) {
+            if (userId != null && (e.getStatus() == 0 || e.getStatus() >= 500)) {
+                var stale = userCache.get(userId);
+                if (stale != null) {
+                    log.warn("Nexxauth GET user {} failed transiently ({}); serving cached user", userId, e.getMessage());
+                    return stale.user();
+                }
+            }
+            throw e;
+        }
+    }
+
+    public void invalidateUserCache(Long userId) {
+        if (userId != null) {
+            userCache.remove(userId);
+        }
     }
 
     public void updateUserRoles(Long userId, List<String> roles) {
@@ -85,12 +122,14 @@ public class NexxauthClient {
         ArrayNode rolesNode = body.putArray("roles");
         roles.forEach(rolesNode::add);
         request("PATCH", orgBaseUrl + "/users/" + userId, body);
+        invalidateUserCache(userId);
     }
 
     public void setUserEnabled(Long userId, boolean enabled) {
         ObjectNode body = objectMapper.createObjectNode();
         body.put("enabled", enabled);
         request("PATCH", orgBaseUrl + "/users/" + userId, body);
+        invalidateUserCache(userId);
     }
 
     // ── Role management (organisation role definitions) ───────────────────────
@@ -131,34 +170,62 @@ public class NexxauthClient {
     // ── HTTP plumbing ─────────────────────────────────────────────────────────
 
     private String request(String method, String url, ObjectNode body) {
-        try {
-            var builder = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("X-Client-Id", clientId)
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + clientToken);
+        var builder = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(10))
+                .header("X-Client-Id", clientId)
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + clientToken);
 
-            if (body != null) {
-                builder.method(method, HttpRequest.BodyPublishers.ofString(body.toString()));
-            } else {
-                builder.method(method, HttpRequest.BodyPublishers.noBody());
-            }
-
-            var response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-            String responseBody = response.body() == null ? "" : response.body();
-
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                String message = extractErrorMessage(responseBody);
-                log.warn("Nexxauth {} {} failed ({}): {}", method, url, response.statusCode(), message);
-                throw new NexxauthApiException(response.statusCode(), message);
-            }
-            return responseBody;
-        } catch (NexxauthApiException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("Nexxauth {} {} failed: {}", method, url, e.getMessage());
-            throw new NexxauthApiException(0, "Nexxauth request failed: " + e.getMessage());
+        if (body != null) {
+            builder.method(method, HttpRequest.BodyPublishers.ofString(body.toString()));
+        } else {
+            builder.method(method, HttpRequest.BodyPublishers.noBody());
         }
+        var httpRequest = builder.build();
+
+        Exception lastException = null;
+        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                var response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+                String responseBody = response.body() == null ? "" : response.body();
+
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    String message = extractErrorMessage(responseBody);
+                    log.warn("Nexxauth {} {} failed ({}): {}", method, url, response.statusCode(), message);
+                    throw new NexxauthApiException(response.statusCode(), message);
+                }
+                return responseBody;
+            } catch (NexxauthApiException e) {
+                throw e;
+            } catch (IOException e) {
+                lastException = e;
+                if (attempt < MAX_RETRIES) {
+                    log.debug("Nexxauth {} {} transient I/O error on attempt {}/{}: {} — retrying",
+                            method, url, attempt + 1, MAX_RETRIES + 1, e.getMessage());
+                    try {
+                        Thread.sleep(100L * (attempt + 1));
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    continue;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                lastException = e;
+                break;
+            } catch (Exception e) {
+                lastException = e;
+                break;
+            }
+        }
+
+        String errMsg = lastException != null && lastException.getMessage() != null
+                ? lastException.getMessage()
+                : (lastException != null ? lastException.getClass().getSimpleName() : "unknown error");
+        log.error("Nexxauth {} {} failed: {}", method, url, errMsg);
+        throw new NexxauthApiException(0, "Nexxauth request failed: " + errMsg);
     }
 
     private String extractErrorMessage(String responseBody) {

@@ -816,7 +816,7 @@ public class PackageService {
     @Transactional
     public PackageResponse assignPackageCompany(AssignPackageCompanyInput input) {
         var pkg = packageRepo.findById(input.packageId())
-                .orElseThrow(() -> new RuntimeException("Package not found: " + input.packageId()));
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + input.packageId()));
         pkg.setCompanyId(input.companyId());
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);
@@ -826,7 +826,7 @@ public class PackageService {
     @Transactional
     public PackageResponse assignPackageTrip(AssignPackageTripInput input) {
         var pkg = packageRepo.findById(input.packageId())
-                .orElseThrow(() -> new RuntimeException("Package not found: " + input.packageId()));
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + input.packageId()));
         pkg.setTripId(input.tripId());
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);
@@ -1013,14 +1013,17 @@ public class PackageService {
     @Transactional(readOnly = true)
     public PackageResponse getPackageById(UUID id) {
         var pkg = packageRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Package not found: " + id));
+                .or(() -> transferPackageRepo.findByTransferId(id).stream()
+                        .findFirst()
+                        .flatMap(tp -> packageRepo.findById(tp.getPackageId())))
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + id));
         return toResponse(pkg);
     }
 
     @Transactional(readOnly = true)
     public PackageResponse getPackageByTrackingCode(String code) {
         var pkg = packageRepo.findByTrackingCode(code)
-                .orElseThrow(() -> new RuntimeException("Package not found: " + code));
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + code));
         return toResponse(pkg);
     }
 

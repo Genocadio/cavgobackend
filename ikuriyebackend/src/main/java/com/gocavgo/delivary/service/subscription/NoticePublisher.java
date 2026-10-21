@@ -22,13 +22,13 @@ import reactor.core.publisher.Sinks;
 public class NoticePublisher {
 
     private final Sinks.Many<NoticeEvent> sink =
-            Sinks.many().multicast().onBackpressureBuffer();
+            Sinks.many().multicast().onBackpressureBuffer(256, false);
 
     /**
      * Publish a notice event to all active subscribers.
      * Called from inside the same transaction as the notice/viewer write.
      */
-    public void publish(NoticeEvent event) {
+    public synchronized void publish(NoticeEvent event) {
         sink.tryEmitNext(event);
     }
 

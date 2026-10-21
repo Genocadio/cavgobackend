@@ -24,13 +24,13 @@ import reactor.core.publisher.Sinks;
 public class PackageTransferPublisher {
 
     private final Sinks.Many<PackageCreationResponse> sink =
-            Sinks.many().multicast().onBackpressureBuffer();
+            Sinks.many().multicast().onBackpressureBuffer(256, false);
 
     /**
      * Publish a new package+transfer event to all active subscribers.
      * Called from inside the same transaction as the package/transfer write.
      */
-    public void publish(PackageCreationResponse event) {
+    public synchronized void publish(PackageCreationResponse event) {
         sink.tryEmitNext(event);
     }
 

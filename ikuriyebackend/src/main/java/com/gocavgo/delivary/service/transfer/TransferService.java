@@ -104,10 +104,8 @@ public class TransferService {
                 .build();
         transferRepo.save(entity);
 
-        // Notify: transfer created (PENDING)
-        noticeService.notifyTransferEvent(entity, NoticeEventMapper.fromTransferStatus(TransferStatus.PENDING), creatorId, null);
-
-        // Link packages
+        // Link packages BEFORE firing the notice so notifyTransferEvent can resolve
+        // package IDs and tracking codes for the transfer.
         var pkgEntities = new ArrayList<TransferPackageEntity>();
         for (UUID packageId : input.packageIds()) {
             pkgEntities.add(TransferPackageEntity.builder()
@@ -118,6 +116,9 @@ public class TransferService {
                     .build());
         }
         transferPackageRepo.saveAll(pkgEntities);
+
+        // Notify: transfer created (PENDING)
+        noticeService.notifyTransferEvent(entity, NoticeEventMapper.fromTransferStatus(TransferStatus.PENDING), creatorId, null);
 
         var response = toResponse(entity, pkgEntities,
                 input.ruleType() == TransferRuleType.SECURE ? rawCode : null);

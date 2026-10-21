@@ -90,6 +90,7 @@ public class UserService {
                 existing == null ? "creating new user" : "hash mismatch — updating",
                 nexxauthUserId, tokenDataHash, existing != null ? existing.getDataHash() : "null");
 
+        nexxauthClient.invalidateUserCache(nexxauthUserId);
         var nexxauthUser = nexxauthClient.getUser(nexxauthUserId);
         log.info("syncUser: Nexxauth returned user={} (enabled={}, roles={})",
                 nexxauthUserId, nexxauthUser.enabled(), nexxauthUser.roles());
@@ -517,8 +518,10 @@ public class UserService {
     }
 
     /**
-     * Fetches the user's role from Nexxauth. Returns CUSTOMER as a safe default
-     * if the Nexxauth call fails (e.g. user not yet provisioned).
+     * Fetches the user's role from Nexxauth. If Nexxauth is temporarily
+     * unreachable, falls back to the authenticated JWT's roles (when querying
+     * the current user) or local worker/driver profile existence before
+     * defaulting to CUSTOMER.
      */
     private Role resolveRoleFromNexxauth(Long userId) {
         try {
@@ -527,6 +530,26 @@ public class UserService {
                     .reduce(Role.CUSTOMER, (a, b) ->
                             precedence(b) > precedence(a) ? b : a);
         } catch (Exception e) {
+            var authentication = org.springframework.security.core.context.SecurityContextHolder
+                    .getContext().getAuthentication();
+            if (authentication != null && userId != null && userId.toString().equals(authentication.getName())) {
+                var tokenRole = resolveRoleFromToken(userId);
+                log.warn("resolveRoleFromNexxauth: failed for userId={}, falling back to JWT role {}: {}",
+                        userId, tokenRole, e.getMessage());
+                return tokenRole;
+            }
+            if (userId != null) {
+                if (workerProfileRepository.findByUserId(userId).isPresent()) {
+                    log.warn("resolveRoleFromNexxauth: failed for userId={}, falling back to local WORKER profile: {}",
+                            userId, e.getMessage());
+                    return Role.WORKER;
+                }
+                if (driverProfileRepository.findByUserId(userId).isPresent()) {
+                    log.warn("resolveRoleFromNexxauth: failed for userId={}, falling back to local DRIVER profile: {}",
+                            userId, e.getMessage());
+                    return Role.DRIVER;
+                }
+            }
             log.warn("resolveRoleFromNexxauth: failed for userId={}, falling back to CUSTOMER: {}",
                     userId, e.getMessage());
             return Role.CUSTOMER;

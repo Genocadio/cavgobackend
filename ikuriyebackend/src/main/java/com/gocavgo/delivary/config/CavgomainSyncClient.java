@@ -40,12 +40,18 @@ public class CavgomainSyncClient {
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    private static final long SYNC_CACHE_TTL_MS = 60_000L;
 
     private final String baseUrl;
     private final HttpClient httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .followRedirects(HttpClient.Redirect.ALWAYS)
             .connectTimeout(java.time.Duration.ofSeconds(3))
             .build();
+    private final java.util.concurrent.ConcurrentHashMap<Long, CachedSyncResult> syncCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record CachedSyncResult(CavgomainUser user, long syncedAtMs) {}
 
     public CavgomainSyncClient(
             @Value("${cavgomain.base-url:}") String baseUrl
@@ -83,6 +89,10 @@ public class CavgomainSyncClient {
         if (baseUrl == null || userId == null) {
             return null;
         }
+        var cached = syncCache.get(userId);
+        if (cached != null && (System.currentTimeMillis() - cached.syncedAtMs()) < SYNC_CACHE_TTL_MS) {
+            return cached.user();
+        }
         try {
             var body = "{\"userId\":" + userId + "}";
             var request = HttpRequest.newBuilder()
@@ -96,16 +106,19 @@ public class CavgomainSyncClient {
 
             if (response.statusCode() == HttpURLConnection.HTTP_NOT_FOUND) {
                 log.info("Cavgomain sync: user not found (404), userId={}", userId);
+                syncCache.put(userId, new CachedSyncResult(null, System.currentTimeMillis()));
                 return null;
             }
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 log.warn("Cavgomain sync returned status={} for userId={}", response.statusCode(), userId);
-                return null;
+                return cached != null ? cached.user() : null;
             }
-            return MAPPER.readValue(response.body(), CavgomainUser.class);
+            var parsed = MAPPER.readValue(response.body(), CavgomainUser.class);
+            syncCache.put(userId, new CachedSyncResult(parsed, System.currentTimeMillis()));
+            return parsed;
         } catch (Exception e) {
             log.warn("Cavgomain sync failed for userId={}: {}", userId, e.getMessage());
-            return null;
+            return cached != null ? cached.user() : null;
         }
     }
 
@@ -116,10 +129,15 @@ public class CavgomainSyncClient {
      * @param userId the Nexxauth org-user id to sync
      */
     public void syncUser(Long userId) {
-        if (baseUrl == null) {
+        if (baseUrl == null || userId == null) {
             // cavgomain is not configured — skip silently
             return;
         }
+        var cached = syncCache.get(userId);
+        if (cached != null && (System.currentTimeMillis() - cached.syncedAtMs()) < SYNC_CACHE_TTL_MS) {
+            return;
+        }
+        syncCache.put(userId, new CachedSyncResult(null, System.currentTimeMillis()));
 
         try {
             var body = "{\"userId\":" + userId + "}";

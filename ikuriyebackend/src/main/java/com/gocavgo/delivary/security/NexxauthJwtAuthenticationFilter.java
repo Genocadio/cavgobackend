@@ -64,6 +64,15 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             claims = jwtVerifier.verify(token);
         } catch (JwtAuthenticationException e) {
+            // For WebSocket upgrade handshakes, allow the upgrade to proceed even
+            // if the HTTP Authorization header is stale — SecurityWebSocketGraphQlInterceptor
+            // authenticates the connection_init payload.
+            if ("websocket".equalsIgnoreCase(request.getHeader("Upgrade"))) {
+                log.debug("Ignoring invalid HTTP Authorization header on WebSocket upgrade ({}): {}",
+                        e.getReason(), e.getMessage());
+                filterChain.doFilter(request, response);
+                return;
+            }
             log.warn("Nexxauth token verification failed: {} - {}", e.getReason(), e.getMessage());
             writeUnauthorized(response, e.getReason().name(), e.getMessage());
             return;

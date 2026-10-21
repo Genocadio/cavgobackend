@@ -14,9 +14,9 @@ import reactor.core.publisher.Sinks;
 public class OfferClaimedPublisher {
 
     private final Sinks.Many<OfferClaimedEvent> sink =
-            Sinks.many().multicast().onBackpressureBuffer();
+            Sinks.many().multicast().onBackpressureBuffer(256, false);
 
-    public void publish(OfferClaimedEvent event) {
+    public synchronized void publish(OfferClaimedEvent event) {
         sink.tryEmitNext(event);
     }
 

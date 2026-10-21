@@ -30,6 +30,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/graphql").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers("/api/files/local/**").permitAll()
                         .requestMatchers("/api/files/**").authenticated()
                         .requestMatchers("/internal/api/**").permitAll()  // service-to-service (cavgomain)

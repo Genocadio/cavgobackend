@@ -108,15 +108,16 @@ public class NoticeService {
             return;
         }
 
-        // For TRANSFER_PENDING, include package tracking codes in the payload
-        // so the Android notification can show which packages were transferred.
-        String trackingCodes = null;
-        if (eventType == NoticeEventType.TRANSFER_PENDING) {
-            trackingCodes = resolveTransferTrackingCodes(transfer.getId());
-        }
-
-        var payload = buildTransferPayload(transfer, eventType, actorId, previousStatus, trackingCodes);
-        var notice = saveNotice(NoticeResourceType.TRANSFER, transfer.getId(), eventType, actorId, payload, null);
+        // Include package IDs and tracking codes in all transfer notices so
+        // clients can always resolve and open the affected package(s).
+        var packages = resolveTransferPackages(transfer.getId());
+        var payload = buildTransferPayload(transfer, eventType, actorId, previousStatus, packages);
+        String primaryTrackingCode = packages.stream()
+                .map(PackageEntity::getTrackingCode)
+                .filter(code -> code != null && !code.isBlank())
+                .findFirst()
+                .orElse(null);
+        var notice = saveNotice(NoticeResourceType.TRANSFER, transfer.getId(), eventType, actorId, payload, primaryTrackingCode);
         saveViewers(notice.getId(), recipients);
         log.debug("notifyTransferEvent: notice={} for transfer={}, {} recipient(s)", notice.getId(), transfer.getId(), recipients.size());
     }
@@ -381,7 +382,7 @@ public class NoticeService {
 
     private String buildTransferPayload(TransferEntity transfer, NoticeEventType eventType,
                                         Long actorId, TransferStatus previousStatus,
-                                        String trackingCodes) {
+                                        List<PackageEntity> packages) {
         try {
             var map = payloadMap(
                     "resourceType", "TRANSFER",
@@ -392,8 +393,20 @@ public class NoticeService {
                     "actorId", actorId != null ? actorId.toString() : null,
                     "changedAt", Instant.now().toString()
             );
-            if (trackingCodes != null) {
-                map.put("trackingCodes", trackingCodes);
+            if (packages != null && !packages.isEmpty()) {
+                var packageIds = packages.stream()
+                        .map(p -> p.getId().toString())
+                        .toList();
+                var codes = packages.stream()
+                        .map(PackageEntity::getTrackingCode)
+                        .filter(code -> code != null && !code.isBlank())
+                        .toList();
+                map.put("packageId", packageIds.get(0));
+                map.put("packageIds", String.join(", ", packageIds));
+                if (!codes.isEmpty()) {
+                    map.put("trackingCode", codes.get(0));
+                    map.put("trackingCodes", String.join(", ", codes));
+                }
             }
             return JSON.writeValueAsString(map);
         } catch (JsonProcessingException e) {
@@ -403,20 +416,16 @@ public class NoticeService {
     }
 
     /**
-     * Resolves a comma-separated list of tracking codes for packages in a transfer.
-     * Used to enrich TRANSFER_PENDING notifications so the recipient knows which
-     * packages were assigned to them.
+     * Resolves the packages belonging to a transfer so transfer notifications
+     * carry both package UUIDs and tracking codes.
      */
-    private String resolveTransferTrackingCodes(UUID transferId) {
-        var packageIds = transferPackageRepo.findByTransferId(transferId);
-        var codes = packageIds.stream()
+    private List<PackageEntity> resolveTransferPackages(UUID transferId) {
+        var transferPackages = transferPackageRepo.findByTransferId(transferId);
+        return transferPackages.stream()
                 .map(tp -> packageRepo.findById(tp.getPackageId()))
                 .filter(java.util.Optional::isPresent)
                 .map(java.util.Optional::get)
-                .map(com.gocavgo.delivary.entity.delivery.PackageEntity::getTrackingCode)
-                .filter(code -> code != null && !code.isBlank())
                 .toList();
-        return codes.isEmpty() ? null : String.join(", ", codes);
     }
 
     private String buildPackageAddedPayload(TransferEntity transfer, PackageEntity pkg, Long actorId) {

@@ -18,9 +18,9 @@ import reactor.core.publisher.Sinks;
 public class TransferCreatedPublisher {
 
     private final Sinks.Many<TransferEvent> sink =
-            Sinks.many().multicast().onBackpressureBuffer();
+            Sinks.many().multicast().onBackpressureBuffer(256, false);
 
-    public void publish(TransferEvent event) {
+    public synchronized void publish(TransferEvent event) {
         sink.tryEmitNext(event);
     }
 

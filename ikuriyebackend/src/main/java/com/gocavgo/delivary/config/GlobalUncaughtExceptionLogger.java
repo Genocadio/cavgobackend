@@ -17,9 +17,30 @@ public class GlobalUncaughtExceptionLogger {
 
     @PostConstruct
     public void registerHandler() {
-        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) ->
-                log.error("Uncaught exception on thread '{}': {}", thread.getName(),
-                        throwable.getMessage(), throwable));
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+            if (isBenignClosedWebSocketException(throwable)) {
+                log.debug("Ignoring closed WebSocket session exception on thread '{}': {}",
+                        thread.getName(), throwable.getMessage());
+                return;
+            }
+            log.error("Uncaught exception on thread '{}': {}", thread.getName(),
+                    throwable.getMessage(), throwable);
+        });
         log.info("Global uncaught exception handler installed");
+    }
+
+    private boolean isBenignClosedWebSocketException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String msg = current.getMessage();
+            if (current instanceof IllegalStateException
+                    && msg != null
+                    && msg.contains("The WebSocket session")
+                    && msg.contains("has been closed")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }
