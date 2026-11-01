@@ -209,6 +209,9 @@ public class PackageResolver {
 
         // Resolve receiver: enrich with profile data if userId provided but name/phone missing.
         var receiver = enrichPerson(input.receiver());
+        if (receiver == null || receiver.phone() == null || receiver.phone().isBlank()) {
+            throw new BusinessValidationException("Receiver phone number is required");
+        }
 
         UUID companyId = null;
 
