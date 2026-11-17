@@ -57,7 +57,7 @@ spring:
 # SERVER client to read/provision users and assign roles through the
 # organisation API.
 nexxauth:
-  base-url: ${NEXXAUTH_BASE_URL:https://auth.med.rw/master}
+  base-url: ${NEXXAUTH_BASE_URL:https://auth.nexxserve.dev/cavgo}
   public-key: ${NEXXAUTH_PUBLIC_KEY:}
   client-id: ${NEXXAUTH_CLIENT_ID:}
   client-token: ${NEXXAUTH_CLIENT_TOKEN:}
@@ -99,9 +99,9 @@ supabase:
   service-key: ${SUPABASE_SERVICE_KEY:}
 
 # Backend base URL — prepended to local file URLs so clients get full
-# absolute paths (e.g. https://api.med.rw/gocavgo/ikuriye/api/files/local/...).
+# absolute paths (e.g. https://api.gocavgo.com/ikuriye/api/files/local/...).
 backend:
-  base-url: ${BACKEND_BASE_URL:https://api.med.rw/gocavgo/ikuriye}
+  base-url: ${BACKEND_BASE_URL:https://api.gocavgo.com/ikuriye}
 
 # File storage selection: auto (MinIO → Supabase → local), minio, supabase, local.
 storage:

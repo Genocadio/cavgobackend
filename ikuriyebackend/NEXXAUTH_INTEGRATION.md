@@ -1,6 +1,6 @@
 # Nexxauth Integration
 
-How the Ikuriye stack authenticates with **Nexxauth** (`https://auth.med.rw/master`),
+How the Ikuriye stack authenticates with **Nexxauth** (`https://auth.nexxserve.dev/cavgo`),
 and how the backend stays in sync with it — roles, users, and permissions.
 
 - [1. Model: who does what](#1-model-who-does-what)
@@ -208,7 +208,7 @@ creates signed URLs). Everything else is gone:
 Backend (`application.yml` / env):
 
 ```
-NEXXAUTH_BASE_URL=https://auth.med.rw/master   # fixed base URL = origin + platform slug
+NEXXAUTH_BASE_URL=https://auth.nexxserve.dev/cavgo   # fixed base URL = origin + platform slug
 NEXXAUTH_PUBLIC_KEY=<base64 DER SPKI from GET /organisations/keys>
 NEXXAUTH_CLIENT_ID=cli_<server client id>
 NEXXAUTH_CLIENT_TOKEN=nx_<server static token>
@@ -221,7 +221,7 @@ NEXXAUTH_CLIENT_TOKEN=nx_<server static token>
 Android (`secrets.properties` → `BuildConfig`):
 
 ```
-NEXXAUTH_BASE_URL=https://auth.med.rw/master   # includes the platform slug
+NEXXAUTH_BASE_URL=https://auth.nexxserve.dev/cavgo   # includes the platform slug
 NEXXAUTH_CLIENT_ID=cli_<android client id>
 SUPABASE_URL / SUPABASE_KEY                     # storage only
 GRAPHQL_URL                                     # unchanged
@@ -231,7 +231,7 @@ Web (`.env.local`):
 
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8080
-NEXT_PUBLIC_NEXXAUTH_BASE_URL=https://auth.med.rw/master
+NEXT_PUBLIC_NEXXAUTH_BASE_URL=https://auth.nexxserve.dev/cavgo
 NEXT_PUBLIC_NEXXAUTH_CLIENT_ID=cli_<web client id>
 ```
 

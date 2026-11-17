@@ -183,7 +183,7 @@ echo
 echo "🎉 All Nexxauth checks passed."
 echo "   Test user: $TEST_EMAIL (id $USER_ID) — delete it in the console if unwanted."
 if [[ -z "${NEXXAUTH_ORGANISATION_ID:-}" ]]; then
-    echo "⚠️  .env is missing NEXXAUTH_ORGANISATION_ID — the backend needs it; add: NEXXAUTH_ORGANISATION_ID=$ORG_ID"
+    echo "ℹ️  NEXXAUTH_ORGANISATION_ID unset — optional; services resolve the org from X-Client-Id (discovered orgId: $ORG_ID)"
 fi
 if [[ -z "$PUBLIC_KEY" ]]; then
     echo "⚠️  .env is missing NEXXAUTH_PUBLIC_KEY — the backend fails to start without it; paste the active key from GET $BASE/organisations/$ORG_ID/keys"

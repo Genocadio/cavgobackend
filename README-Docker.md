@@ -110,7 +110,7 @@ Every Java service logs a connectivity report right after boot
 ═══════════════ CAVGOMAIN BOOT DEPENDENCY HEALTH ═══════════════
   ✓ RabbitMQ      REACHABLE   (localhost:5672)
   ✓ PostgreSQL    REACHABLE
-  ✗ NeXXauth      NOT REACHABLE (https://auth.med.rw/master)
+  ✗ NeXXauth      NOT REACHABLE (https://auth.nexxserve.dev/cavgo)
   ✓ Ikuriye       SKIPPED — ikuriye.base-url not configured
 ══════════════════════════════════════════════════════════════
 ```

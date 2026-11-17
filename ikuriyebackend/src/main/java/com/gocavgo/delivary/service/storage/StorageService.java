@@ -63,7 +63,7 @@ public class StorageService {
     @Value("${supabase.service-key:}")
     private String supabaseServiceKey;
 
-    @Value("${backend.base-url:https://api.med.rw/gocavgo/ikuriye}")
+    @Value("${backend.base-url:https://api.gocavgo.com/ikuriye}")
     private String backendBaseUrl;
 
     @Value("${storage.local.base-path:./storage}")
