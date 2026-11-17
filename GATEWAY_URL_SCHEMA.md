@@ -92,16 +92,6 @@ returns presigned GET URLs built with `MINIO_PUBLIC_ENDPOINT`, which is
 MinIO's S3 port 9000 itself is loopback-only; only the console on 9001 is
 bound to all interfaces.
 
-### Other vhosts on the same server (not CavGo APIs)
-
-| Host | Upstream | Purpose |
-|---|---|---|
-| `igisubizo.med.rw` | `127.0.0.1:3001` (Nexxclinic) | Separate clinic product, with its own MinIO buckets (`clinic-files`, `uploads-*`) |
-| `pass.nexxserve.dev` | `127.0.0.1:8080` (nexxpass sync) | Separate product, `client_max_body_size 20M` |
-
-The remaining `med.rw` hostnames belong to the clinic product, not to the
-CavGo delivery stack. CavGo APIs and auth use `gocavgo.com` / `nexxserve.dev`.
-
 ## 4. Path schema
 
 ```
