@@ -56,8 +56,12 @@ class NexxauthRolesTest {
     }
 
     @Test
-    void primaryRole_defaultsToDriver() {
-        assertEquals(CompanyUserRole.DRIVER, NexxauthRoles.primaryRole(null));
-        assertEquals(CompanyUserRole.DRIVER, NexxauthRoles.primaryRole(List.of()));
+    void primaryRole_returnsNullWithoutRecognisedRole() {
+        // No recognised role must never imply DRIVER — that would grant a role
+        // the user was never approved for.
+        assertNull(NexxauthRoles.primaryRole(null));
+        assertNull(NexxauthRoles.primaryRole(List.of()));
+        assertNull(NexxauthRoles.primaryRole(List.of(
+                new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_CUSTOMER"))));
     }
 }

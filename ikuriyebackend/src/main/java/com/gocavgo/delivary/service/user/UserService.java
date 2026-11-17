@@ -195,19 +195,17 @@ public class UserService {
         return users.stream()
                 .map(user -> {
                     var resolvedRole = resolveRoleFromNexxauth(user.getId());
-                    // Auto-create missing driver profiles so the driver picker and
-                    // validateDriver() always find a profile row for DRIVER-role users.
+                    // Expose the status of an EXISTING driver profile only. Never
+                    // auto-create one here: a driver profile is business data that
+                    // must only exist after the DRIVER role was approved (via
+                    // assignRole by an admin, or the auth filter's cavgomain
+                    // membership check). Creating it from a token role alone let a
+                    // user who merely requested DRIVER become a driver in the data.
                     String driverStatus = null;
                     if (resolvedRole == Role.DRIVER) {
                         var profile = driverProfileRepository.findByUserId(user.getId());
                         if (profile.isPresent()) {
                             driverStatus = profile.get().getStatus().name();
-                        } else {
-                            log.info("searchUsers: backfilling driver profile for userId={}", user.getId());
-                            var newProfile = upsertDriverProfile(user);
-                            if (newProfile != null) {
-                                driverStatus = newProfile.getStatus().name();
-                            }
                         }
                     }
                     var resp = toUserResponse(user, resolvedRole);
@@ -270,7 +268,9 @@ public class UserService {
                         driverProfileRepository.deleteById(profile.getId());
                     });
         } else if (input.role() == Role.DRIVER) {
-            upsertDriverProfile(saved);
+            // officeId (when supplied) is the office location UUID that becomes
+            // the driver's company reference — same convention as worker profiles.
+            upsertDriverProfile(saved, input.officeId());
             // Leaving WORKER role — drop the worker profile.
             workerProfileRepository.findByUserId(saved.getId())
                     .ifPresent(profile -> {
@@ -421,10 +421,30 @@ public class UserService {
                 .build();
     }
 
-    private DriverProfileEntity upsertDriverProfile(UserEntity user) {
+    /**
+     * Ensures an approved driver has a driver profile linked to their office.
+     * Called from the auth filter only after cavgomain has confirmed an approved
+     * DRIVER company membership, using that membership's office location id as
+     * the company reference. A user who merely requested DRIVER never reaches
+     * this method, so no profile is created for them.
+     */
+    @Transactional
+    public void ensureDriverProfile(Long userId, UUID companyId) {
+        var user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            log.debug("ensureDriverProfile: no local user {} yet, profile will be created on next sync", userId);
+            return;
+        }
+        upsertDriverProfile(user, companyId);
+    }
+
+    private DriverProfileEntity upsertDriverProfile(UserEntity user, UUID companyId) {
         var existing = driverProfileRepository.findByUserId(user.getId());
         if (existing.isPresent()) {
             var profile = existing.get();
+            if (companyId != null && !companyId.equals(profile.getCompanyId())) {
+                profile.setCompanyId(companyId);
+            }
             driverProfileRepository.save(profile);
             log.info("upsertDriverProfile: updated driver profile id={} for user={}",
                     profile.getId(), user.getId());
@@ -432,13 +452,14 @@ public class UserService {
         }
         var profile = driverProfileRepository.save(DriverProfileEntity.builder()
                 .user(user)
+                .companyId(companyId)
                 .employmentType(EmploymentType.COMPANY)
                 .driverType(DriverType.OPEN)
                 .status(DriverStatus.ONLINE)
                 .createdAt(Instant.now())
                 .build());
-        log.info("upsertDriverProfile: created driver profile id={} for user={}",
-                profile.getId(), user.getId());
+        log.info("upsertDriverProfile: created driver profile id={} for user={} with company={}",
+                profile.getId(), user.getId(), companyId);
         return profile;
     }
 

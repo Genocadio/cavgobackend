@@ -65,7 +65,8 @@ class UserServiceTest {
 
         assertEquals(100L, result.getUser().getId());
         assertEquals("John", result.getUser().getFirstName());
-        assertEquals(CompanyUserRole.ADMIN, result.getUser().getRole());
+        // Identity sync mirrors profile data only — roles come from approval.
+        assertNull(result.getUser().getRole());
         assertEquals(UserStatus.ACTIVE, result.getUser().getStatus());
         // New CompanyUser has a pre-assigned (Nexxauth) id — saveAndFlush()
         // inserts the row with the requested id (persist() with a preset id
@@ -169,7 +170,7 @@ class UserServiceTest {
     }
 
     @Test
-    void syncUser_unknownRole_defaultsToDriver() {
+    void syncUser_unknownRole_doesNotGrantAnyRole() {
         var nexxauthUser = new NexxauthClient.OrgUser(
                 100L, "Jane", "Smith", "jane@test.com", "+0987654321",
                 "janesmith", true, List.of("unknown_role"), List.of()
@@ -186,8 +187,39 @@ class UserServiceTest {
 
         var result = userService.syncUser(100L);
 
-        assertEquals(CompanyUserRole.DRIVER, result.getUser().getRole());
+        assertNull(result.getUser().getRole());
+        assertNull(result.getCompany());
         verify(companyUserRepository).saveAndFlush(any(CompanyUser.class));
+    }
+
+    @Test
+    void syncUser_preservesApprovedRoleOnDataHashChange() {
+        var nexxauthUser = mockNexxauthUser(100L, true, List.of("driver"));
+        when(nexxauthClient.getUser(100L)).thenReturn(nexxauthUser);
+
+        Company company = new Company();
+        company.setId(1L);
+        company.setCompanyName("Test Co");
+
+        CompanyUser approvedDriver = new CompanyUser();
+        approvedDriver.setId(100L);
+        approvedDriver.setCompany(company);
+        approvedDriver.setFirstName("John");
+        approvedDriver.setLastName("Doe");
+        approvedDriver.setEmail("john@test.com");
+        approvedDriver.setPhone("+1234567890");
+        approvedDriver.setRole(CompanyUserRole.DRIVER);
+        approvedDriver.setStatus(UserStatus.ACTIVE);
+        approvedDriver.setDataHash("old-hash");
+        approvedDriver.setCreatedAt(LocalDateTime.now());
+        approvedDriver.setUpdatedAt(LocalDateTime.now());
+        when(companyUserRepository.findById(100L)).thenReturn(Optional.of(approvedDriver));
+        when(companyUserRepository.save(any(CompanyUser.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        var result = userService.syncUser(100L, "new-hash");
+
+        assertEquals(CompanyUserRole.DRIVER, result.getUser().getRole());
+        assertEquals(1L, result.getCompany().getCompanyId());
     }
 
     @Test

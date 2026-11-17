@@ -69,7 +69,18 @@ public class CavgomainSyncClient {
      * A user as served back by cavgomain's internal sync endpoint. Only the
      * fields needed to extract the office location id are mapped.
      */
-    public record CavgomainUser(Long id, CavgomainOffice office) {
+    public record CavgomainUser(Long id, Long companyId, String role, CavgomainOffice office) {
+
+        /**
+         * True only when cavgomain confirms an approved company membership with
+         * the requested role. A user who merely requested a role has no company
+         * and no role locally, so this returns false until staff approves the
+         * request.
+         */
+        public boolean hasApprovedRole(String roleName) {
+            return companyId != null && roleName != null && roleName.equalsIgnoreCase(role);
+        }
+
         public record CavgomainOffice(
                 String officeLocationId,
                 String companyCode,

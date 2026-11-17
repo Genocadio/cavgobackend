@@ -71,14 +71,17 @@ public final class NexxauthRoles {
     }
 
     /**
-     * Picks the most privileged role from a set of authorities.
+     * Picks the most privileged role from a set of authorities, or {@code null}
+     * when none of them maps to a local role. Absence of a recognised role must
+     * never imply DRIVER — that would grant a role the user was never given.
      */
     public static CompanyUserRole primaryRole(Collection<? extends GrantedAuthority> authorities) {
-        CompanyUserRole primary = CompanyUserRole.DRIVER;
-        if (authorities == null) return primary;
+        CompanyUserRole primary = null;
+        if (authorities == null) return null;
         for (GrantedAuthority authority : authorities) {
             CompanyUserRole candidate = fromAuthority(authority);
-            if (candidate != null && PRECEDENCE.getOrDefault(candidate, 0) > PRECEDENCE.getOrDefault(primary, 0)) {
+            if (candidate != null && PRECEDENCE.getOrDefault(candidate, 0)
+                    > (primary == null ? 0 : PRECEDENCE.getOrDefault(primary, 0))) {
                 primary = candidate;
             }
         }

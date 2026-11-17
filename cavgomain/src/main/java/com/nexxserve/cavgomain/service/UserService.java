@@ -12,7 +12,6 @@ import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.UserRepository;
 import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
 import com.nexxserve.cavgomain.security.NexxauthClient;
-import com.nexxserve.cavgomain.security.NexxauthRoles;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,11 +105,12 @@ public class UserService {
 
         var status = nexxauthUser.enabled() ? UserStatus.ACTIVE : UserStatus.INACTIVE;
 
-        // Derive the company role from Nexxauth roles
-        var role = NexxauthRoles.fromNexxauthNames(nexxauthUser.roles()).stream()
-                .reduce(CompanyUserRole.DRIVER, (a, b) ->
-                        precedence(b) > precedence(a) ? b : a);
-
+        // Roles are NEVER derived here. Identity sync mirrors Nexxauth profile
+        // data only. A role is granted exclusively by an explicit, staff-gated
+        // action (driver/company-access request approval, staff console, or an
+        // admin role assignment). Deriving it from token roles used to default
+        // unknown roles (e.g. CUSTOMER) to DRIVER and created a company_user row
+        // with no company — i.e. a user became a driver just by requesting one.
         if (existing.isPresent()) {
             var user = existing.get();
             boolean changed = false;
@@ -136,11 +136,7 @@ public class UserService {
                 user.setStatus(status);
                 changed = true;
             }
-            if (user.getRole() != role) {
-                log.info("syncUser: role changed {} -> {}", user.getRole(), role);
-                user.setRole(role);
-                changed = true;
-            }
+            // Deliberately do NOT touch user.role or user.company here.
 
             // Always update the dataHash if provided, even if no other fields changed
             if (dataHash != null && !dataHash.equals(user.getDataHash())) {
@@ -170,7 +166,7 @@ public class UserService {
         user.setEmail(nexxauthUser.email());
         user.setPhone(nexxauthUser.phone());
         user.setStatus(status);
-        user.setRole(role);
+        // No role and no company until a request is approved by staff.
         if (dataHash != null) user.setDataHash(dataHash);
 
         // The id is pre-assigned (Nexxauth user id), so Spring Data's save()
@@ -249,15 +245,5 @@ public class UserService {
                 .map(UserResponseDto::fromEntity)
                 .filter(java.util.Objects::nonNull)
                 .toList();
-    }
-
-    private static int precedence(CompanyUserRole role) {
-        return switch (role) {
-            case DRIVER -> 1;
-            case WORKER -> 2;
-            case FLEET_MANAGER -> 3;
-            case SUPERVISOR -> 4;
-            case ADMIN -> 5;
-        };
     }
 }

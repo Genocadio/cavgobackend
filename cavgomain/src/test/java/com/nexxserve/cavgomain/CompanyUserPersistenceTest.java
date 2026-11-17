@@ -56,7 +56,9 @@ class CompanyUserPersistenceTest {
 
         assertThat(result.getUser().getId()).isEqualTo(nexxauthUserId);
         assertThat(result.getUser().getFirstName()).isEqualTo("John");
-        assertThat(result.getUser().getRole()).isEqualTo(CompanyUserRole.ADMIN);
+        // Identity sync never assigns a role — only an explicit approval grants
+        // one. A brand-new mirror row has no role until then.
+        assertThat(result.getUser().getRole()).isNull();
         assertThat(result.getUser().getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(companyUserRepository.findById(nexxauthUserId)).isPresent();
     }

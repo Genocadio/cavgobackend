@@ -2,6 +2,7 @@ package com.gocavgo.delivary.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gocavgo.delivary.config.CavgomainSyncClient;
+import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.repository.user.DriverProfileRepository;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.service.user.UserService;
@@ -130,11 +131,22 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Map the token's role names to local Spring authorities. Multiple roles
-        // grant multiple ROLE_* authorities (e.g. ["worker", "driver"]).
-        var authorities = claims.roles().stream()
+        // Map the token's role names to local Spring authorities. A token role
+        // alone is NOT enough for privileged roles: DRIVER/WORKER must also have
+        // an approved company membership in cavgomain. This is what stops a user
+        // from acting on a role they merely requested (request still PENDING).
+        var tokenRoles = claims.roles().stream()
                 .map(NexxauthRoles::fromNexxauthName)
                 .filter(role -> role != null)
+                .toList();
+
+        boolean needsPrivilegedCheck = tokenRoles.contains(Role.DRIVER) || tokenRoles.contains(Role.WORKER);
+        final CavgomainSyncClient.CavgomainUser cavgomainUser =
+                (needsPrivilegedCheck && cavgoSyncClient.isEnabled())
+                        ? cavgoSyncClient.syncUserAndGetResult(claims.userId()) : null;
+
+        var authorities = tokenRoles.stream()
+                .filter(role -> isRoleEffective(role, cavgomainUser, claims.userId()))
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role.name()))
                 .toList();
 
@@ -143,8 +155,35 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
         );
         SecurityContextHolder.getContext().setAuthentication(authentication);
 
-        // Touch driver profile heartbeat — sets last_seen_at + ONLINE
-        if (authorities.stream().anyMatch(a -> a.getAuthority().equals("ROLE_DRIVER"))) {
+        boolean isDriver = authorities.stream().anyMatch(a -> a.getAuthority().equals("ROLE_DRIVER"));
+        boolean isWorker = authorities.stream().anyMatch(a -> a.getAuthority().equals("ROLE_WORKER"));
+
+        if (isWorker && cavgomainUser != null) {
+            try {
+                String officeLocationId = cavgomainUser.office() != null
+                        ? cavgomainUser.office().officeLocationId() : null;
+                userService.applyOfficeLocation(claims.userId(), officeLocationId);
+            } catch (Exception e) {
+                log.warn("Cavgomain office sync failed for userId={}: {}", claims.userId(), e.getMessage());
+            }
+        }
+
+        if (isDriver) {
+            // The driver profile is created only after approval (isDriver is
+            // true only with a confirmed cavgomain membership), using the
+            // office location id from cavgomain as the company reference when
+            // one is attached.
+            java.util.UUID officeLocationId = null;
+            if (cavgomainUser != null && cavgomainUser.office() != null
+                    && cavgomainUser.office().officeLocationId() != null) {
+                try {
+                    officeLocationId = java.util.UUID.fromString(cavgomainUser.office().officeLocationId());
+                } catch (IllegalArgumentException e) {
+                    log.warn("Invalid office location id for userId={}: {}", claims.userId(),
+                            cavgomainUser.office().officeLocationId());
+                }
+            }
+            userService.ensureDriverProfile(claims.userId(), officeLocationId);
             try {
                 driverProfileRepository.touchLastSeen(claims.userId());
             } catch (Exception e) {
@@ -152,35 +191,32 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
 
-        // ── Cavgo Main sync ──────────────────────────────────────────────────
-        // WORKER: evaluative — expect the user as cavgomain serves it (with
-        // office data) and extract the office location id into the local worker
-        // profile. Unknown user (404) or any error falls straight back to the
-        // Nexxauth provisioning above — never block or fail the request.
-        // DRIVER: keep the fire-and-forget mirror so cavgomain stays aware.
-        boolean isWorkerOrDriver = authorities.stream().anyMatch(a ->
-                a.getAuthority().equals("ROLE_WORKER") || a.getAuthority().equals("ROLE_DRIVER"));
-        if (isWorkerOrDriver && cavgoSyncClient.isEnabled()) {
-            boolean isWorker = authorities.stream().anyMatch(a -> a.getAuthority().equals("ROLE_WORKER"));
-            if (isWorker) {
-                try {
-                    var cavgomainUser = cavgoSyncClient.syncUserAndGetResult(claims.userId());
-                    if (cavgomainUser != null) {
-                        String officeLocationId = cavgomainUser.office() != null
-                                ? cavgomainUser.office().officeLocationId() : null;
-                        userService.applyOfficeLocation(claims.userId(), officeLocationId);
-                    }
-                } catch (Exception e) {
-                    log.warn("Cavgomain office sync failed for userId={}: {}", claims.userId(), e.getMessage());
-                }
-            } else {
-                cavgoSyncClient.syncUser(claims.userId());
-            }
-        }
-
         log.debug("Nexxauth token verified for userId={}, roles={}, synced={}",
                 claims.userId(), authorities, needsSync);
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Identity and admin roles come straight from the Nexxauth token. DRIVER
+     * and WORKER are business roles: they only become effective once cavgomain
+     * has an approved company membership with that role. Fail closed when the
+     * membership cannot be confirmed.
+     */
+    private boolean isRoleEffective(Role role,
+                                    CavgomainSyncClient.CavgomainUser cavgomainUser,
+                                    Long userId) {
+        if (role != Role.DRIVER && role != Role.WORKER) {
+            return true;
+        }
+        if (!cavgoSyncClient.isEnabled()) {
+            log.warn("Denying ROLE_{} for userId={}: cavgomain approval check is not configured", role, userId);
+            return false;
+        }
+        boolean approved = cavgomainUser != null && cavgomainUser.hasApprovedRole(role.name());
+        if (!approved) {
+            log.info("Denying ROLE_{} for userId={}: no approved company membership in cavgomain", role, userId);
+        }
+        return approved;
     }
 
     private void writeUnauthorized(HttpServletResponse response, String code, String message) throws IOException {

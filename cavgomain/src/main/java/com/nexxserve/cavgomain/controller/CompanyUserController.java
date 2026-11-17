@@ -5,6 +5,7 @@ import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
 import com.nexxserve.cavgomain.service.CompanyUserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -22,12 +23,19 @@ public class CompanyUserController {
 
     private final CompanyUserService companyUserService;
 
+    /**
+     * Staff-only: creating a staff record writes a role (a licence number makes
+     * the user a DRIVER) and a company. An ordinary authenticated user must not
+     * be able to grant themselves a role this way.
+     */
     @PostMapping
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public CompanyUserResponseDto createCompanyUser(@Valid @RequestBody CompanyUserRequestDto user) {
         return companyUserService.createCompanyUser(user);
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public CompanyUserResponseDto updateCompanyUser(@PathVariable Long id, @Valid @RequestBody CompanyUserRequestDto user) {
         return companyUserService.updateCompanyUser(id, user);
     }
@@ -38,6 +46,7 @@ public class CompanyUserController {
      * company access request approval flow.
      */
     @PutMapping("/{id}/company/{companyId}")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public ResponseEntity<CompanyUserResponseDto> assignCompanyToUser(
             @PathVariable Long id, @PathVariable Long companyId) {
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
@@ -106,6 +115,7 @@ public class CompanyUserController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public void deleteCompanyUser(@PathVariable Long id) {
         companyUserService.deleteCompanyUser(id);
     }
