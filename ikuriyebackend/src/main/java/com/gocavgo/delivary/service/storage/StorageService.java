@@ -1,5 +1,6 @@
 package com.gocavgo.delivary.service.storage;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -23,24 +24,38 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Dual-mode file storage service — supports local disk storage and Supabase Storage.
+ * Multi-backend file storage service — supports MinIO (S3-compatible),
+ * Supabase Storage, and local disk storage.
  * <p>
- * When Supabase is configured and reachable, files are uploaded to Supabase and
- * clients receive signed URLs. When Supabase is not configured or unavailable,
- * files are stored locally on disk and served via a direct REST endpoint.
+ * Backend selection is controlled by {@code storage.provider}:
+ * <ul>
+ *   <li>{@code auto} (default) — MinIO first, then Supabase, then local disk</li>
+ *   <li>{@code minio} — MinIO only (falls back to local disk when unreachable)</li>
+ *   <li>{@code supabase} — Supabase only (falls back to local disk when unreachable)</li>
+ *   <li>{@code local} — always local disk</li>
+ * </ul>
  * <p>
- * If Supabase comes back online after being unavailable, a background migration
- * moves local files to Supabase automatically. Files already in Supabase remain
- * there regardless of availability — cached signed URLs are returned.
+ * When a remote backend is configured and reachable, files are uploaded there
+ * and clients receive a signed URL. When no remote backend is available, files
+ * are stored locally on disk and served via a direct REST endpoint.
  * <p>
- * Clients never see Supabase URLs, bucket names, or storage backends. They only
+ * If a remote backend comes back online, a background migration moves local
+ * files there automatically. Files already stored remotely are never moved.
+ * <p>
+ * Clients never see provider URLs, bucket names, or storage backends. They only
  * receive a URL they can fetch the file from.
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class StorageService {
 
     private static final long SIGNED_URL_EXPIRY_SECONDS = 604800; // 7 days
+
+    private final MinioStorageService minioStorageService;
+
+    @Value("${storage.provider:auto}")
+    private String storageProvider;
 
     @Value("${supabase.url:}")
     private String supabaseUrl;
@@ -88,19 +103,67 @@ public class StorageService {
     }
 
     /**
+     * Returns true if MinIO is configured (env vars present).
+     */
+    public boolean isMinioConfigured() {
+        return minioStorageService.isConfigured();
+    }
+
+    /**
+     * Returns true if MinIO is configured AND currently reachable.
+     */
+    public boolean isMinioAvailable() {
+        return minioStorageService.isAvailable();
+    }
+
+    /**
+     * Returns true when at least one remote backend is currently reachable.
+     */
+    public boolean isRemoteAvailable() {
+        return isMinioAvailable() || isSupabaseAvailable();
+    }
+
+    /**
+     * The remote backend that new uploads and local→remote migration should use,
+     * or null when only local storage is available.
+     */
+    public String getActiveRemoteMode() {
+        if (prefersMinio() && isMinioAvailable()) return "minio";
+        if (prefersSupabase() && isSupabaseAvailable()) return "supabase";
+        return null;
+    }
+
+    /**
      * Returns the active storage mode for logging/display.
      */
     public String getActiveMode() {
-        if (isSupabaseAvailable()) return "supabase";
+        if (prefersMinio() && isMinioAvailable()) return "minio";
+        if (prefersSupabase() && isSupabaseAvailable()) return "supabase";
+        if ("local".equalsIgnoreCase(provider())) return "local";
+        if (isMinioConfigured()) return "minio (unavailable — using local fallback)";
         if (isSupabaseConfigured()) return "supabase (unavailable — using local fallback)";
         return "local";
+    }
+
+    private String provider() {
+        return storageProvider == null ? "auto" : storageProvider.trim().toLowerCase();
+    }
+
+    private boolean prefersMinio() {
+        String provider = provider();
+        return ("auto".equals(provider) || "minio".equals(provider) || "s3".equals(provider));
+    }
+
+    private boolean prefersSupabase() {
+        String provider = provider();
+        return !"local".equals(provider) && !"minio".equals(provider) && !"s3".equals(provider);
     }
 
     // ── Upload ───────────────────────────────────────────────────────────
 
     /**
-     * Upload a file. Tries Supabase first if configured and available;
-     * falls back to local disk storage otherwise.
+     * Upload a file. Uses MinIO when configured/available, then Supabase, and
+     * falls back to local disk storage when no remote backend is reachable.
      *
      * @param bucket   the storage bucket (e.g. "package-media", "profiles")
      * @param folder   subfolder (e.g. "photos", "avatars")
@@ -112,8 +175,19 @@ public class StorageService {
         String extension = getExtension(file.getOriginalFilename(), mimeType);
         String storagePath = folder + "/" + UUID.randomUUID() + "." + extension;
 
-        // Try Supabase if available
-        if (isSupabaseAvailable()) {
+        // Try MinIO first (default priority)
+        if (prefersMinio() && isMinioAvailable()) {
+            try {
+                minioStorageService.upload(bucket, storagePath, file, mimeType);
+                log.info("Upload to MinIO succeeded: bucket={}, path={}, size={}", bucket, storagePath, file.getSize());
+                return new UploadResult(storagePath, bucket, "minio", false);
+            } catch (Exception e) {
+                log.warn("MinIO upload failed, trying the next storage backend: {}", e.getMessage());
+            }
+        }
+
+        // Then Supabase
+        if (prefersSupabase() && isSupabaseAvailable()) {
             try {
                 uploadToSupabase(bucket, storagePath, file, mimeType);
                 log.info("Upload to Supabase succeeded: bucket={}, path={}, size={}", bucket, storagePath, file.getSize());
@@ -134,23 +208,45 @@ public class StorageService {
     // ── URL Resolution ───────────────────────────────────────────────────
 
     /**
-     * Get a fetchable URL for a stored file. For Supabase files, returns a
-     * signed URL (cached). For local files, returns a direct REST URL.
+     * Get a fetchable URL for a stored file.
+     * <ul>
+     *   <li>{@code minio} — presigned MinIO URL (cached)</li>
+     *   <li>{@code supabase} — Supabase signed URL (cached)</li>
+     *   <li>{@code local} — direct REST URL served by this backend</li>
+     * </ul>
+     * Legacy rows without a mode are resolved as Supabase first, then MinIO.
      *
-     * @param bucket       the storage bucket
-     * @param storagePath  the storage path
-     * @param isLocal      whether the file is stored locally
+     * @param bucket      the storage bucket
+     * @param storagePath the storage path
+     * @param storageMode the backend that stored the file ({@code minio}, {@code supabase}, {@code local})
      * @return a URL the client can fetch, or null if the file can't be resolved
      */
-    public String getFileUrl(String bucket, String storagePath, boolean isLocal) {
+    public String getFileUrl(String bucket, String storagePath, String storageMode) {
         if (storagePath == null || storagePath.isBlank()) return null;
 
-        if (isLocal) {
+        if ("local".equals(storageMode)) {
             return buildLocalFileUrl(bucket, storagePath);
         }
+        if ("minio".equals(storageMode)) {
+            return minioStorageService.getPresignedUrl(bucket, storagePath);
+        }
+        if ("supabase".equals(storageMode)) {
+            return getSignedUrl(bucket, storagePath);
+        }
 
-        // Supabase file — try to generate signed URL
-        return getSignedUrl(bucket, storagePath);
+        // Legacy/unknown mode: prefer Supabase rows from before MinIO existed.
+        String url = getSignedUrl(bucket, storagePath);
+        if (url != null) return url;
+        return minioStorageService.getPresignedUrl(bucket, storagePath);
+    }
+
+    /**
+     * Backwards-compatible overload. New code should pass the storage mode so
+     * MinIO objects resolve correctly.
+     */
+    @Deprecated
+    public String getFileUrl(String bucket, String storagePath, boolean isLocal) {
+        return getFileUrl(bucket, storagePath, isLocal ? "local" : "supabase");
     }
 
     /**
@@ -205,7 +301,37 @@ public class StorageService {
         };
     }
 
-    // ── Migration: Local → Supabase ──────────────────────────────────────
+    // ── Migration: Local → Remote ────────────────────────────────────────
+
+    /**
+     * Migrate a local file to the active remote backend (MinIO or Supabase).
+     * Returns true on success and removes the local copy. Used by the background
+     * migration service.
+     */
+    public boolean migrateLocalToRemote(String bucket, String storagePath) {
+        String mode = getActiveRemoteMode();
+        if (mode == null) {
+            log.debug("Cannot migrate — no remote storage backend is available");
+            return false;
+        }
+
+        if ("minio".equals(mode)) {
+            Path localPath = getLocalFilePath(bucket, storagePath);
+            String mimeType = getLocalFileContentType(storagePath);
+            boolean success = minioStorageService.uploadLocalFile(bucket, storagePath, localPath, mimeType);
+            if (success) {
+                try {
+                    Files.deleteIfExists(localPath);
+                } catch (IOException e) {
+                    log.warn("Migrated to MinIO but could not delete local file {}: {}", localPath, e.getMessage());
+                }
+                log.info("Migrated local file to MinIO: bucket={}, path={}", bucket, storagePath);
+            }
+            return success;
+        }
+
+        return migrateLocalToSupabase(bucket, storagePath);
+    }
 
     /**
      * Migrate a local file to Supabase. Returns true on success.
@@ -379,13 +505,15 @@ public class StorageService {
     // ── Delete ───────────────────────────────────────────────────────────
 
     /**
-     * Delete a file from wherever it is stored (Supabase or local disk).
+     * Delete a file from wherever it is stored (MinIO, Supabase, or local disk).
      * Best-effort: failures are logged but don't throw.
      */
     public void deleteFile(String bucket, String storagePath, String storageMode) {
         if (storagePath == null || bucket == null) return;
 
-        if ("local".equals(storageMode)) {
+        if ("minio".equals(storageMode)) {
+            minioStorageService.delete(bucket, storagePath);
+        } else if ("local".equals(storageMode)) {
             try {
                 Path path = getLocalFilePath(bucket, storagePath);
                 Files.deleteIfExists(path);

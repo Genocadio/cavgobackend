@@ -19,6 +19,11 @@ spring:
     username: admin
     password: admin
 
+# MinIO is reachable by service name inside the Docker network. Credentials
+# and the public (client-facing) endpoint come from the environment.
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://minio:9000}
+
 eureka:
   client:
     service-url:

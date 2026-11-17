@@ -26,6 +26,28 @@ services:
       timeout: 3s
       retries: 3
 
+  # MinIO / S3-compatible object storage (ikuriyebackend file uploads)
+  minio:
+    image: minio/minio:latest
+    container_name: cavgo-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${PORT_MINIO:-9000}:9000"
+      - "${PORT_MINIO_CONSOLE:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - cavgo-network
+
   postgres:
     image: postgres:15-alpine
     container_name: cavgo-postgres
@@ -296,6 +318,20 @@ services:
       NEXXAUTH_CLIENT_TOKEN: ${NEXXAUTH_CLIENT_TOKEN:-nx_A-PoujyVQeOc-M9IWCPmRYtJ8QKIByUVZqHVm66By2M}
       CAVGOMAIN_BASE_URL: http://cavgomain:${PORT_MAIN:-6060}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
+      # File uploads: MinIO first, optional Supabase fallback, local disk last.
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-auto}
+      STORAGE_MIGRATION_ENABLED: ${STORAGE_MIGRATION_ENABLED:-true}
+      MINIO_ENABLED: ${MINIO_ENABLED:-true}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:${PORT_MINIO:-9000}}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
+      LOCAL_STORAGE_PATH: /app/storage
+    volumes:
+      - ikuriye_storage:/app/storage
     ports:
       - "${PORT_IKURIYE:-6100}:6100"
     depends_on:
@@ -304,6 +340,8 @@ services:
       eurekacavgo:
         condition: service_healthy
       cavgomain:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     networks:
       - cavgo-network
@@ -459,6 +497,8 @@ services:
 volumes:
   postgres_data:
   meili_data:
+  minio_data:
+  ikuriye_storage:
 
 networks:
   cavgo-network:

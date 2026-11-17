@@ -38,6 +38,7 @@ public class BootDependencyHealthLogger {
     private final String nexxauthBaseUrl;
     private final String cavgomainBaseUrl;
     private final String supabaseUrl;
+    private final String minioUrl;
 
     private final String rabbitHost;
     private final int rabbitPort;
@@ -54,6 +55,7 @@ public class BootDependencyHealthLogger {
             @Value("${nexxauth.base-url:}") String nexxauthBaseUrl,
             @Value("${cavgomain.base-url:}") String cavgomainBaseUrl,
             @Value("${supabase.url:}") String supabaseUrl,
+            @Value("${minio.endpoint:}") String minioUrl,
             @Value("${spring.rabbitmq.host:localhost}") String rabbitHost,
             @Value("${spring.rabbitmq.port:5672}") int rabbitPort,
             @Value("${spring.rabbitmq.username:}") String rabbitUser,
@@ -63,6 +65,7 @@ public class BootDependencyHealthLogger {
         this.nexxauthBaseUrl = normalize(nexxauthBaseUrl);
         this.cavgomainBaseUrl = normalize(cavgomainBaseUrl);
         this.supabaseUrl = normalize(supabaseUrl);
+        this.minioUrl = normalize(minioUrl);
         this.rabbitHost = rabbitHost;
         this.rabbitPort = rabbitPort;
         this.rabbitUser = rabbitUser;
@@ -72,7 +75,7 @@ public class BootDependencyHealthLogger {
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
         log.info("════════════════ IKURIVE BOOT DEPENDENCY HEALTH ════════════════");
-        log.info("  Targets: RabbitMQ, PostgreSQL, NeXXauth, Supabase, CavgoMain");
+        log.info("  Targets: RabbitMQ, PostgreSQL, NeXXauth, MinIO, Supabase, CavgoMain");
         check("PostgreSQL", null, "datasource",
                 () -> {
                     try (var conn = dataSource.getConnection();
@@ -87,6 +90,8 @@ public class BootDependencyHealthLogger {
                 this::rabbitReachable);
         check("NeXXauth", nexxauthBaseUrl, "nexxauth.base-url",
                 () -> httpReachable(nexxauthBaseUrl));
+        check("MinIO", minioUrl, "minio.endpoint",
+                () -> httpReachable(minioHealthUrl(minioUrl)));
         check("Supabase", supabaseUrl, "supabase.url",
                 () -> httpReachable(supabaseUrl));
         check("CavgoMain", cavgomainBaseUrl, "cavgomain.base-url",
@@ -146,6 +151,11 @@ public class BootDependencyHealthLogger {
         } catch (Exception e) {
             throw new IllegalStateException(e.getMessage(), e);
         }
+    }
+
+    private static String minioHealthUrl(String endpoint) {
+        if (endpoint == null || endpoint.isBlank()) return endpoint;
+        return endpoint.replaceAll("/+$", "") + "/minio/health/live";
     }
 
     private static String normalize(String value) {

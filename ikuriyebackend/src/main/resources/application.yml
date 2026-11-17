@@ -77,7 +77,21 @@ eureka:
     prefer-ip-address: true
     instance-id: ${spring.application.name}:${random.uuid}
 
-# Supabase Storage — file uploads (package media + profile avatars).
+# MinIO / S3-compatible object storage — preferred upload backend.
+# The backend creates the "package-media" and "profiles" buckets on first boot
+# and returns presigned download URLs, so clients never need MinIO credentials.
+# Set MINIO_PUBLIC_ENDPOINT to the externally reachable URL when the internal
+# endpoint is only resolvable inside Docker (e.g. http://minio:9000).
+minio:
+  enabled: ${MINIO_ENABLED:true}
+  endpoint: ${MINIO_ENDPOINT:}
+  public-endpoint: ${MINIO_PUBLIC_ENDPOINT:}
+  access-key: ${MINIO_ACCESS_KEY:}
+  secret-key: ${MINIO_SECRET_KEY:}
+  region: ${MINIO_REGION:us-east-1}
+  presigned-expiry-seconds: ${MINIO_PRESIGNED_EXPIRY_SECONDS:604800}
+
+# Supabase Storage — optional fallback when MinIO is not available.
 # The backend proxies uploads and generates signed URLs so clients never
 # see Supabase URLs or bucket names.
 supabase:
@@ -89,9 +103,11 @@ supabase:
 backend:
   base-url: ${BACKEND_BASE_URL:https://api.med.rw/gocavgo/ikuriye}
 
-# Local file storage — used when Supabase is not configured or unavailable.
-# Files are stored under this path, served via /api/files/local/{bucket}/...
+# File storage selection: auto (MinIO → Supabase → local), minio, supabase, local.
 storage:
+  provider: ${STORAGE_PROVIDER:auto}
+  # Local fallback — used when no remote backend is configured or reachable.
+  # Files are stored under this path, served via /api/files/local/{bucket}/...
   local:
     base-path: ${LOCAL_STORAGE_PATH:./storage}
   migration:

@@ -471,10 +471,10 @@ public class UserService {
 
     private UserResponse toUserResponse(UserEntity user, Role role) {
         var base = userMapper.toResponse(user, role);
-        // Resolve avatar URL from storage path — handles both local and Supabase
+        // Resolve avatar URL from storage path — handles MinIO, Supabase and local
         if (user.getAvatarStoragePath() != null && user.getAvatarBucket() != null) {
-            boolean isLocal = "local".equals(user.getAvatarStorageMode());
-            var avatarUrl = storageService.getFileUrl(user.getAvatarBucket(), user.getAvatarStoragePath(), isLocal);
+            var avatarUrl = storageService.getFileUrl(
+                    user.getAvatarBucket(), user.getAvatarStoragePath(), user.getAvatarStorageMode());
             if (avatarUrl != null) {
                 return new UserResponse(
                         base.id(), base.email(), base.phone(),

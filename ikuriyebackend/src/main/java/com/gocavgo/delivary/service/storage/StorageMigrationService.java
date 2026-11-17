@@ -6,26 +6,28 @@ import com.gocavgo.delivary.repository.delivery.PackageMediaJpaRepository;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Background service that migrates locally-stored files to Supabase Storage
- * when it becomes available. Runs periodically and processes files in batches.
+ * Background service that migrates locally-stored files to the active remote
+ * storage backend (MinIO first, then Supabase) when it becomes available. Runs
+ * periodically and processes files in batches.
  * <p>
  * Only runs when:
  * <ul>
- *   <li>Supabase is configured</li>
- *   <li>Supabase is currently available</li>
- *   <li>Migration is enabled in config</li>
+ *   <li>a remote backend (MinIO or Supabase) is configured</li>
+ *   <li>that backend is currently available</li>
+ *   <li>migration is enabled in config</li>
  * </ul>
  * <p>
- * Already-in-Supabase files are never touched. If Supabase goes offline again
- * mid-migration, partially-migrated files remain in Supabase (already uploaded)
- * and the local copy is only deleted after a successful upload.
+ * Files already stored remotely are never touched. If the remote backend goes
+ * offline mid-migration, partially-migrated files remain in the remote store
+ * (already uploaded) and the local copy is only deleted after a successful
+ * upload.
  */
 @Service
 @RequiredArgsConstructor
@@ -36,10 +38,14 @@ public class StorageMigrationService {
     private final PackageMediaJpaRepository mediaRepo;
     private final UserRepository userRepository;
 
+    @Value("${storage.migration.enabled:true}")
+    private boolean migrationEnabled;
+
     private static final int BATCH_SIZE = 20;
 
     /**
-     * Run every 5 minutes. Migrates a batch of local package media files to Supabase.
+     * Run every 5 minutes. Migrates a batch of local package media files to the
+     * active remote backend.
      */
     @Scheduled(fixedDelay = 300000, initialDelay = 60000)
     public void migratePackageMedia() {
@@ -51,7 +57,8 @@ public class StorageMigrationService {
             return;
         }
 
-        log.info("Starting package media migration: {} local files found", localMedia.size());
+        log.info("Starting package media migration: {} local files found, target={}",
+                localMedia.size(), storageService.getActiveRemoteMode());
 
         int migrated = 0;
         int failed = 0;
@@ -69,23 +76,33 @@ public class StorageMigrationService {
 
             // Check if file actually exists locally
             if (!storageService.localFileExists(media.getBucket(), media.getStoragePath())) {
-                // File already gone — mark as supabase (it was migrated or never local)
-                media.setStorageMode("supabase");
-                mediaRepo.save(media);
+                // File already gone — mark it with the active remote mode (it was
+                // migrated previously or never existed locally).
+                String remoteMode = storageService.getActiveRemoteMode();
+                if (remoteMode != null) {
+                    media.setStorageMode(remoteMode);
+                    mediaRepo.save(media);
+                }
                 skipped++;
                 continue;
             }
 
             try {
-                boolean success = storageService.migrateLocalToSupabase(media.getBucket(), media.getStoragePath());
-                if (success) {
-                    media.setStorageMode("supabase");
-                    // Update the stored url to point to the Supabase signed URL
-                    String supabaseUrl = storageService.getFileUrl(media.getBucket(), media.getStoragePath(), false);
-                    if (supabaseUrl != null) {
-                        media.setUrl(supabaseUrl);
+                String remoteMode = storageService.getActiveRemoteMode();
+                boolean success = storageService.migrateLocalToRemote(media.getBucket(), media.getStoragePath());
+                if (success && remoteMode != null) {
+                    media.setStorageMode(remoteMode);
+                    // Update the stored url to point at the remote signed URL
+                    String remoteUrl = storageService.getFileUrl(
+                            media.getBucket(), media.getStoragePath(), remoteMode);
+                    if (remoteUrl != null) {
+                        media.setUrl(remoteUrl);
                     }
                     mediaRepo.save(media);
+                    migrated++;
+                } else if (success) {
+                    // Upload succeeded but the backend became unavailable before
+                    // the mode was recorded; the next batch will reconcile it.
                     migrated++;
                 } else {
                     failed++;
@@ -113,7 +130,8 @@ public class StorageMigrationService {
             return;
         }
 
-        log.info("Starting avatar migration: {} local avatars found", localAvatars.size());
+        log.info("Starting avatar migration: {} local avatars found, target={}",
+                localAvatars.size(), storageService.getActiveRemoteMode());
 
         int migrated = 0;
         int failed = 0;
@@ -128,16 +146,23 @@ public class StorageMigrationService {
             }
 
             if (!storageService.localFileExists(user.getAvatarBucket(), user.getAvatarStoragePath())) {
-                user.setAvatarStorageMode("supabase");
-                userRepository.save(user);
+                String remoteMode = storageService.getActiveRemoteMode();
+                if (remoteMode != null) {
+                    user.setAvatarStorageMode(remoteMode);
+                    userRepository.save(user);
+                }
                 continue;
             }
 
             try {
-                boolean success = storageService.migrateLocalToSupabase(user.getAvatarBucket(), user.getAvatarStoragePath());
-                if (success) {
-                    user.setAvatarStorageMode("supabase");
+                String remoteMode = storageService.getActiveRemoteMode();
+                boolean success = storageService.migrateLocalToRemote(
+                        user.getAvatarBucket(), user.getAvatarStoragePath());
+                if (success && remoteMode != null) {
+                    user.setAvatarStorageMode(remoteMode);
                     userRepository.save(user);
+                    migrated++;
+                } else if (success) {
                     migrated++;
                 } else {
                     failed++;
@@ -153,7 +178,6 @@ public class StorageMigrationService {
     }
 
     private boolean shouldMigrate() {
-        return storageService.isSupabaseConfigured()
-                && storageService.isSupabaseAvailable();
+        return migrationEnabled && storageService.isRemoteAvailable();
     }
 }

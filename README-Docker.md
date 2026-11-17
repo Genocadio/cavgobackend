@@ -1,8 +1,8 @@
 # CAVGO Microservices Docker Setup
 
 This Docker Compose setup provides the full CAVGO stack: Java, Go and Node
-services, PostgreSQL, RabbitMQ, Redis and Meilisearch, all on one `cavgo-network`
-bridge so services reach each other by name.
+services, PostgreSQL, RabbitMQ, Redis, Meilisearch and MinIO, all on one
+`cavgo-network` bridge so services reach each other by name.
 
 ## Services
 
@@ -12,6 +12,7 @@ bridge so services reach each other by name.
 | Redis              | 6379  | image          | Cache for Navigation                     |
 | PostgreSQL         | 5432  | image + init   | One database per service                 |
 | Meilisearch        | 7700  | image          | Search provider (location/route/trip)    |
+| MinIO              | 9000  | image          | Object storage (console on 9001)         |
 | Eurekacavgo        | 8761  | Java           | Service discovery                        |
 | Cavgomain          | 6060  | Java           | Main service (companies, users, offices) |
 | Cavgogateway       | 8080  | Java           | API gateway (runtime routes from file)   |
@@ -52,6 +53,24 @@ Each service gets its own database, created automatically on first start:
 - `cavgomain`, `ridehail`, `cavgomqt`, `navigation`, `ikuriye`
 - `cavgotrips`, `cavgobooks`
 - `adminaggregate`
+
+## File storage (ikuriyebackend)
+
+Package media and profile avatars are stored in MinIO by default. The backend
+creates the `package-media` and `profiles` buckets automatically and returns
+short-lived signed URLs to clients.
+
+- **Upload:** `POST /api/files/upload` (multipart `file`, optional `purpose=avatar`).
+- **Backend order:** `STORAGE_PROVIDER=auto` tries MinIO → Supabase → local disk.
+  Force a backend with `minio`, `supabase`, or `local`.
+- **Download URLs:** presigned against `MINIO_PUBLIC_ENDPOINT`, which must be
+  reachable by clients. Defaults to `http://localhost:9000` in the local compose
+  file; set the public hostname (e.g. `https://files.example.com`) in production.
+- **Fallback:** if MinIO is down, new uploads go to Supabase when configured,
+  otherwise to the local `ikuriye_storage` volume. A background job migrates
+  local files to the active remote backend once it is reachable again.
+- **Credentials:** `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` in `.env`; the
+  backend receives them as `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY`.
 
 ## Cross-service office sync (cavgomain ↔ ikuriyebackend)
 
@@ -105,6 +124,9 @@ most often change:
 - `NEXXAUTH_BASE_URL`, `NEXXAUTH_PUBLIC_KEY`, `NEXXAUTH_CLIENT_ID`,
   `NEXXAUTH_CLIENT_TOKEN` — identity provider wiring (all Java services).
 - `MQTT_BROKER_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD` — HiveMQ (required).
+- `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_PUBLIC_ENDPOINT` — object
+  storage and presigned download host (see "File storage" above).
+- `STORAGE_PROVIDER` — `auto` (default), `minio`, `supabase`, or `local`.
 - `IKURIYE_BASE_URL`, `CAVGOMAIN_BASE_URL` — office-sync direction (see above).
 - Port overrides: `PORT_MAIN`, `PORT_GATEWAY`, `PORT_TRIPS`, `PORT_IKURIYE`, … (`PORT_*` in `.env.example`).
 

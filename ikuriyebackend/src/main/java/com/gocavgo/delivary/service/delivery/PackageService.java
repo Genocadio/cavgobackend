@@ -1582,8 +1582,7 @@ public class PackageService {
         // Resolve URL from storage path — handles both local and Supabase
         String url = null;
         if (m.getStoragePath() != null && m.getBucket() != null) {
-            boolean isLocal = "local".equals(m.getStorageMode());
-            url = storageService.getFileUrl(m.getBucket(), m.getStoragePath(), isLocal);
+            url = storageService.getFileUrl(m.getBucket(), m.getStoragePath(), m.getStorageMode());
         }
         // Derive MIME type from mediaType enum
         String mime = m.getMediaType() == com.gocavgo.delivary.enums.delivery.MediaType.VIDEO

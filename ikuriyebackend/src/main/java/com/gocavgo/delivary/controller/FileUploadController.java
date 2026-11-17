@@ -104,8 +104,8 @@ public class FileUploadController {
             media = mediaRepo.save(media);
 
             // Resolve the URL the client can fetch from
-            boolean isLocal = "local".equals(uploadResult.mode());
-            String url = storageService.getFileUrl(uploadResult.bucket(), uploadResult.storagePath(), isLocal);
+            String url = storageService.getFileUrl(
+                    uploadResult.bucket(), uploadResult.storagePath(), uploadResult.mode());
 
             log.info("Upload complete: mediaId={}, url={}", media.getId(), url != null ? "(resolved)" : "(pending)");
 
