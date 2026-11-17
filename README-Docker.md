@@ -71,6 +71,9 @@ short-lived signed URLs to clients.
   local files to the active remote backend once it is reachable again.
 - **Credentials:** `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` in `.env`; the
   backend receives them as `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY`.
+- **Reverse proxy:** allow multipart bodies up to the backend's 100 MB limit
+  (nginx: `client_max_body_size 100m;`). The Spring multipart limit is already
+  configured as `max-file-size: 100MB` / `max-request-size: 100MB`.
 
 ## Cross-service office sync (cavgomain ↔ ikuriyebackend)
 
