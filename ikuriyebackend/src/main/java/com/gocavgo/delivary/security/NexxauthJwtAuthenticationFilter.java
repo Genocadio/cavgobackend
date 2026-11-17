@@ -146,7 +146,7 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
                         ? cavgoSyncClient.syncUserAndGetResult(claims.userId()) : null;
 
         var authorities = tokenRoles.stream()
-                .filter(role -> isRoleEffective(role, cavgomainUser, claims.userId()))
+                .filter(role -> cavgoSyncClient.isRoleEffective(role, cavgomainUser, claims.userId()))
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role.name()))
                 .toList();
 
@@ -194,29 +194,6 @@ public class NexxauthJwtAuthenticationFilter extends OncePerRequestFilter {
         log.debug("Nexxauth token verified for userId={}, roles={}, synced={}",
                 claims.userId(), authorities, needsSync);
         filterChain.doFilter(request, response);
-    }
-
-    /**
-     * Identity and admin roles come straight from the Nexxauth token. DRIVER
-     * and WORKER are business roles: they only become effective once cavgomain
-     * has an approved company membership with that role. Fail closed when the
-     * membership cannot be confirmed.
-     */
-    private boolean isRoleEffective(Role role,
-                                    CavgomainSyncClient.CavgomainUser cavgomainUser,
-                                    Long userId) {
-        if (role != Role.DRIVER && role != Role.WORKER) {
-            return true;
-        }
-        if (!cavgoSyncClient.isEnabled()) {
-            log.warn("Denying ROLE_{} for userId={}: cavgomain approval check is not configured", role, userId);
-            return false;
-        }
-        boolean approved = cavgomainUser != null && cavgomainUser.hasApprovedRole(role.name());
-        if (!approved) {
-            log.info("Denying ROLE_{} for userId={}: no approved company membership in cavgomain", role, userId);
-        }
-        return approved;
     }
 
     private void writeUnauthorized(HttpServletResponse response, String code, String message) throws IOException {

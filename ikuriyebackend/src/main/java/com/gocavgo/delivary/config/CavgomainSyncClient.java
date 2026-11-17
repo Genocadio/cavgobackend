@@ -2,6 +2,7 @@ package com.gocavgo.delivary.config;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gocavgo.delivary.enums.user.Role;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -183,5 +184,32 @@ public class CavgomainSyncClient {
      */
     public boolean isEnabled() {
         return baseUrl != null;
+    }
+
+    /**
+     * Decides whether a role carried by a Nexxauth token may become a Spring
+     * authority. Identity/admin roles pass straight through. DRIVER and WORKER
+     * are business roles that only take effect once cavgomain confirms an
+     * approved company membership with that role. Fails closed when the check
+     * is unavailable or the membership is unknown — a user must never be able
+     * to act on a role they merely requested.
+     *
+     * @param user   the cavgomain sync result (may be null when unknown/failed)
+     * @param role   the local role derived from the token
+     * @param userId the Nexxauth user id (for logging)
+     */
+    public boolean isRoleEffective(Role role, CavgomainUser user, Long userId) {
+        if (role != Role.DRIVER && role != Role.WORKER) {
+            return true;
+        }
+        if (baseUrl == null) {
+            log.warn("Denying ROLE_{} for userId={}: cavgomain approval check is not configured", role, userId);
+            return false;
+        }
+        boolean approved = user != null && user.hasApprovedRole(role.name());
+        if (!approved) {
+            log.info("Denying ROLE_{} for userId={}: no approved company membership in cavgomain", role, userId);
+        }
+        return approved;
     }
 }

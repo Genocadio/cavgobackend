@@ -1,5 +1,6 @@
 package com.gocavgo.delivary.config;
 
+import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.repository.user.DriverProfileRepository;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.security.NexxauthJwtVerifier;
@@ -35,6 +36,7 @@ public class SecurityWebSocketGraphQlInterceptor implements WebSocketGraphQlInte
     private final NexxauthJwtVerifier jwtVerifier;
     private final UserRepository userRepository;
     private final DriverProfileRepository driverProfileRepository;
+    private final CavgomainSyncClient cavgoSyncClient;
 
     @Override
     public Mono<Object> handleConnectionInitialization(WebSocketSessionInfo session, Map<String, Object> connectionInitPayload) {
@@ -59,9 +61,21 @@ public class SecurityWebSocketGraphQlInterceptor implements WebSocketGraphQlInte
                     return Mono.error(new AccessDeniedException("User account is disabled"));
                 }
 
-                var authorities = claims.roles().stream()
+                // Same approval gate as the HTTP filter: a token role alone is
+                // not enough for DRIVER/WORKER. Without a confirmed cavgomain
+                // membership these authorities are withheld, so a user who only
+                // requested the role cannot act on it over WebSocket either.
+                var tokenRoles = claims.roles().stream()
                         .map(NexxauthRoles::fromNexxauthName)
                         .filter(role -> role != null)
+                        .toList();
+
+                boolean needsPrivilegedCheck = tokenRoles.contains(Role.DRIVER) || tokenRoles.contains(Role.WORKER);
+                var cavgomainUser = (needsPrivilegedCheck && cavgoSyncClient.isEnabled())
+                        ? cavgoSyncClient.syncUserAndGetResult(claims.userId()) : null;
+
+                var authorities = tokenRoles.stream()
+                        .filter(role -> cavgoSyncClient.isRoleEffective(role, cavgomainUser, claims.userId()))
                         .map(role -> new SimpleGrantedAuthority("ROLE_" + role.name()))
                         .toList();
 
