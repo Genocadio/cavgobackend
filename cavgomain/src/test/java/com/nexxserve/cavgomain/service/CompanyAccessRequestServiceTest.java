@@ -84,6 +84,35 @@ class CompanyAccessRequestServiceTest {
     }
 
     @Test
+    void approveRequest_failsClosedWhenNexxauthRoleAssignmentFails() {
+        Long requestId = 21L;
+        Long requesterUserId = 101L;
+        Long approverUserId = 201L;
+
+        Company company = new Company();
+        company.setId(1L);
+        company.setCompanyCode("COMP1");
+
+        CompanyAccessRequest request = new CompanyAccessRequest();
+        request.setId(requestId);
+        request.setNexxauthUserId(requesterUserId);
+        request.setCompany(company);
+        request.setRole(CompanyUserRole.WORKER);
+        request.setStatus(CompanyAccessRequestStatus.PENDING);
+
+        when(requestRepository.findById(requestId)).thenReturn(Optional.of(request));
+        doThrow(new RuntimeException("Nexxauth unavailable"))
+                .when(nexxauthClient).updateUserRoles(requesterUserId, List.of("worker"));
+
+        assertThrows(RuntimeException.class, () ->
+                companyAccessRequestService.approveRequest(requestId, approverUserId));
+
+        assertEquals(CompanyAccessRequestStatus.PENDING, request.getStatus());
+        verify(requestRepository, never()).save(any(CompanyAccessRequest.class));
+        verify(companyUserRepository, never()).save(any(CompanyUser.class));
+    }
+
+    @Test
     void createRequest_grantsWorkerRoleForNonStaffUser() {
         Long userId = 100L;
 

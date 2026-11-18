@@ -209,48 +209,40 @@ public class DriverRequestService {
                     "You cannot approve your own driver request.");
         }
 
-        // 1. Update request status — record who approved
+        // 1. Update Nexxauth roles first. Fail closed: a request must never be
+        // marked approved when the authoritative identity store did not grant
+        // the role. Any exception propagates and @Transactional rolls back.
+        nexxauthClient.updateUserRoles(request.getNexxauthUserId(), List.of("driver"));
+        log.info("Assigned driver role in Nexxauth for userId={}", request.getNexxauthUserId());
+
+        // 2. Create/update local CompanyUser with DRIVER role. A failure here
+        // must also roll the approval back.
+        var existingUser = companyUserRepository.findById(request.getNexxauthUserId());
+        if (existingUser.isPresent()) {
+            var user = existingUser.get();
+            user.setCompany(request.getCompany());
+            user.setRole(CompanyUserRole.DRIVER);
+            companyUserRepository.save(user);
+            log.info("Updated CompanyUser to DRIVER for userId={}", request.getNexxauthUserId());
+        } else {
+            var newUser = new CompanyUser();
+            newUser.setId(request.getNexxauthUserId());
+            newUser.setFirstName(request.getFirstName());
+            newUser.setLastName(request.getLastName() != null ? request.getLastName() : "");
+            newUser.setEmail(request.getEmail());
+            newUser.setPhone(request.getPhone());
+            newUser.setCompany(request.getCompany());
+            newUser.setRole(CompanyUserRole.DRIVER);
+            newUser.setStatus(com.nexxserve.cavgomain.enums.UserStatus.ACTIVE);
+            companyUserRepository.save(newUser);
+            log.info("Created CompanyUser as DRIVER for userId={}", request.getNexxauthUserId());
+        }
+
+        // 3. Record approval only after both grants succeeded.
         request.setStatus(DriverRequestStatus.APPROVED);
         request.setApprovedBy(approverUserId);
         request.setApprovedAt(LocalDateTime.now());
         driverRequestRepository.save(request);
-
-        // 2. Update Nexxauth roles — assign "driver" role (replaces existing roles such as "customer")
-        try {
-            nexxauthClient.updateUserRoles(request.getNexxauthUserId(), List.of("driver"));
-            log.info("Assigned driver role in Nexxauth for userId={}", request.getNexxauthUserId());
-        } catch (Exception e) {
-            log.error("Failed to update Nexxauth roles for userId={}: {}",
-                    request.getNexxauthUserId(), e.getMessage());
-            // Don't fail the whole approval — roles can be manually synced later
-        }
-
-        // 3. Create/update local CompanyUser with DRIVER role
-        try {
-            var existingUser = companyUserRepository.findById(request.getNexxauthUserId());
-            if (existingUser.isPresent()) {
-                var user = existingUser.get();
-                user.setCompany(request.getCompany());
-                user.setRole(CompanyUserRole.DRIVER);
-                companyUserRepository.save(user);
-                log.info("Updated CompanyUser to DRIVER for userId={}", request.getNexxauthUserId());
-            } else {
-                var newUser = new CompanyUser();
-                newUser.setId(request.getNexxauthUserId());
-                newUser.setFirstName(request.getFirstName());
-                newUser.setLastName(request.getLastName() != null ? request.getLastName() : "");
-                newUser.setEmail(request.getEmail());
-                newUser.setPhone(request.getPhone());
-                newUser.setCompany(request.getCompany());
-                newUser.setRole(CompanyUserRole.DRIVER);
-                newUser.setStatus(com.nexxserve.cavgomain.enums.UserStatus.ACTIVE);
-                companyUserRepository.save(newUser);
-                log.info("Created CompanyUser as DRIVER for userId={}", request.getNexxauthUserId());
-            }
-        } catch (Exception e) {
-            log.error("Failed to create/update CompanyUser for userId={}: {}",
-                    request.getNexxauthUserId(), e.getMessage());
-        }
 
         log.info("Driver request approved: requestId={}, userId={}",
                 requestId, request.getNexxauthUserId());

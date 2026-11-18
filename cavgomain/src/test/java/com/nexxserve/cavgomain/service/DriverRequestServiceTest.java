@@ -77,4 +77,32 @@ class DriverRequestServiceTest {
                         user.getCompany().getId().equals(1L)
         ));
     }
+
+    @Test
+    void approveRequest_failsClosedWhenNexxauthRoleAssignmentFails() {
+        Long requestId = 11L;
+        Long requesterUserId = 101L;
+        Long approverUserId = 201L;
+
+        Company company = new Company();
+        company.setId(1L);
+        company.setCompanyCode("COMP1");
+
+        DriverRequest request = new DriverRequest();
+        request.setId(requestId);
+        request.setNexxauthUserId(requesterUserId);
+        request.setCompany(company);
+        request.setStatus(DriverRequestStatus.PENDING);
+
+        when(driverRequestRepository.findById(requestId)).thenReturn(Optional.of(request));
+        doThrow(new RuntimeException("Nexxauth unavailable"))
+                .when(nexxauthClient).updateUserRoles(requesterUserId, List.of("driver"));
+
+        assertThrows(RuntimeException.class, () ->
+                driverRequestService.approveRequest(requestId, approverUserId));
+
+        assertEquals(DriverRequestStatus.PENDING, request.getStatus());
+        verify(driverRequestRepository, never()).save(any(DriverRequest.class));
+        verify(companyUserRepository, never()).save(any(CompanyUser.class));
+    }
 }

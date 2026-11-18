@@ -183,15 +183,13 @@ public class CompanyAccessRequestService {
         if (roleNexxauthName == null) {
             roleNexxauthName = "worker";
         }
-        try {
-            nexxauthClient.updateUserRoles(request.getNexxauthUserId(), List.of(roleNexxauthName));
-            log.info("Assigned {} role in Nexxauth for userId={} (request {})",
-                    roleNexxauthName, request.getNexxauthUserId(), requestId);
-            request.setRole(effectiveRole);
-        } catch (Exception e) {
-            log.error("Failed to assign {} role in Nexxauth for userId={} (request {}): {}",
-                    roleNexxauthName, request.getNexxauthUserId(), requestId, e.getMessage());
-        }
+        // Fail closed: never mark a request approved unless the authoritative
+        // identity store actually granted the role. Any failure propagates and
+        // @Transactional rolls the local approval back.
+        nexxauthClient.updateUserRoles(request.getNexxauthUserId(), List.of(roleNexxauthName));
+        log.info("Assigned {} role in Nexxauth for userId={} (request {})",
+                roleNexxauthName, request.getNexxauthUserId(), requestId);
+        request.setRole(effectiveRole);
 
         // 2. Assign the requesting user to the company with their effective role.
         var existingUser = companyUserRepository.findById(request.getNexxauthUserId());
