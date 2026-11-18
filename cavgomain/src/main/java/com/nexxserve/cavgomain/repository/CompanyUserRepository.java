@@ -25,6 +25,7 @@ public interface CompanyUserRepository extends JpaRepository<CompanyUser, Long> 
     
     List<CompanyUser> findByRole(CompanyUserRole role);
     List<CompanyUser> findByCompanyIdAndRole(Long companyId, CompanyUserRole role);
+    long countByCompanyIdAndRole(Long companyId, CompanyUserRole role);
 
     @Query("SELECT cu FROM CompanyUser cu WHERE cu.licenseExpiry < CURRENT_DATE")
     List<CompanyUser> findUsersWithExpiredLicense();

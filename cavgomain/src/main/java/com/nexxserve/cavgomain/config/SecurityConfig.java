@@ -4,6 +4,7 @@ import com.nexxserve.cavgomain.security.NexxauthJwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -35,6 +36,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/main/auth/**").permitAll()  // keep open for potential future use
+                        .requestMatchers(HttpMethod.POST, "/main/company-admin-access-requests/validate-company-code").permitAll()
                         .requestMatchers("/internal/api/**").permitAll()  // internal service-to-service
                         .anyRequest().authenticated()
                 )

@@ -4,6 +4,7 @@ import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.UserStatus;
 import com.nexxserve.cavgomain.repository.CompanyAccessRequestRepository;
+import com.nexxserve.cavgomain.repository.CompanyAdminAccessRequestRepository;
 import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.DriverRequestRepository;
@@ -39,6 +40,43 @@ public class CompanyScopeGuard {
     private final VehicleRepository vehicleRepository;
     private final DriverRequestRepository driverRequestRepository;
     private final CompanyAccessRequestRepository companyAccessRequestRepository;
+    private final CompanyAdminAccessRequestRepository companyAdminAccessRequestRepository;
+
+    /**
+     * Requires an authenticated Nexxauth ADMIN who is also an active ADMIN
+     * member of this exact company. Unlike ordinary company-scope checks,
+     * global staff roles do not bypass the local membership boundary.
+     */
+    public Long requireCompanyAdminScope(Long companyId) {
+        if (companyId == null || !currentRoles().contains(CompanyUserRole.ADMIN)) {
+            throw denied();
+        }
+
+        Long userId = currentUserId();
+        CompanyUser membership = companyUserRepository.findById(userId).orElseThrow(this::denied);
+        if (membership.getStatus() != UserStatus.ACTIVE
+                || membership.getRole() != CompanyUserRole.ADMIN
+                || !Objects.equals(companyIdOf(membership), companyId)) {
+            throw denied();
+        }
+        return userId;
+    }
+
+    public void requireCompanyAdminScopeForCompanyAccessRequest(Long companyId, Long requestId) {
+        requireCompanyAdminScope(companyId);
+        var request = companyAccessRequestRepository.findById(requestId).orElseThrow(this::denied);
+        if (!Objects.equals(companyIdOf(request.getCompany()), companyId)) {
+            throw denied();
+        }
+    }
+
+    public void requireCompanyAdminScopeForAdminAccessRequest(Long companyId, Long requestId) {
+        requireCompanyAdminScope(companyId);
+        var request = companyAdminAccessRequestRepository.findById(requestId).orElseThrow(this::denied);
+        if (!Objects.equals(companyIdOf(request.getCompany()), companyId)) {
+            throw denied();
+        }
+    }
 
     /**
      * Requires access to {@code companyId}. Returns the same id so callers can

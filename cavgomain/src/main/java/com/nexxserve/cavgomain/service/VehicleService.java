@@ -404,6 +404,28 @@ VehicleAssignment assignment = activeAssignment.get();
         return response;
     }
 
+   public void unassignDriverFromCompany(Long driverId, Long companyId) {
+       CompanyUser driver = companyUserRepository.findById(driverId)
+               .orElseThrow(() -> new EntityNotFoundException("Driver not found"));
+       if (driver.getCompany() == null || !driver.getCompany().getId().equals(companyId)
+               || driver.getRole() != CompanyUserRole.DRIVER) {
+           throw new IllegalArgumentException("Driver does not belong to this company");
+       }
+
+       List<VehicleAssignment> activeAssignments = assignmentRepository.findActiveAssignmentsByDriver(driverId);
+       for (VehicleAssignment assignment : activeAssignments) {
+           Vehicle vehicle = assignment.getVehicle();
+           if (vehicle.getCompany() == null || !vehicle.getCompany().getId().equals(companyId)) {
+               throw new IllegalArgumentException("Driver has an assignment outside this company");
+           }
+           assignment.setUnassignedDate(LocalDateTime.now());
+           assignment.setStatus(com.nexxserve.cavgomain.enums.AssignmentStatus.COMPLETED);
+           assignmentRepository.save(assignment);
+           eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(vehicle));
+           syncAfterAssignment(vehicle);
+       }
+   }
+
    @Transactional
 public VehicleAssignmentResponseDto swapAssignment(Long vehicleId, Long newDriverId) {
         Vehicle vehicle = getVehicle(vehicleId);

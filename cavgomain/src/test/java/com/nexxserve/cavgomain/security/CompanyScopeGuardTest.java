@@ -8,6 +8,7 @@ import com.nexxserve.cavgomain.entity.Vehicle;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
 import com.nexxserve.cavgomain.enums.UserStatus;
 import com.nexxserve.cavgomain.repository.CompanyAccessRequestRepository;
+import com.nexxserve.cavgomain.repository.CompanyAdminAccessRequestRepository;
 import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.DriverRequestRepository;
@@ -39,6 +40,7 @@ class CompanyScopeGuardTest {
     @Mock private VehicleRepository vehicleRepository;
     @Mock private DriverRequestRepository driverRequestRepository;
     @Mock private CompanyAccessRequestRepository companyAccessRequestRepository;
+    @Mock private CompanyAdminAccessRequestRepository companyAdminAccessRequestRepository;
 
     @InjectMocks private CompanyScopeGuard guard;
 
@@ -54,7 +56,7 @@ class CompanyScopeGuardTest {
         assertEquals(99L, guard.requireCompanyScope(99L));
 
         verifyNoInteractions(companyUserRepository, companyRepository, vehicleRepository,
-                driverRequestRepository, companyAccessRequestRepository);
+                driverRequestRepository, companyAccessRequestRepository, companyAdminAccessRequestRepository);
     }
 
     @Test
@@ -112,6 +114,35 @@ class CompanyScopeGuardTest {
         when(companyAccessRequestRepository.findById(12L)).thenReturn(Optional.of(request));
 
         assertThrows(AccessDeniedException.class, () -> guard.requireCompanyScopeForCompanyAccessRequest(12L));
+    }
+
+    @Test
+    void companyAdminRequiresLocalAdminMembershipInExactCompany() {
+        authenticate("7", CompanyUserRole.ADMIN);
+        when(companyUserRepository.findById(7L))
+                .thenReturn(Optional.of(membership(1L, CompanyUserRole.ADMIN)));
+
+        assertEquals(7L, guard.requireCompanyAdminScope(1L));
+        assertThrows(AccessDeniedException.class, () -> guard.requireCompanyAdminScope(2L));
+    }
+
+    @Test
+    void globalAdminTokenCannotBypassLocalCompanyAdminRole() {
+        authenticate("7", CompanyUserRole.ADMIN);
+        when(companyUserRepository.findById(7L))
+                .thenReturn(Optional.of(membership(1L, CompanyUserRole.FLEET_MANAGER)));
+
+        assertThrows(AccessDeniedException.class, () -> guard.requireCompanyAdminScope(1L));
+    }
+
+    @Test
+    void inactiveLocalAdminMembershipIsDenied() {
+        authenticate("7", CompanyUserRole.ADMIN);
+        CompanyUser membership = membership(1L, CompanyUserRole.ADMIN);
+        membership.setStatus(UserStatus.INACTIVE);
+        when(companyUserRepository.findById(7L)).thenReturn(Optional.of(membership));
+
+        assertThrows(AccessDeniedException.class, () -> guard.requireCompanyAdminScope(1L));
     }
 
     private void authenticate(String principal, CompanyUserRole... roles) {

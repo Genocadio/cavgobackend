@@ -30,10 +30,9 @@ import java.util.List;
  * the requested role in Nexxauth — a user can never self-assign or
  * self-approve. Every approval records who approved (approvedBy).
  *
- * <p>The requested role follows the requester's current profile: staff
- * (admin / supervisor / fleet_manager) keep their role when requesting access;
- * a driver stays a driver; every other user (worker, customer, unassigned) is
- * granted the {@code worker} role on approval.
+ * <p>The requested role follows the requester's current profile: fleet
+ * managers and drivers keep their role; everyone else is granted the
+ * {@code worker} role. Administrator access uses a separate request workflow.
  */
 @Service
 @RequiredArgsConstructor
@@ -98,6 +97,12 @@ public class CompanyAccessRequestService {
             throw new IllegalArgumentException(
                     "You already have access to this company.");
         }
+        var existingRoles = NexxauthRoles.fromNexxauthNames(nexxauthRoles);
+        if (existingRoles.contains(CompanyUserRole.ADMIN)
+                || existingRoles.contains(CompanyUserRole.SUPERVISOR)) {
+            throw new IllegalArgumentException(
+                    "Company administrator requests must use the separate administrator access workflow.");
+        }
 
         CompanyAccessRequest request = new CompanyAccessRequest();
         request.setNexxauthUserId(nexxauthUserId);
@@ -133,6 +138,7 @@ public class CompanyAccessRequestService {
     @Transactional(readOnly = true)
     public List<CompanyAccessRequestResponseDto> getAllRequestsByCompany(Long companyId) {
         return requestRepository.findByCompanyIdOrderByCreatedAtDesc(companyId).stream()
+                .filter(this::isRegularCompanyRequest)
                 .map(CompanyAccessRequestResponseDto::fromEntity)
                 .toList();
     }
@@ -143,6 +149,7 @@ public class CompanyAccessRequestService {
     @Transactional(readOnly = true)
     public List<CompanyAccessRequestResponseDto> getPendingRequestsByCompany(Long companyId) {
         return requestRepository.findByCompanyIdAndStatus(companyId, CompanyAccessRequestStatus.PENDING).stream()
+                .filter(this::isRegularCompanyRequest)
                 .map(CompanyAccessRequestResponseDto::fromEntity)
                 .toList();
     }
@@ -179,6 +186,10 @@ public class CompanyAccessRequestService {
         // 1. Assign the requested role in Nexxauth (replaces existing roles such as "customer").
         CompanyUserRole effectiveRole = request.getRole() != null
                 ? request.getRole() : REQUESTED_ROLE;
+        if (effectiveRole == CompanyUserRole.ADMIN || effectiveRole == CompanyUserRole.SUPERVISOR) {
+            throw new IllegalArgumentException(
+                    "Administrator access must be approved through the separate company administrator request.");
+        }
         String roleNexxauthName = NexxauthRoles.toNexxauthName(effectiveRole);
         if (roleNexxauthName == null) {
             roleNexxauthName = "worker";
@@ -268,24 +279,15 @@ public class CompanyAccessRequestService {
      * Derives the role requested through the company access workflow from the
      * requester's current Nexxauth role names:
      * <ul>
-     *   <li>staff (admin / supervisor / fleet_manager) keep their highest staff role;</li>
+     *   <li>fleet managers keep the FLEET_MANAGER role;</li>
      *   <li>a driver keeps the DRIVER role (drivers join through the driver app);</li>
-     *   <li>everyone else (worker, customer, unassigned) is granted the WORKER role.</li>
+     *   <li>all other users, including global admins and supervisors, request WORKER access.</li>
      * </ul>
      */
     private CompanyUserRole resolveRequestedRole(List<String> nexxauthRoles) {
         var mapped = NexxauthRoles.fromNexxauthNames(nexxauthRoles);
-        CompanyUserRole highest = null;
         for (CompanyUserRole role : mapped) {
-            if (role == CompanyUserRole.ADMIN || role == CompanyUserRole.SUPERVISOR
-                    || role == CompanyUserRole.FLEET_MANAGER) {
-                if (highest == null || precedence(role) > precedence(highest)) {
-                    highest = role;
-                }
-            }
-        }
-        if (highest != null) {
-            return highest;
+            if (role == CompanyUserRole.FLEET_MANAGER) return role;
         }
         if (mapped.contains(CompanyUserRole.DRIVER)) {
             return CompanyUserRole.DRIVER;
@@ -293,13 +295,9 @@ public class CompanyAccessRequestService {
         return REQUESTED_ROLE;
     }
 
-    private static int precedence(CompanyUserRole role) {
-        return switch (role) {
-            case DRIVER -> 1;
-            case WORKER -> 2;
-            case FLEET_MANAGER -> 3;
-            case SUPERVISOR -> 4;
-            case ADMIN -> 5;
-        };
+    private boolean isRegularCompanyRequest(CompanyAccessRequest request) {
+        return request.getRole() != CompanyUserRole.ADMIN
+                && request.getRole() != CompanyUserRole.SUPERVISOR;
     }
+
 }

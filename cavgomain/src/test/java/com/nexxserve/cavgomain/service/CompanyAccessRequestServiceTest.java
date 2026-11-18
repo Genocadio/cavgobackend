@@ -165,6 +165,25 @@ class CompanyAccessRequestServiceTest {
     }
 
     @Test
+    void createRequestDoesNotPutAdminOrSupervisorInFleetManagerQueue() {
+        Long userId = 100L;
+        Company company = new Company();
+        company.setId(1L);
+        company.setCompanyCode("COMP1");
+
+        when(companyRepository.findByCompanyCode("COMP1")).thenReturn(Optional.of(company));
+        when(requestRepository.existsByNexxauthUserIdAndStatus(userId, CompanyAccessRequestStatus.PENDING))
+                .thenReturn(false);
+        when(driverRequestRepository.findByNexxauthUserIdAndStatus(userId, DriverRequestStatus.PENDING))
+                .thenReturn(Optional.empty());
+        when(companyUserRepository.findById(userId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class, () -> companyAccessRequestService.createRequest(
+                "COMP1", userId, "Admin", "User", "admin@example.com", null, List.of("admin")));
+        verify(requestRepository, never()).save(any(CompanyAccessRequest.class));
+    }
+
+    @Test
     void createRequest_blocksDuplicatePendingRequest() {
         Long userId = 100L;
 
