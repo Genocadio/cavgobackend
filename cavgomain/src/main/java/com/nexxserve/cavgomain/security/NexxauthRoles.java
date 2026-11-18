@@ -15,9 +15,10 @@ import java.util.Map;
  * and global roles — the org-access JWT carries role names and the backend
  * maps those names back to the local enum.
  *
- * <p>The Nexxauth organisation must provision roles named exactly like the local
- * enum names lower-cased ({@code admin}, {@code driver}, {@code fleet_manager},
- * {@code supervisor}). Any unknown role name from the token is ignored.
+ * <p>The Nexxauth organisation must provision roles matching the local enum
+ * names case-insensitively ({@code ADMIN}, {@code DRIVER}, {@code FLEET_MANAGER},
+ * {@code SUPERVISOR}, {@code WORKER}). Any unknown role name from the token is
+ * ignored.
  */
 public final class NexxauthRoles {
 

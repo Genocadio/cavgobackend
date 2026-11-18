@@ -14,7 +14,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Client for the Nexxauth organisation API, authenticated as the SERVER client
@@ -66,10 +69,28 @@ public class NexxauthClient {
         return parseUser(json);
     }
 
+    /**
+     * Replaces a user's organisation roles in Nexxauth. Nexxauth's PATCH
+     * endpoint accepts numeric {@code roleIds}, not role names; an unknown
+     * field is silently ignored, which left stale roles in place. Resolve the
+     * provisioned role names to their IDs first so the update actually takes
+     * effect.
+     */
     public void updateUserRoles(Long userId, List<String> roles) {
+        Map<String, Long> roleIdsByName = new HashMap<>();
+        for (OrgRole role : listRoles()) {
+            roleIdsByName.put(role.name().toUpperCase(Locale.ROOT), role.id());
+        }
+
         ObjectNode body = objectMapper.createObjectNode();
-        ArrayNode rolesNode = body.putArray("roles");
-        roles.forEach(rolesNode::add);
+        ArrayNode roleIdsNode = body.putArray("roleIds");
+        for (String role : roles) {
+            Long roleId = roleIdsByName.get(role.toUpperCase(Locale.ROOT));
+            if (roleId == null) {
+                throw new IllegalArgumentException("Nexxauth role not provisioned: " + role);
+            }
+            roleIdsNode.add(roleId);
+        }
         request("PATCH", orgBaseUrl + "/users/" + userId, body);
     }
 
