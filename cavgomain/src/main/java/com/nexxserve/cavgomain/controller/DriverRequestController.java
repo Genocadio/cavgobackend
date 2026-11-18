@@ -2,6 +2,7 @@ package com.nexxserve.cavgomain.controller;
 
 import com.nexxserve.cavgomain.dto.request.DriverRequestCreateDto;
 import com.nexxserve.cavgomain.dto.response.DriverRequestResponseDto;
+import com.nexxserve.cavgomain.security.CompanyScopeGuard;
 import com.nexxserve.cavgomain.service.DriverRequestService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +42,7 @@ public class DriverRequestController {
     private static final Logger log = LoggerFactory.getLogger(DriverRequestController.class);
     private final DriverRequestService driverRequestService;
     private final com.nexxserve.cavgomain.security.NexxauthClient nexxauthClient;
+    private final CompanyScopeGuard companyScopeGuard;
 
     /**
      * Returns the authenticated user's latest driver request status.
@@ -118,6 +120,7 @@ public class DriverRequestController {
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public ResponseEntity<List<DriverRequestResponseDto>> getCompanyRequests(
             @PathVariable Long companyId) {
+        companyScopeGuard.requireCompanyScope(companyId);
         var requests = driverRequestService.getAllRequestsByCompany(companyId);
         return ResponseEntity.ok(requests);
     }
@@ -129,6 +132,7 @@ public class DriverRequestController {
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public ResponseEntity<List<DriverRequestResponseDto>> getPendingCompanyRequests(
             @PathVariable Long companyId) {
+        companyScopeGuard.requireCompanyScope(companyId);
         var requests = driverRequestService.getPendingRequestsByCompany(companyId);
         return ResponseEntity.ok(requests);
     }
@@ -139,6 +143,7 @@ public class DriverRequestController {
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public ResponseEntity<DriverRequestResponseDto> getRequest(@PathVariable Long id) {
+        companyScopeGuard.requireCompanyScopeForDriverRequest(id);
         try {
             var response = driverRequestService.getRequestById(id);
             return ResponseEntity.ok(response);
@@ -155,6 +160,7 @@ public class DriverRequestController {
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public ResponseEntity<DriverRequestResponseDto> approveRequest(@PathVariable Long id) {
+        companyScopeGuard.requireCompanyScopeForDriverRequest(id);
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
         try {
@@ -174,6 +180,7 @@ public class DriverRequestController {
     public ResponseEntity<DriverRequestResponseDto> rejectRequest(
             @PathVariable Long id,
             @RequestBody(required = false) Map<String, String> body) {
+        companyScopeGuard.requireCompanyScopeForDriverRequest(id);
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
         String reason = body != null ? body.get("reason") : null;

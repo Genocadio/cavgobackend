@@ -9,6 +9,7 @@ import com.nexxserve.cavgomain.dto.response.VehicleLocationResponseDto;
 import com.nexxserve.cavgomain.dto.response.VehicleResponseDto;
 import com.nexxserve.cavgomain.dto.response.VehicleSettingsResponseDto;
 import com.nexxserve.cavgomain.enums.VehicleStatus;
+import com.nexxserve.cavgomain.security.CompanyScopeGuard;
 import com.nexxserve.cavgomain.service.VehicleService;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,11 +28,13 @@ import java.util.List;
 public class VehicleController {
 
     private final VehicleService vehicleService;
+    private final CompanyScopeGuard companyScopeGuard;
 
     @PostMapping
     public ResponseEntity<VehicleResponseDto> createVehicle(
             @Valid @RequestBody VehicleRequestDto vehicle,
             HttpServletRequest httpRequest) {
+        requireVehicleCompanyScope(vehicle.getCompanyCode());
         var authUserId = (Long) httpRequest.getAttribute("nexxauthUserId");
         var result = vehicleService.createVehicleWithPassword(vehicle, authUserId);
         VehicleResponseDto body = result.response();
@@ -41,22 +44,27 @@ public class VehicleController {
 
     @GetMapping("/driver/{id}")
     public VehicleResponseDto getVehicleByDriver(@PathVariable Long id) {
+        companyScopeGuard.requireCompanyScopeForStaff(id);
         return vehicleService.getByDriver(id);
     }
 
     @GetMapping("/{id}")
     public VehicleResponseDto getVehicle(@PathVariable Long id) {
+        companyScopeGuard.requireCompanyScopeForVehicle(id);
         return vehicleService.getVehicleResponse(id);
     }
 
     @GetMapping
     public List<VehicleResponseDto> getAllVehicles(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit) {
-        return vehicleService.getAllVehicles(timeLimit);
+        Long companyId = companyScopeGuard.requireGlobalOrDefaultCompanyScope();
+        return vehicleService.getAllVehicles(timeLimit, companyId);
     }
 
     @PutMapping("/{id}")
     public VehicleResponseDto updateVehicle(@PathVariable Long id, @RequestBody VehicleRequestDto vehicle) {
+        companyScopeGuard.requireCompanyScopeForVehicle(id);
+        requireVehicleCompanyScope(vehicle.getCompanyCode());
         return vehicleService.updateVehicle(id, vehicle);
     }
 
@@ -69,6 +77,7 @@ public class VehicleController {
     @PutMapping("/{id}/status")
     public VehicleResponseDto updateVehicleStatus(@PathVariable Long id,
                                                   @RequestParam("status") String status) {
+        companyScopeGuard.requireCompanyScopeForVehicle(id);
         return vehicleService.updateVehicleStatus(id, status);
     }
 
@@ -81,11 +90,13 @@ public class VehicleController {
             @RequestParam(required = false) String driverName,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        companyScopeGuard.requireCompanyScope(companyId);
         return vehicleService.getCompanyVehiclesPaged(companyId, timeLimit, plate, status, driverName, page, size);
     }
 
     @DeleteMapping("/{id}")
     public void deleteVehicle(@PathVariable Long id) {
+        companyScopeGuard.requireCompanyScopeForVehicle(id);
         vehicleService.deleteVehicle(id);
     }
 
@@ -94,11 +105,15 @@ public class VehicleController {
             @PathVariable Long vehicleId,
             @PathVariable Long driverId,
             @RequestParam(required = false) String notes) {
+        companyScopeGuard.requireCompanyScopeForVehicle(vehicleId);
+        companyScopeGuard.requireCompanyScopeForStaff(driverId);
         return vehicleService.assignVehicleToDriver(vehicleId, driverId, notes);
     }
 
     @PostMapping("/assign")
     public VehicleAssignmentResponseDto assignVehicleToDriverWithDto(@Valid @RequestBody VehicleAssignmentRequestDto assignmentDto) {
+        companyScopeGuard.requireCompanyScopeForVehicle(assignmentDto.getVehicleId());
+        companyScopeGuard.requireCompanyScopeForStaff(assignmentDto.getDriverId());
         return vehicleService.assignVehicleToDriverWithDto(assignmentDto);
     }
 
@@ -109,28 +124,35 @@ public class VehicleController {
 
     @PostMapping("/{licensePlate}/password/reset")
     public ResponseEntity<String> resetVehiclePassword(@PathVariable String licensePlate) {
+        companyScopeGuard.requireCompanyScopeForVehiclePlate(licensePlate);
         String newPassword = vehicleService.regenerateVehiclePassword(licensePlate);
         return ResponseEntity.ok(newPassword);
     }
 
     @DeleteMapping("/{vehicleId}/unassign")
     public VehicleAssignmentResponseDto unassignVehicle(@PathVariable Long vehicleId) {
+        companyScopeGuard.requireCompanyScopeForVehicle(vehicleId);
         return vehicleService.unassignVehicle(vehicleId);
     }
 
     @PutMapping("/{vehicleId}/swap/{newDriverId}")
     public VehicleAssignmentResponseDto swapAssignment(@PathVariable Long vehicleId, @PathVariable Long newDriverId) {
+        companyScopeGuard.requireCompanyScopeForVehicle(vehicleId);
+        companyScopeGuard.requireCompanyScopeForStaff(newDriverId);
         return vehicleService.swapAssignment(vehicleId, newDriverId);
     }
 
     @PutMapping("/driver/{currentDriverId}/swap/{newDriverId}")
     public VehicleAssignmentResponseDto swapDriverAssignment(@PathVariable Long currentDriverId, @PathVariable Long newDriverId) {
+        companyScopeGuard.requireCompanyScopeForStaff(currentDriverId);
+        companyScopeGuard.requireCompanyScopeForStaff(newDriverId);
         return vehicleService.swapDriverAssignment(currentDriverId, newDriverId);
     }
 
     // Vehicle Settings Endpoints
     @GetMapping("/{id}/settings")
     public VehicleSettingsResponseDto getVehicleSettings(@PathVariable Long id) {
+        companyScopeGuard.requireCompanyScopeForVehicle(id);
         return vehicleService.getVehicleSettings(id);
     }
 
@@ -138,6 +160,7 @@ public class VehicleController {
     public VehicleSettingsResponseDto updateVehicleSettings(
             @PathVariable Long id,
             @Valid @RequestBody VehicleSettingsUpdateDto settingsDto) {
+        companyScopeGuard.requireCompanyScopeForVehicle(id);
         return vehicleService.updateVehicleSettings(id, settingsDto);
     }
 
@@ -146,11 +169,26 @@ public class VehicleController {
     public List<VehicleLocationResponseDto> getVehicleLocations(
             @PathVariable Long id,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime since) {
+        companyScopeGuard.requireCompanyScopeForVehicle(id);
         return vehicleService.getVehicleLocations(id, since);
     }
 
     @GetMapping("/{id}/location/latest")
     public VehicleLocationResponseDto getLatestVehicleLocation(@PathVariable Long id) {
+        companyScopeGuard.requireCompanyScopeForVehicle(id);
         return vehicleService.getLatestVehicleLocation(id);
+    }
+
+    /**
+     * A vehicle request may omit the company code, in which case the service
+     * infers the company from the authenticated user. Either way the caller
+     * must be scoped to the target company.
+     */
+    private void requireVehicleCompanyScope(String companyCode) {
+        if (companyCode == null || companyCode.isBlank()) {
+            companyScopeGuard.requireCurrentCompanyScope();
+        } else {
+            companyScopeGuard.requireCompanyScopeForCompanyCode(companyCode);
+        }
     }
 }

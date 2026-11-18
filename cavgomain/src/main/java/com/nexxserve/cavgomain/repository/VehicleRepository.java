@@ -35,6 +35,12 @@ public interface VehicleRepository extends JpaRepository<Vehicle, Long> {
     @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va WHERE v.company.id = :companyId")
     List<Vehicle> findByCompanyIdWithActiveAssignments(@Param("companyId") Long companyId);
 
+    @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va " +
+           "WHERE v.company.id = :companyId " +
+           "AND (v.createdAt >= :timeLimit OR v.updatedAt >= :timeLimit)")
+    List<Vehicle> findByCompanyIdWithActiveAssignmentsAfterTime(@Param("companyId") Long companyId,
+                                                                @Param("timeLimit") LocalDateTime timeLimit);
+
     @Query("SELECT DISTINCT v FROM Vehicle v LEFT JOIN FETCH v.assignments va")
     List<Vehicle> findAllWithActiveAssignments();
 

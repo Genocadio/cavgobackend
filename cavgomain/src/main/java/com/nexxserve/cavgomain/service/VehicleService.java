@@ -184,13 +184,18 @@ public class VehicleService {
     }
 
     public List<VehicleResponseDto> getAllVehicles(LocalDateTime timeLimit) {
-        List<Vehicle> vehicles;
-        if (timeLimit != null) {
-            vehicles = vehicleRepository.findAllWithActiveAssignmentsAfterTime(timeLimit);
-        } else {
-            // Use a very old date to get all records
-            vehicles = vehicleRepository.findAllWithActiveAssignmentsAfterTime(LocalDateTime.of(1970, 1, 1, 0, 0));
-        }
+        return getAllVehicles(timeLimit, null);
+    }
+
+    /**
+     * Company-scoped variant used by company endpoints. A null company id keeps
+     * the legacy global behaviour for ADMIN/SUPERVISOR callers.
+     */
+    public List<VehicleResponseDto> getAllVehicles(LocalDateTime timeLimit, Long companyId) {
+        var cutoff = timeLimit != null ? timeLimit : LocalDateTime.of(1970, 1, 1, 0, 0);
+        List<Vehicle> vehicles = companyId == null
+                ? vehicleRepository.findAllWithActiveAssignmentsAfterTime(cutoff)
+                : vehicleRepository.findByCompanyIdWithActiveAssignmentsAfterTime(companyId, cutoff);
         return vehicles.stream()
                 .sorted(Comparator.comparingInt((Vehicle v) -> v.getStatus() == VehicleStatus.OCCUPIED ? 0 : 1)
                         .thenComparing(Vehicle::getId, Comparator.reverseOrder()))

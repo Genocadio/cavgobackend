@@ -29,6 +29,9 @@ public interface CompanyUserRepository extends JpaRepository<CompanyUser, Long> 
     @Query("SELECT cu FROM CompanyUser cu WHERE cu.licenseExpiry < CURRENT_DATE")
     List<CompanyUser> findUsersWithExpiredLicense();
 
+    @Query("SELECT cu FROM CompanyUser cu WHERE cu.licenseExpiry < CURRENT_DATE AND cu.company.id = :companyId")
+    List<CompanyUser> findUsersWithExpiredLicenseByCompanyId(@Param("companyId") Long companyId);
+
     @Query("SELECT cu FROM CompanyUser cu WHERE cu.company.id = :companyId " +
            "AND (cu.createdAt >= :timeLimit OR cu.updatedAt >= :timeLimit)")
     List<CompanyUser> findByCompanyIdAfterTime(@Param("companyId") Long companyId, @Param("timeLimit") LocalDateTime timeLimit);

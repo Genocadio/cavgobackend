@@ -2,6 +2,7 @@ package com.nexxserve.cavgomain.controller;
 
 import com.nexxserve.cavgomain.dto.request.CompanyAccessRequestCreateDto;
 import com.nexxserve.cavgomain.dto.response.CompanyAccessRequestResponseDto;
+import com.nexxserve.cavgomain.security.CompanyScopeGuard;
 import com.nexxserve.cavgomain.service.CompanyAccessRequestService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,7 @@ public class CompanyAccessRequestController {
 
     private final CompanyAccessRequestService companyAccessRequestService;
     private final com.nexxserve.cavgomain.security.NexxauthClient nexxauthClient;
+    private final CompanyScopeGuard companyScopeGuard;
 
     /**
      * Returns the authenticated user's latest company access request status.
@@ -116,6 +118,7 @@ public class CompanyAccessRequestController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<CompanyAccessRequestResponseDto>> getCompanyRequests(
             @PathVariable Long companyId) {
+        companyScopeGuard.requireCompanyScope(companyId);
         var requests = companyAccessRequestService.getAllRequestsByCompany(companyId);
         return ResponseEntity.ok(requests);
     }
@@ -127,6 +130,7 @@ public class CompanyAccessRequestController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<CompanyAccessRequestResponseDto>> getPendingCompanyRequests(
             @PathVariable Long companyId) {
+        companyScopeGuard.requireCompanyScope(companyId);
         var requests = companyAccessRequestService.getPendingRequestsByCompany(companyId);
         return ResponseEntity.ok(requests);
     }
@@ -140,6 +144,7 @@ public class CompanyAccessRequestController {
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public ResponseEntity<CompanyAccessRequestResponseDto> approveRequest(@PathVariable Long id) {
+        companyScopeGuard.requireCompanyScopeForCompanyAccessRequest(id);
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
         try {
@@ -159,6 +164,7 @@ public class CompanyAccessRequestController {
     public ResponseEntity<CompanyAccessRequestResponseDto> rejectRequest(
             @PathVariable Long id,
             @RequestBody(required = false) Map<String, String> body) {
+        companyScopeGuard.requireCompanyScopeForCompanyAccessRequest(id);
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var userId = (Long) request.getAttribute("nexxauthUserId");
         String reason = body != null ? body.get("reason") : null;

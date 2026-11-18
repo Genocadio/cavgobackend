@@ -2,6 +2,7 @@ package com.nexxserve.cavgomain.controller;
 
 import com.nexxserve.cavgomain.dto.request.CompanyUserRequestDto;
 import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
+import com.nexxserve.cavgomain.security.CompanyScopeGuard;
 import com.nexxserve.cavgomain.service.CompanyUserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ import java.util.List;
 public class CompanyUserController {
 
     private final CompanyUserService companyUserService;
+    private final CompanyScopeGuard companyScopeGuard;
 
     /**
      * Staff-only: creating a staff record writes a role (a licence number makes
@@ -31,12 +33,15 @@ public class CompanyUserController {
     @PostMapping
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public CompanyUserResponseDto createCompanyUser(@Valid @RequestBody CompanyUserRequestDto user) {
+        companyScopeGuard.requireCompanyScopeForCompanyCode(user.getCompanyCode());
         return companyUserService.createCompanyUser(user);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public CompanyUserResponseDto updateCompanyUser(@PathVariable Long id, @Valid @RequestBody CompanyUserRequestDto user) {
+        companyScopeGuard.requireCompanyScopeForStaff(id);
+        companyScopeGuard.requireCompanyScopeForCompanyCode(user.getCompanyCode());
         return companyUserService.updateCompanyUser(id, user);
     }
 
@@ -49,6 +54,8 @@ public class CompanyUserController {
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public ResponseEntity<CompanyUserResponseDto> assignCompanyToUser(
             @PathVariable Long id, @PathVariable Long companyId) {
+        companyScopeGuard.requireCompanyScopeForStaff(id);
+        companyScopeGuard.requireCompanyScope(companyId);
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         var currentUserId = (Long) request.getAttribute("nexxauthUserId");
         if (currentUserId != null && currentUserId.equals(id)) {
@@ -82,6 +89,7 @@ public class CompanyUserController {
     @PutMapping("/{id}/office/{officeId}")
     public CompanyUserResponseDto assignOffice(
             @PathVariable Long id, @PathVariable Long officeId) {
+        companyScopeGuard.requireCompanyScopeForStaff(id);
         return companyUserService.assignOfficeToUser(id, officeId);
     }
 
@@ -89,6 +97,7 @@ public class CompanyUserController {
 
     @GetMapping("/{id}")
     public CompanyUserResponseDto getCompanyUser(@PathVariable Long id) {
+        companyScopeGuard.requireCompanyScopeForStaff(id);
         return companyUserService.findById(id);
     }
 
@@ -96,6 +105,7 @@ public class CompanyUserController {
     public List<CompanyUserResponseDto> getByCompanyId(
             @PathVariable Long companyId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime timeLimit) {
+        companyScopeGuard.requireCompanyScope(companyId);
         return companyUserService.findByCompanyId(companyId, timeLimit);
     }
 
@@ -106,17 +116,20 @@ public class CompanyUserController {
             @RequestParam(required = false) String query,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        companyScopeGuard.requireCompanyScope(companyId);
         return companyUserService.findDriversByCompanyPaged(companyId, timeLimit, query, page, size);
     }
 
     @GetMapping("/expired-licenses")
     public List<CompanyUserResponseDto> getUsersWithExpiredLicense() {
-        return companyUserService.findUsersWithExpiredLicense();
+        Long companyId = companyScopeGuard.requireGlobalOrDefaultCompanyScope();
+        return companyUserService.findUsersWithExpiredLicense(companyId);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
     public void deleteCompanyUser(@PathVariable Long id) {
+        companyScopeGuard.requireCompanyScopeForStaff(id);
         companyUserService.deleteCompanyUser(id);
     }
 }

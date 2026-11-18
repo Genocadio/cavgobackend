@@ -286,7 +286,19 @@ public class CompanyUserService {
 
     @Transactional(readOnly = true)
     public List<CompanyUserResponseDto> findUsersWithExpiredLicense() {
-        return companyUserRepository.findUsersWithExpiredLicense().stream()
+        return findUsersWithExpiredLicense(null);
+    }
+
+    /**
+     * Company-scoped variant used by company endpoints. A null company id keeps
+     * the legacy global behaviour for ADMIN/SUPERVISOR callers.
+     */
+    @Transactional(readOnly = true)
+    public List<CompanyUserResponseDto> findUsersWithExpiredLicense(Long companyId) {
+        var users = companyId == null
+                ? companyUserRepository.findUsersWithExpiredLicense()
+                : companyUserRepository.findUsersWithExpiredLicenseByCompanyId(companyId);
+        return users.stream()
                 .map(user -> {
                     CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(user);
                     
