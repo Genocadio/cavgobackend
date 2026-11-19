@@ -15,6 +15,10 @@ import * as db from "../db";
  *
  * Fail closed: if no public key is configured, or the token is missing/invalid,
  * the request is unauthenticated and every resolver guard rejects it.
+ *
+ * Authorization: ADMIN and SUPER_ADMIN are both accepted as admins. An ordinary
+ * ADMIN is still confined to the company resolved from `/main/staff/me`; only a
+ * SUPER_ADMIN (which belongs to no company) is exempt from company scoping.
  */
 
 export interface AuthContext {
@@ -22,7 +26,10 @@ export interface AuthContext {
   userId: string | null;
   roles: string[];
   companyId: string | null;
+  /** ADMIN or SUPER_ADMIN — may use admin-only guards. */
   isAdmin: boolean;
+  /** SUPER_ADMIN only — the sole role exempt from company scoping. */
+  isSuperAdmin: boolean;
 }
 
 const ANONYMOUS: AuthContext = {
@@ -31,6 +38,7 @@ const ANONYMOUS: AuthContext = {
   roles: [],
   companyId: null,
   isAdmin: false,
+  isSuperAdmin: false,
 };
 
 interface JwtClaims {
@@ -149,6 +157,7 @@ export async function buildAuthContext(authorizationHeader: string | undefined):
       roles,
       companyId,
       isAdmin: roles.includes("ADMIN") || roles.includes("SUPER_ADMIN"),
+      isSuperAdmin: roles.includes("SUPER_ADMIN"),
     };
   } catch (error) {
     console.warn("[AUTH] Rejected token:", error instanceof Error ? error.message : String(error));
@@ -167,6 +176,7 @@ export function requireAuth(ctx?: AuthContext): AuthContext {
   return ctx;
 }
 
+/** Both ADMIN and SUPER_ADMIN pass; company scoping is enforced separately. */
 export function requireAdmin(ctx?: AuthContext): AuthContext {
   const auth = requireAuth(ctx);
   if (!auth.isAdmin) {
@@ -175,10 +185,14 @@ export function requireAdmin(ctx?: AuthContext): AuthContext {
   return auth;
 }
 
-/** Caller must be an admin or belong to the requested company. */
+/**
+ * SUPER_ADMIN is globally scoped. Every other caller — including an ordinary
+ * ADMIN — must belong to the requested company. An admin with no local company
+ * membership therefore fails closed rather than seeing every company.
+ */
 export function assertCompanyAccess(ctx: AuthContext | undefined, companyId: string | null | undefined): void {
   const auth = requireAuth(ctx);
-  if (auth.isAdmin) {
+  if (auth.isSuperAdmin) {
     return;
   }
   if (!companyId || auth.companyId == null || String(companyId) !== String(auth.companyId)) {
@@ -189,7 +203,7 @@ export function assertCompanyAccess(ctx: AuthContext | undefined, companyId: str
 /** Resource-level check: resolve the car's company from the local store. */
 export async function assertCarAccess(ctx: AuthContext | undefined, carId: string): Promise<void> {
   const auth = requireAuth(ctx);
-  if (auth.isAdmin) {
+  if (auth.isSuperAdmin) {
     return;
   }
   const car = await db.carRepository.getCarById(carId);
@@ -199,7 +213,7 @@ export async function assertCarAccess(ctx: AuthContext | undefined, carId: strin
 /** Resource-level check for driver-scoped queries. */
 export async function assertDriverAccess(ctx: AuthContext | undefined, driverId: string): Promise<void> {
   const auth = requireAuth(ctx);
-  if (auth.isAdmin) {
+  if (auth.isSuperAdmin) {
     return;
   }
   const driver = await db.driverRepository.getDriverById(driverId);
@@ -209,7 +223,7 @@ export async function assertDriverAccess(ctx: AuthContext | undefined, driverId:
 /** Resource-level check: a trip inherits its company from the assigned car. */
 export async function assertTripAccess(ctx: AuthContext | undefined, tripId: string): Promise<void> {
   const auth = requireAuth(ctx);
-  if (auth.isAdmin) {
+  if (auth.isSuperAdmin) {
     return;
   }
   const trip = await db.tripRepository.getTripById(tripId);
