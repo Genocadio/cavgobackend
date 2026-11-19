@@ -122,7 +122,10 @@ export interface PerDestinationMetrics{
 export interface TripMetrics{
     tripId: string;
     companyId: string;
+    /** Passenger fare revenue from qualifying bookings. */
     totalFare: number;
+    /** Reserved for package delivery fees; no ledger exists yet. */
+    packageDeliveryRevenue: number;
     startedAt: number | null;
     completedAt: number | null;
     perDestinationMetrics: PerDestinationMetrics[];
@@ -133,16 +136,22 @@ export interface TripMetrics{
 
 export interface DriverMetrics{
     driverId: string;
+    /** Passenger fare revenue only; package fees are reported separately. */
     totalRevenue: number;
     totalTrips: number;
     totalDistance: number;
+    /** Reserved for package delivery fees; no ledger exists yet. */
+    packageDeliveryRevenue: number;
 }
 
 export interface CarMetrics{
     carId: string;
+    /** Passenger fare revenue only; package fees are reported separately. */
     totalRevenue: number;
     totalTrips: number;
     totalDistance: number;
+    /** Reserved for package delivery fees; no ledger exists yet. */
+    packageDeliveryRevenue: number;
 }
 
 export type MetricsPeriod = "today" | "custom";
@@ -176,9 +185,11 @@ export interface CompanyPeriodMetrics {
   cancelledTrips: number;
   inProgressTrips: number;
   scheduledTrips: number;
-  // Revenue
+  // Revenue (passenger fares from bookings)
   totalRevenue: number;
   revenueFromCompletedTrips: number;
+  /** Reserved for package delivery fees; no ledger exists yet. */
+  packageDeliveryRevenue: number;
   // Travel metrics
   totalDistance: number;
   totalDuration: number;
@@ -682,4 +693,71 @@ export interface TripSnapshotPublish {
   capacity: SnapshotCapacity;
   locations: SnapshotLocation[];
   summary: SnapshotSummary;
+}
+
+// ---------------------------------------------------------------------------
+// Package projection (pushed from ikuriyebackend)
+// ---------------------------------------------------------------------------
+
+export type PackageStatus =
+  | "CREATED"
+  | "ACCEPTED"
+  | "PICKED_UP"
+  | "IN_TRANSIT"
+  | "PENDING_CONFIRMATION"
+  | "DELIVERED"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "ORIGIN_OFFICE"
+  | "ASSIGNED_DRIVER"
+  | "DESTINATION_OFFICE"
+  | "READY_FOR_COLLECTION";
+
+export type PackageOrigin = "PRIVATE" | "FLEET";
+export type DeliveryType = "OPEN" | "FIXED_ROUTE";
+
+export interface PackageCarrierLeg {
+  id: string;
+  packageId: string;
+  driverId: string;
+  tripId: string | null;
+  companyId: string | null;
+  companyRefId: string | null;
+  vehicleId: string | null;
+  linkedAt: number;
+  fromStatus: string | null;
+  toStatus: string | null;
+}
+
+export interface CompanyPackage {
+  id: string;
+  trackingCode: string;
+  deliveryType: DeliveryType;
+  packageOrigin: PackageOrigin;
+  status: PackageStatus;
+  companyId: string | null;
+  companyRefId: string | null;
+  tripId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  carrierLegs: PackageCarrierLeg[];
+}
+
+export interface PackageActivityGroup {
+  tripId: string | null;
+  carId: string | null;
+  plate: string | null;
+  driverId: string | null;
+  driverName: string | null;
+  packageCount: number;
+}
+
+export interface CompanyPackageActivity {
+  companyId: string;
+  startTime: number;
+  endTime: number;
+  totalPackages: number;
+  inProgressPackages: number;
+  packages: CompanyPackage[];
+  groups: PackageActivityGroup[];
 }

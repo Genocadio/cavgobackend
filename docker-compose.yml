@@ -318,6 +318,9 @@ services:
       NEXXAUTH_CLIENT_ID: ${NEXXAUTH_CLIENT_ID:-cli_vrwPaVOqk-EJHFft9o1Mq1g1W3h_KTCv6aNw6IlVit4}
       NEXXAUTH_CLIENT_TOKEN: ${NEXXAUTH_CLIENT_TOKEN:-nx_A-PoujyVQeOc-M9IWCPmRYtJ8QKIByUVZqHVm66By2M}
       CAVGOMAIN_BASE_URL: http://cavgomain:${PORT_MAIN:-6060}
+      # Package snapshot pushes for company-scoped reporting in adminaggregate.
+      AGGREGATOR_BASE_URL: http://adminaggregate:${PORT_ADMINAGGREGATE:-4000}
+      AGGREGATOR_INTERNAL_API_KEY: ${INTERNAL_API_KEY:-nx-internal-dev-change-me}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
       # File uploads: MinIO first, optional Supabase fallback, local disk last.
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-auto}

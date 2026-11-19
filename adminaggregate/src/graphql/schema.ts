@@ -1,7 +1,9 @@
 import { gql } from "graphql-tag";
 import * as db from "../db";
-import type { Car, Driver, Trip, Destination } from "../types";
+import type { Car, Driver, Trip, Destination, PackageStatus } from "../types";
 import { pubsub, TRIGGERS } from "../services/pubsub";
+import { resolveDateRange } from "../metrics/dateRange";
+import { ACTIVE_PACKAGE_STATUSES, normalizePackageStatuses } from "../metrics/packageStatus";
 import {
   assertCarAccess,
   assertCompanyAccess,
@@ -47,6 +49,31 @@ const typeDefs = gql`
     cash
     epayment
     card
+  }
+
+  enum PackageStatus {
+    CREATED
+    ACCEPTED
+    PICKED_UP
+    IN_TRANSIT
+    PENDING_CONFIRMATION
+    DELIVERED
+    COMPLETED
+    CANCELLED
+    ORIGIN_OFFICE
+    ASSIGNED_DRIVER
+    DESTINATION_OFFICE
+    READY_FOR_COLLECTION
+  }
+
+  enum PackageOrigin {
+    PRIVATE
+    FLEET
+  }
+
+  enum DeliveryType {
+    OPEN
+    FIXED_ROUTE
   }
 
   type LatLang {
@@ -135,22 +162,30 @@ const typeDefs = gql`
 
   type DriverMetrics {
     driverId: ID!
+    """Passenger fare revenue from qualifying bookings."""
     totalRevenue: Float!
     totalTrips: Int!
     totalDistance: Float!
+    """Reserved for package delivery fees; no ledger exists yet."""
+    packageDeliveryRevenue: Float!
   }
 
   type CarMetrics {
     carId: ID!
+    """Passenger fare revenue from qualifying bookings."""
     totalRevenue: Float!
     totalTrips: Int!
     totalDistance: Float!
+    """Reserved for package delivery fees; no ledger exists yet."""
+    packageDeliveryRevenue: Float!
   }
 
   type TripMetrics {
     tripId: ID!
-  companyId: ID!
+    companyId: ID!
     totalFare: Float!
+    """Reserved for package delivery fees; no ledger exists yet."""
+    packageDeliveryRevenue: Float!
     totalDistance: Float!
     totalDuration: Float!
     startedAt: Float
@@ -203,8 +238,11 @@ const typeDefs = gql`
     cancelledTrips: Int!
     inProgressTrips: Int!
     scheduledTrips: Int!
+    """Passenger fare revenue from qualifying bookings."""
     totalRevenue: Float!
     revenueFromCompletedTrips: Float!
+    """Reserved for package delivery fees; no ledger exists yet."""
+    packageDeliveryRevenue: Float!
     totalDistance: Float!
     totalDuration: Float!
     averageTripDistance: Float!
@@ -221,6 +259,53 @@ const typeDefs = gql`
     cancelled: Int!
     in_progress: Int!
     scheduled: Int!
+  }
+
+  """Immutable snapshot of the driver/trip/vehicle at a custody handover."""
+  type PackageCarrierLeg {
+    id: ID!
+    driverId: ID!
+    tripId: ID
+    companyId: ID
+    companyRefId: ID
+    vehicleId: ID
+    linkedAt: Float!
+    fromStatus: String
+    toStatus: String
+  }
+
+  type CompanyPackage {
+    id: ID!
+    trackingCode: String!
+    deliveryType: DeliveryType!
+    packageOrigin: PackageOrigin!
+    status: PackageStatus!
+    companyId: ID
+    companyRefId: ID
+    tripId: ID
+    createdAt: Float!
+    updatedAt: Float!
+    carrierLegs: [PackageCarrierLeg!]!
+  }
+
+  """Packages handed to a driver on one trip (or an unassigned bucket)."""
+  type PackageActivityGroup {
+    tripId: ID
+    carId: ID
+    plate: String
+    driverId: ID
+    driverName: String
+    packageCount: Int!
+  }
+
+  type CompanyPackageActivity {
+    companyId: ID!
+    startTime: Float!
+    endTime: Float!
+    totalPackages: Int!
+    inProgressPackages: Int!
+    packages: [CompanyPackage!]!
+    groups: [PackageActivityGroup!]!
   }
 
   type SnapshotSeats {
@@ -275,7 +360,7 @@ const typeDefs = gql`
     driversByCompany(companyId: ID!): [Driver!]!
     getCarsByCompany(companyId: ID!, limit: Int, offset: Int): CarPage!
     getDriversByCompany(companyId: ID!): [Driver!]!
-    driverMetrics(driverId: ID!): DriverMetrics
+    driverMetrics(driverId: ID!, startDate: String, endDate: String): DriverMetrics
     carMetrics(carId: ID!, startDate: String, endDate: String): CarMetrics
     tripMetrics(tripId: ID!): TripMetrics
     companyDashboard(companyId: ID!): CompanyDashboard
@@ -283,12 +368,19 @@ const typeDefs = gql`
     tripsByCompany(companyId: ID!): [Trip!]!
     getActiveCompanyTrips(companyId: ID!): [Trip!]!
     getTripSnapshot(tripId: ID!): TripSnapshot
+    companyPackageActivity(
+      companyId: ID!
+      startDate: String
+      endDate: String
+      statuses: [PackageStatus!]
+    ): CompanyPackageActivity
   }
 
   type Subscription {
     activeCompanyTrips(companyId: ID!): [Trip!]!
     trip(tripId: ID!): Trip
     tripSnapshot(tripId: ID!): TripSnapshot
+    companyPackageUpdates(companyId: ID!): CompanyPackageActivity
   }
 `;
 
@@ -407,8 +499,15 @@ const resolvers = {
       assertCompanyAccess(ctx.auth, companyId);
       return (await db.driverRepository.getDriversByCompany(companyId)).map(wrapDriver);
     },
-    driverMetrics: async (_: unknown, { driverId }: { driverId: string }, ctx: Context) => {
+    driverMetrics: async (
+      _: unknown,
+      { driverId, startDate, endDate }: { driverId: string; startDate?: string; endDate?: string },
+      ctx: Context
+    ) => {
       await assertDriverAccess(ctx.auth, driverId);
+      if (startDate || endDate) {
+        return db.metricsRepository.getDriverMetricsByDateRange(driverId, startDate, endDate);
+      }
       return db.metricsRepository.getDriverMetrics(driverId);
     },
     carMetrics: async (
@@ -459,6 +558,24 @@ const resolvers = {
       }
 
       return db.snapshotRepository.createInitialSnapshot(trip, trip.carDriver.car.capacity);
+    },
+    companyPackageActivity: async (
+      _: unknown,
+      {
+        companyId,
+        startDate,
+        endDate,
+        statuses,
+      }: { companyId: string; startDate?: string; endDate?: string; statuses?: PackageStatus[] },
+      ctx: Context
+    ) => {
+      assertCompanyAccess(ctx.auth, companyId);
+      const requested = normalizePackageStatuses(statuses);
+      return db.packageRepository.getCompanyPackageActivity(
+        companyId,
+        resolveDateRange(startDate, endDate),
+        requested ?? ACTIVE_PACKAGE_STATUSES
+      );
     },
   },
   Subscription: {
@@ -544,6 +661,35 @@ const resolvers = {
       resolve: (payload: { tripSnapshot: any }) => {
         return payload.tripSnapshot;
       },
+    },
+    companyPackageUpdates: {
+      subscribe: async (_: unknown, { companyId }: { companyId: string }, ctx: Context) => {
+        assertCompanyAccess(ctx.auth, companyId);
+        const range = resolveDateRange();
+        const initial = await db.packageRepository.getCompanyPackageActivity(
+          companyId,
+          range,
+          ACTIVE_PACKAGE_STATUSES
+        );
+
+        const trigger = TRIGGERS.COMPANY_PACKAGES_UPDATED(companyId);
+        const asyncIterable = pubsub.asyncIterator<{ companyId: string }>([trigger]);
+
+        async function* subscriptionGenerator() {
+          yield { companyPackageUpdates: initial };
+          for await (const _payload of asyncIterable) {
+            const refreshed = await db.packageRepository.getCompanyPackageActivity(
+              companyId,
+              resolveDateRange(),
+              ACTIVE_PACKAGE_STATUSES
+            );
+            yield { companyPackageUpdates: refreshed };
+          }
+        }
+
+        return subscriptionGenerator();
+      },
+      resolve: (payload: { companyPackageUpdates: unknown }) => payload.companyPackageUpdates,
     },
   },
 };

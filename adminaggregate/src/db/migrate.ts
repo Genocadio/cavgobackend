@@ -59,6 +59,34 @@ export async function migrate(): Promise<void> {
       END $$;
     `);
 
+    await client.query(`
+      DO $$ BEGIN
+        CREATE TYPE package_status_enum AS ENUM (
+          'CREATED', 'ACCEPTED', 'PICKED_UP', 'IN_TRANSIT', 'PENDING_CONFIRMATION',
+          'DELIVERED', 'COMPLETED', 'CANCELLED', 'ORIGIN_OFFICE', 'ASSIGNED_DRIVER',
+          'DESTINATION_OFFICE', 'READY_FOR_COLLECTION'
+        );
+      EXCEPTION
+        WHEN duplicate_object THEN null;
+      END $$;
+    `);
+
+    await client.query(`
+      DO $$ BEGIN
+        CREATE TYPE package_origin_enum AS ENUM ('PRIVATE', 'FLEET');
+      EXCEPTION
+        WHEN duplicate_object THEN null;
+      END $$;
+    `);
+
+    await client.query(`
+      DO $$ BEGIN
+        CREATE TYPE delivery_type_enum AS ENUM ('OPEN', 'FIXED_ROUTE');
+      EXCEPTION
+        WHEN duplicate_object THEN null;
+      END $$;
+    `);
+
     // Create companies table
     await client.query(`
       CREATE TABLE IF NOT EXISTS companies (
@@ -277,6 +305,51 @@ export async function migrate(): Promise<void> {
         snapshot JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+    `);
+
+    // Package projection pushed from ikuriyebackend (no customer PII).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS packages (
+        id TEXT PRIMARY KEY,
+        tracking_code TEXT NOT NULL,
+        delivery_type delivery_type_enum NOT NULL,
+        package_origin package_origin_enum NOT NULL,
+        status package_status_enum NOT NULL,
+        company_id TEXT,
+        company_ref_id TEXT,
+        trip_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL,
+        synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS package_carrier_legs (
+        id TEXT PRIMARY KEY,
+        package_id TEXT NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+        driver_id TEXT NOT NULL,
+        trip_id TEXT,
+        company_id TEXT,
+        company_ref_id TEXT,
+        vehicle_id TEXT,
+        linked_at TIMESTAMPTZ NOT NULL,
+        from_status TEXT,
+        to_status TEXT
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS packages_company_id_idx ON packages(company_id);
+      CREATE INDEX IF NOT EXISTS packages_company_ref_id_idx ON packages(company_ref_id);
+      CREATE INDEX IF NOT EXISTS packages_trip_id_idx ON packages(trip_id);
+      CREATE INDEX IF NOT EXISTS packages_status_idx ON packages(status);
+      CREATE INDEX IF NOT EXISTS packages_created_at_idx ON packages(created_at);
+      CREATE INDEX IF NOT EXISTS package_carrier_legs_package_id_idx ON package_carrier_legs(package_id);
+      CREATE INDEX IF NOT EXISTS package_carrier_legs_company_id_idx ON package_carrier_legs(company_id);
+      CREATE INDEX IF NOT EXISTS package_carrier_legs_trip_id_idx ON package_carrier_legs(trip_id);
+      CREATE INDEX IF NOT EXISTS package_carrier_legs_driver_id_idx ON package_carrier_legs(driver_id);
+      CREATE INDEX IF NOT EXISTS package_carrier_legs_linked_at_idx ON package_carrier_legs(linked_at);
     `);
 
     // Alter car_locations table to make bearing and accuracy nullable (for existing tables)

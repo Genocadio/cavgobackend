@@ -11,6 +11,7 @@ import * as db from "./db";
 import { typeDefs, resolvers } from "./graphql";
 import * as syncService from "./services/syncService";
 import * as pushSyncService from "./services/pushSyncService";
+import * as packageSyncService from "./services/packageSyncService";
 import * as rabbitmq from "./services/rabbitmq";
 import * as eventHandlers from "./services/eventHandlers";
 import * as tripPolling from "./services/tripPolling";
@@ -242,6 +243,20 @@ export async function main(): Promise<void> {
     } catch (error) {
       console.error(`[PUSH SYNC] Error syncing workers for company ${companyId}:`, error);
       res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // ikuriyebackend pushes a minimal package snapshot on every lifecycle change.
+  // The snapshot carries its own company context, so there is no company path
+  // parameter here; scope is enforced on the GraphQL read side instead.
+  app.post("/internal/packages", express.json(), async (req, res) => {
+    if (!requireInternalKey(req, res)) return;
+    try {
+      const snapshot = await packageSyncService.syncPackageFromInternal(req.body);
+      res.status(200).json({ packageId: snapshot.id });
+    } catch (error) {
+      console.error("[PACKAGE SYNC] Error ingesting package snapshot:", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
     }
   });
 

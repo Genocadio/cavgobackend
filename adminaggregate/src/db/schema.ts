@@ -45,6 +45,31 @@ export const bookingStatusEnum = pgEnum("booking_status_enum", [
 ]);
 export const paymentTypeEnum = pgEnum("payment_type_enum", ["cash", "epayment", "card"]);
 
+/**
+ * Package domain mirrors the minimal projection pushed by ikuriyebackend.
+ * Customer names/phones/addresses are deliberately not stored here.
+ *
+ * Note: `companyId` is the cavgomain office UUID, while `companyRefId` is the
+ * trip-service Long id used for admin joins. Both are kept as text so a single
+ * table can hold both ID spaces without bigint/JS precision surprises.
+ */
+export const packageStatusEnum = pgEnum("package_status_enum", [
+  "CREATED",
+  "ACCEPTED",
+  "PICKED_UP",
+  "IN_TRANSIT",
+  "PENDING_CONFIRMATION",
+  "DELIVERED",
+  "COMPLETED",
+  "CANCELLED",
+  "ORIGIN_OFFICE",
+  "ASSIGNED_DRIVER",
+  "DESTINATION_OFFICE",
+  "READY_FOR_COLLECTION",
+]);
+export const packageOriginEnum = pgEnum("package_origin_enum", ["PRIVATE", "FLEET"]);
+export const deliveryTypeEnum = pgEnum("delivery_type_enum", ["OPEN", "FIXED_ROUTE"]);
+
 export const companies = pgTable("companies", {
   id: text("id").primaryKey(),
   companyName: text("company_name").notNull(),
@@ -204,5 +229,38 @@ export const carLocations = pgTable("car_locations", {
   bearing: doublePrecision("bearing"),
   accuracy: doublePrecision("accuracy"),
   timestamp: timestamp("timestamp", { withTimezone: true }).notNull(),
+});
+
+/**
+ * Minimal package projection ingested from ikuriyebackend. No FK to trips/cars/
+ * drivers because those may not exist in this store yet when a push arrives —
+ * joins are done at query time and are best-effort.
+ */
+export const packages = pgTable("packages", {
+  id: text("id").primaryKey(),
+  trackingCode: text("tracking_code").notNull(),
+  deliveryType: deliveryTypeEnum("delivery_type").notNull(),
+  packageOrigin: packageOriginEnum("package_origin").notNull(),
+  status: packageStatusEnum("status").notNull(),
+  companyId: text("company_id"),
+  companyRefId: text("company_ref_id"),
+  tripId: text("trip_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Immutable carrier snapshots, replaced wholesale on each package push. */
+export const packageCarrierLegs = pgTable("package_carrier_legs", {
+  id: text("id").primaryKey(),
+  packageId: text("package_id").notNull().references(() => packages.id, { onDelete: "cascade" }),
+  driverId: text("driver_id").notNull(),
+  tripId: text("trip_id"),
+  companyId: text("company_id"),
+  companyRefId: text("company_ref_id"),
+  vehicleId: text("vehicle_id"),
+  linkedAt: timestamp("linked_at", { withTimezone: true }).notNull(),
+  fromStatus: text("from_status"),
+  toStatus: text("to_status"),
 });
 

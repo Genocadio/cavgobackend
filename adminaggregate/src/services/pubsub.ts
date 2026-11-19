@@ -83,5 +83,6 @@ export const TRIGGERS = {
   COMPANY_TRIPS_UPDATED: (companyId: string) => `companyTrips:${companyId}`,
   TRIP_UPDATED: (tripId: string) => `trip:${tripId}`,
   TRIP_SNAPSHOT_UPDATED: (tripId: string) => `tripSnapshot:${tripId}`,
+  COMPANY_PACKAGES_UPDATED: (companyId: string) => `companyPackages:${companyId}`,
 } as const;
 

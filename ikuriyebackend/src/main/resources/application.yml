@@ -69,6 +69,13 @@ nexxauth:
 cavgomain:
   base-url: ${CAVGOMAIN_BASE_URL:}
 
+# Admin aggregator — fire-and-forget package snapshot pushes for company-scoped
+# reporting. Both values must be set or the client is disabled (no network I/O).
+# Uses the same shared secret as cavgomain's aggregator push endpoints.
+aggregator:
+  base-url: ${AGGREGATOR_BASE_URL:}
+  internal-api-key: ${AGGREGATOR_INTERNAL_API_KEY:}
+
 eureka:
   client:
     register-with-eureka: true

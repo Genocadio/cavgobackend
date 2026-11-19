@@ -53,6 +53,7 @@ import com.gocavgo.delivary.service.notification.NoticeEventMapper;
 import com.gocavgo.delivary.service.notification.NoticeService;
 import com.gocavgo.delivary.service.storage.StorageService;
 import com.gocavgo.delivary.dto.delivery.output.OfferClaimedEvent;
+import com.gocavgo.delivary.config.PackageAggregatorSyncClient;
 import com.gocavgo.delivary.service.subscription.OfferClaimedPublisher;
 import com.gocavgo.delivary.service.subscription.PackageTransferPublisher;
 import com.gocavgo.delivary.service.transfer.TransferService;
@@ -74,6 +75,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -121,6 +124,7 @@ public class PackageService {
     private final UserService userService;
     private final DeliveryMapper deliveryMapper;
     private final StorageService storageService;
+    private final PackageAggregatorSyncClient packageAggregatorSyncClient;
     private final com.gocavgo.delivary.repository.user.DriverProfileJpaRepository driverProfileRepo;
     private final com.gocavgo.delivary.repository.user.WorkerProfileJpaRepository workerProfileRepo;
 
@@ -242,6 +246,7 @@ public class PackageService {
             packageTransferPublisher.publish(response);
         }
 
+        publishPackageSnapshot(pkg);
         return response;
     }
 
@@ -333,6 +338,59 @@ public class PackageService {
                 .linkedAt(now)
                 .createdAt(now)
                 .build());
+    }
+
+    /**
+     * Publish a minimal package snapshot to adminaggregate after the current
+     * transaction commits. Building the payload before registering the callback
+     * avoids lazy-loading outside the transaction; the HTTP send itself is
+     * fire-and-forget and never fails the package mutation.
+     */
+    private void publishPackageSnapshot(PackageEntity pkg) {
+        if (!packageAggregatorSyncClient.isEnabled()) {
+            return;
+        }
+        try {
+            var legs = carrierLegRepo.findByPackageIdOrderByLinkedAtAsc(pkg.getId());
+            var snapshot = new PackageAggregatorSyncClient.PackageSnapshot(
+                    pkg.getId(),
+                    pkg.getTrackingCode(),
+                    pkg.getDeliveryType() == null ? null : pkg.getDeliveryType().name(),
+                    pkg.getPackageOrigin() == null ? null : pkg.getPackageOrigin().name(),
+                    pkg.getStatus() == null ? null : pkg.getStatus().name(),
+                    pkg.getCompanyId(),
+                    pkg.getCompanyRefId(),
+                    pkg.getTripId(),
+                    pkg.getCreatedAt(),
+                    pkg.getUpdatedAt(),
+                    legs.stream()
+                            .map(leg -> new PackageAggregatorSyncClient.CarrierLeg(
+                                    leg.getId(),
+                                    leg.getDriverId(),
+                                    leg.getTripId(),
+                                    leg.getCompanyId(),
+                                    leg.getCompanyRefId(),
+                                    leg.getVehicleId(),
+                                    leg.getLinkedAt(),
+                                    leg.getFromStatus(),
+                                    leg.getToStatus()))
+                            .toList()
+            );
+
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        packageAggregatorSyncClient.publishPackage(snapshot);
+                    }
+                });
+            } else {
+                packageAggregatorSyncClient.publishPackage(snapshot);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to prepare package snapshot for aggregator: packageId={}, error={}",
+                    pkg.getId(), e.getMessage());
+        }
     }
 
     /**
@@ -428,6 +486,7 @@ public class PackageService {
                 "Accepted by " + custodianRole.name().toLowerCase());
         saveEvent(pkg.getId(), mapStatusToEvent(notifyStatus), actorId, "Package accepted");
 
+        publishPackageSnapshot(pkg);
         return new AcceptOfferResponse(toResponse(pkg));
     }
 
@@ -756,6 +815,7 @@ public class PackageService {
         saveEvent(pkg.getId(), PackageEventType.ASSIGNED, input.assignedBy(),
                 "Driver assigned: " + input.driverId());
 
+        publishPackageSnapshot(pkg);
         return toResponse(pkg);
     }
 
@@ -805,6 +865,7 @@ public class PackageService {
         saveEvent(pkg.getId(), eventType, actorId,
                 notes != null ? notes : "Status: " + status);
 
+        publishPackageSnapshot(pkg);
         return toResponse(pkg);
     }
 
@@ -919,6 +980,7 @@ public class PackageService {
         }
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);
+        publishPackageSnapshot(pkg);
         return toResponse(pkg);
     }
 
@@ -944,6 +1006,7 @@ public class PackageService {
             pkg.setUpdatedAt(Instant.now());
             packageRepo.save(pkg);
         }
+        publishPackageSnapshot(pkg);
         return toResponse(pkg);
     }
 
