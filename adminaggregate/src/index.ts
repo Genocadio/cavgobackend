@@ -124,23 +124,27 @@ export async function main(): Promise<void> {
     },
   });
 
+  const isAllowedOrigin = (origin?: string): boolean => {
+    if (!origin) return true;
+    if (origin === "https://cavgo-company.vercel.app") return true;
+    if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:")) {
+      return true;
+    }
+    try {
+      const { protocol, hostname } = new URL(origin);
+      return protocol === "https:" && (hostname === "gocavgo.com" || hostname.endsWith(".gocavgo.com"));
+    } catch {
+      return false;
+    }
+  };
+
   // Handle WebSocket connections
   wsServer.on("connection", (socket, request) => {
     // Check CORS for WebSocket connections
     const origin = request.headers.origin;
-    if (origin) {
-      const allowedOrigins = [
-        "https://admin.gocavgo.com",
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "https://cavgo-company.vercel.app",
-        "http://127.0.0.1:3001",
-      ];
-      if (!allowedOrigins.includes(origin) && !origin.startsWith("http://localhost:") && !origin.startsWith("http://127.0.0.1:")) {
-        socket.close(1008, "Not allowed by CORS");
-        return;
-      }
+    if (origin && !isAllowedOrigin(origin)) {
+      socket.close(1008, "Not allowed by CORS");
+      return;
     }
 
     const closed = wsServerImpl.opened(
@@ -195,19 +199,9 @@ export async function main(): Promise<void> {
         if (!origin) {
           return callback(null, true);
         }
-        // Allow known production and preview origins
-        const allowedOrigins = [
-          "https://admin.gocavgo.com",
-          "https://cavgo-company.vercel.app",
-        ];
-        if (allowedOrigins.includes(origin)) {
+        if (isAllowedOrigin(origin)) {
           return callback(null, true);
         }
-        // Allow localhost for development
-        if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:")) {
-          return callback(null, true);
-        }
-        // Reject other origins
         callback(new Error("Not allowed by CORS"));
       },
       credentials: true,
