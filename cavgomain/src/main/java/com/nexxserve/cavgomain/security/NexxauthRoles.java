@@ -17,8 +17,10 @@ import java.util.Map;
  *
  * <p>The Nexxauth organisation must provision roles matching the local enum
  * names case-insensitively ({@code ADMIN}, {@code DRIVER}, {@code FLEET_MANAGER},
- * {@code SUPERVISOR}, {@code WORKER}). Any unknown role name from the token is
- * ignored.
+ * {@code SUPERVISOR}, {@code WORKER}, {@code SUPER_ADMIN}). Any unknown role
+ * name from the token is ignored. {@code SUPER_ADMIN} is a global superuser
+ * role: it is mapped from the token for authorization but must never be stored
+ * as a company membership role.
  */
 public final class NexxauthRoles {
 
@@ -41,6 +43,7 @@ public final class NexxauthRoles {
         PRECEDENCE.put(CompanyUserRole.FLEET_MANAGER, 3);
         PRECEDENCE.put(CompanyUserRole.SUPERVISOR, 4);
         PRECEDENCE.put(CompanyUserRole.ADMIN, 5);
+        PRECEDENCE.put(CompanyUserRole.SUPER_ADMIN, 6);
     }
 
     public static String toNexxauthName(CompanyUserRole role) {

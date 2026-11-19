@@ -22,12 +22,15 @@ import java.util.stream.Collectors;
 /**
  * Enforces company boundaries on company-scoped endpoints.
  *
- * <p>The verified Nexxauth token determines whether the caller is global staff
- * (ADMIN/SUPERVISOR) or a company-scoped role (FLEET_MANAGER/DRIVER/WORKER).
- * Global staff may access any company. Company-scoped callers may only access
- * the company attached to their approved local {@link CompanyUser} membership;
- * a requested role or a token role with no approved membership is never enough
- * to cross that boundary.
+ * <p>The verified Nexxauth token determines whether the caller is a global
+ * superuser (SUPER_ADMIN), global staff (ADMIN/SUPERVISOR), or a company-scoped
+ * role (FLEET_MANAGER/DRIVER/WORKER). SUPER_ADMIN is the application superuser:
+ * it belongs to no company yet may access and administer every company. Global
+ * staff may access any company but company-administration endpoints still
+ * require an active local ADMIN membership in that exact company. Company-scoped
+ * callers may only access the company attached to their approved local
+ * {@link CompanyUser} membership; a requested role or a token role with no
+ * approved membership is never enough to cross that boundary.
  */
 @Component
 @RequiredArgsConstructor
@@ -46,9 +49,18 @@ public class CompanyScopeGuard {
      * Requires an authenticated Nexxauth ADMIN who is also an active ADMIN
      * member of this exact company. Unlike ordinary company-scope checks,
      * global staff roles do not bypass the local membership boundary.
+     * SUPER_ADMIN is the sole exception: it is the application superuser and
+     * needs no local membership to administer any company.
      */
     public Long requireCompanyAdminScope(Long companyId) {
-        if (companyId == null || !currentRoles().contains(CompanyUserRole.ADMIN)) {
+        if (companyId == null) {
+            throw denied();
+        }
+        Set<CompanyUserRole> roles = currentRoles();
+        if (roles.contains(CompanyUserRole.SUPER_ADMIN)) {
+            return currentUserId();
+        }
+        if (!roles.contains(CompanyUserRole.ADMIN)) {
             throw denied();
         }
 
@@ -76,6 +88,11 @@ public class CompanyScopeGuard {
         if (!Objects.equals(companyIdOf(request.getCompany()), companyId)) {
             throw denied();
         }
+    }
+
+    /** True when the verified token carries the global SUPER_ADMIN role. */
+    public boolean isSuperAdmin() {
+        return currentRoles().contains(CompanyUserRole.SUPER_ADMIN);
     }
 
     /**
@@ -166,7 +183,9 @@ public class CompanyScopeGuard {
 
     private boolean hasGlobalStaffRole() {
         Set<CompanyUserRole> roles = currentRoles();
-        return roles.contains(CompanyUserRole.ADMIN) || roles.contains(CompanyUserRole.SUPERVISOR);
+        return roles.contains(CompanyUserRole.SUPER_ADMIN)
+                || roles.contains(CompanyUserRole.ADMIN)
+                || roles.contains(CompanyUserRole.SUPERVISOR);
     }
 
     private CompanyUser requireScopedMembership() {

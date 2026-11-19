@@ -57,6 +57,38 @@ class CompanyAdminManagementServiceTest {
     }
 
     @Test
+    void superAdminCanAssignAdminRoleBeyondOrdinaryAdminRestrictions() {
+        CompanyUser member = member(20L, 7L, CompanyUserRole.WORKER);
+        when(companyUserRepository.findById(20L)).thenReturn(Optional.of(member));
+        when(nexxauthClient.getUser(20L)).thenReturn(identity(20L, List.of("customer", "worker")));
+        when(companyUserRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateRole(7L, 10L, 20L, CompanyUserRole.ADMIN, true);
+
+        verify(nexxauthClient).updateUserRoles(20L, List.of("customer", "admin"));
+        assertEquals(CompanyUserRole.ADMIN, member.getRole());
+    }
+
+    @Test
+    void superAdminCannotBeStoredAsCompanyMembership() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateRole(7L, 10L, 20L, CompanyUserRole.SUPER_ADMIN, true));
+        verifyNoInteractions(companyUserRepository, nexxauthClient, vehicleService);
+    }
+
+    @Test
+    void superAdminCanRemoveSupervisor() {
+        CompanyUser member = member(20L, 7L, CompanyUserRole.SUPERVISOR);
+        when(companyUserRepository.findById(20L)).thenReturn(Optional.of(member));
+        when(nexxauthClient.getUser(20L)).thenReturn(identity(20L, List.of("supervisor")));
+
+        service.removeFromCompany(7L, 10L, 20L, true);
+
+        assertNull(member.getCompany());
+        assertNull(member.getRole());
+    }
+
+    @Test
     void managementRejectsMembersFromAnotherCompany() {
         when(companyUserRepository.findById(20L))
                 .thenReturn(Optional.of(member(20L, 8L, CompanyUserRole.WORKER)));

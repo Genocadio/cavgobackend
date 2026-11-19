@@ -20,7 +20,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/main/company-admin/companies/{companyId}")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
+@PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
 public class CompanyAdminManagementController {
 
     private final CompanyScopeGuard companyScopeGuard;
@@ -41,7 +41,8 @@ public class CompanyAdminManagementController {
             @Valid @RequestBody CompanyAdminRoleUpdateDto body) {
         Long callerId = companyScopeGuard.requireCompanyAdminScope(companyId);
         try {
-            return ResponseEntity.ok(managementService.updateRole(companyId, callerId, staffId, body.getRole()));
+            return ResponseEntity.ok(managementService.updateRole(
+                    companyId, callerId, staffId, body.getRole(), companyScopeGuard.isSuperAdmin()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
@@ -52,7 +53,7 @@ public class CompanyAdminManagementController {
             @PathVariable Long companyId, @PathVariable Long staffId) {
         Long callerId = companyScopeGuard.requireCompanyAdminScope(companyId);
         try {
-            managementService.removeFromCompany(companyId, callerId, staffId);
+            managementService.removeFromCompany(companyId, callerId, staffId, companyScopeGuard.isSuperAdmin());
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));

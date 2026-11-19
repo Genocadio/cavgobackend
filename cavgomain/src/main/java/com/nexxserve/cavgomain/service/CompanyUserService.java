@@ -15,6 +15,8 @@ import com.nexxserve.cavgomain.repository.CompanyRepository;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.OfficeRepository;
 import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
+import com.nexxserve.cavgomain.security.NexxauthClient;
+import com.nexxserve.cavgomain.security.NexxauthRoles;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -23,14 +25,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class CompanyUserService {
+
+    private static final Set<String> COMPANY_ROLE_NAMES =
+            Set.of("admin", "supervisor", "fleet_manager", "driver", "worker");
 
     private final CompanyUserRepository companyUserRepository;
     private final CompanyRepository companyRepository;
@@ -39,8 +47,21 @@ public class CompanyUserService {
     private final AggregatorSyncService aggregatorSyncService;
     private final EventMessagePublisher eventMessagePublisher;
     private final IkuriyeSyncClient ikuriyeSyncClient;
+    private final NexxauthClient nexxauthClient;
 
     public CompanyUserResponseDto createCompanyUser(CompanyUserRequestDto user) {
+        return createCompanyUser(user, false);
+    }
+
+    /**
+     * @param propagateRoleToNexxauth when the caller is the global SUPER_ADMIN,
+     *                                also grant the membership role in Nexxauth so
+     *                                the user's next token carries it. Ordinary
+     *                                staff paths keep their existing behaviour:
+     *                                Nexxauth roles come from approval flows.
+     */
+    public CompanyUserResponseDto createCompanyUser(CompanyUserRequestDto user, boolean propagateRoleToNexxauth) {
+        rejectSuperAdminMembershipRole(user.getRole());
         Company company = companyRepository.findByCompanyCode(user.getCompanyCode())
                 .orElseThrow(() -> new IllegalArgumentException("Company not found with Code: " + user.getCompanyCode()));
         if (user.getLicenseNumber() != null) {
@@ -54,6 +75,9 @@ public class CompanyUserService {
             entity.setOffice(office);
         }
         CompanyUser saved = companyUserRepository.save(entity);
+        if (propagateRoleToNexxauth && user.getNexxauthUserId() != null && saved.getRole() != null) {
+            syncNexxauthRole(user.getNexxauthUserId(), saved.getRole());
+        }
         CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(saved);
 
         // Push the worker's office location id to ikuriye when a non-driver
@@ -87,6 +111,11 @@ public class CompanyUserService {
     }
 
     public CompanyUserResponseDto updateCompanyUser(Long id, CompanyUserRequestDto user) {
+        return updateCompanyUser(id, user, false);
+    }
+
+    public CompanyUserResponseDto updateCompanyUser(Long id, CompanyUserRequestDto user, boolean propagateRoleToNexxauth) {
+        rejectSuperAdminMembershipRole(user.getRole());
         CompanyUser existingUser = companyUserRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("Company not found with id: " + id));
         CompanyUserRole oldRole = existingUser.getRole();
         Long oldOfficeId = existingUser.getOffice() != null ? existingUser.getOffice().getId() : null;
@@ -110,6 +139,9 @@ public class CompanyUserService {
         }
         
         CompanyUser saved = companyUserRepository.save(existingUser);
+        if (propagateRoleToNexxauth && id != null && saved.getRole() != null) {
+            syncNexxauthRole(id, saved.getRole());
+        }
         CompanyUserResponseDto dto = CompanyUserResponseDto.fromEntity(saved);
 
         // If a worker's office assignment changed (or they just became a WORKER),
@@ -392,5 +424,34 @@ public class CompanyUserService {
                 worker.getId(),
                 office != null ? office.getOfficeLocationId() : null
         );
+    }
+
+    private void rejectSuperAdminMembershipRole(CompanyUserRole role) {
+        if (role == CompanyUserRole.SUPER_ADMIN) {
+            throw new IllegalArgumentException("SUPER_ADMIN is a global role and cannot be a company membership");
+        }
+    }
+
+    /**
+     * Grants the membership role in Nexxauth while preserving global roles
+     * (for example CUSTOMER or SUPER_ADMIN). Used only for the superuser's
+     * direct staff-management path; ordinary grants go through the approval
+     * flows which already handle Nexxauth role assignment.
+     */
+    private void syncNexxauthRole(Long userId, CompanyUserRole role) {
+        String roleName = NexxauthRoles.toNexxauthName(role);
+        if (roleName == null) {
+            return;
+        }
+        var identity = nexxauthClient.getUser(userId);
+        List<String> roles = new ArrayList<>();
+        if (identity.roles() != null) {
+            identity.roles().stream()
+                    .filter(existing -> existing != null
+                            && !COMPANY_ROLE_NAMES.contains(existing.trim().toLowerCase(Locale.ROOT)))
+                    .forEach(roles::add);
+        }
+        roles.add(roleName);
+        nexxauthClient.updateUserRoles(userId, roles);
     }
 }

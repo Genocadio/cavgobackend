@@ -31,18 +31,18 @@ public class CompanyUserController {
      * be able to grant themselves a role this way.
      */
     @PostMapping
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public CompanyUserResponseDto createCompanyUser(@Valid @RequestBody CompanyUserRequestDto user) {
         companyScopeGuard.requireCompanyScopeForCompanyCode(user.getCompanyCode());
-        return companyUserService.createCompanyUser(user);
+        return companyUserService.createCompanyUser(user, companyScopeGuard.isSuperAdmin());
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public CompanyUserResponseDto updateCompanyUser(@PathVariable Long id, @Valid @RequestBody CompanyUserRequestDto user) {
         companyScopeGuard.requireCompanyScopeForStaff(id);
         companyScopeGuard.requireCompanyScopeForCompanyCode(user.getCompanyCode());
-        return companyUserService.updateCompanyUser(id, user);
+        return companyUserService.updateCompanyUser(id, user, companyScopeGuard.isSuperAdmin());
     }
 
     /**
@@ -51,7 +51,7 @@ public class CompanyUserController {
      * company access request approval flow.
      */
     @PutMapping("/{id}/company/{companyId}")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public ResponseEntity<CompanyUserResponseDto> assignCompanyToUser(
             @PathVariable Long id, @PathVariable Long companyId) {
         companyScopeGuard.requireCompanyScopeForStaff(id);
@@ -127,7 +127,7 @@ public class CompanyUserController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public void deleteCompanyUser(@PathVariable Long id) {
         companyScopeGuard.requireCompanyScopeForStaff(id);
         companyUserService.deleteCompanyUser(id);

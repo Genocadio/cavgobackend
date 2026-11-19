@@ -4,8 +4,10 @@ import com.nexxserve.cavgomain.dto.request.CompanyRequestDto;
 import com.nexxserve.cavgomain.dto.response.CompanyResponseDto;
 import com.nexxserve.cavgomain.enums.CompanyStatus;
 import com.nexxserve.cavgomain.service.CompanyService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -18,13 +20,16 @@ public class CompanyController {
 
     private final CompanyService companyService;
 
+    /** Company creation is an application-superuser operation. */
     @PostMapping
-    public CompanyResponseDto createCompany(@RequestBody CompanyRequestDto company) {
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public CompanyResponseDto createCompany(@Valid @RequestBody CompanyRequestDto company) {
         return companyService.createCompany(company);
     }
 
     @PutMapping("/{id}")
-    public CompanyResponseDto updateCompany(@PathVariable Long id, @RequestBody CompanyRequestDto company) {
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public CompanyResponseDto updateCompany(@PathVariable Long id, @Valid @RequestBody CompanyRequestDto company) {
         return companyService.updateCompany(id, company);
     }
 
@@ -55,6 +60,7 @@ public class CompanyController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public void deleteCompany(@PathVariable Long id) {
         companyService.deleteCompany(id);
     }

@@ -15,6 +15,7 @@ class NexxauthRolesTest {
         assertEquals(CompanyUserRole.DRIVER, NexxauthRoles.fromNexxauthName("DRIVER"));
         assertEquals(CompanyUserRole.FLEET_MANAGER, NexxauthRoles.fromNexxauthName("fleet_manager"));
         assertEquals(CompanyUserRole.SUPERVISOR, NexxauthRoles.fromNexxauthName("Supervisor"));
+        assertEquals(CompanyUserRole.SUPER_ADMIN, NexxauthRoles.fromNexxauthName("super_admin"));
     }
 
     @Test
@@ -53,6 +54,15 @@ class NexxauthRolesTest {
                 new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ADMIN")
         );
         assertEquals(CompanyUserRole.ADMIN, NexxauthRoles.primaryRole(authorities));
+    }
+
+    @Test
+    void primaryRole_picksSuperAdminOverAdmin() {
+        var authorities = List.of(
+                new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ADMIN"),
+                new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_SUPER_ADMIN")
+        );
+        assertEquals(CompanyUserRole.SUPER_ADMIN, NexxauthRoles.primaryRole(authorities));
     }
 
     @Test

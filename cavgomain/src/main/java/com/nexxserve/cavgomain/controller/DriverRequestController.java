@@ -117,7 +117,7 @@ public class DriverRequestController {
      * pending, approved, and rejected requests.
      */
     @GetMapping("/company/{companyId}")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public ResponseEntity<List<DriverRequestResponseDto>> getCompanyRequests(
             @PathVariable Long companyId) {
         companyScopeGuard.requireCompanyScope(companyId);
@@ -129,7 +129,7 @@ public class DriverRequestController {
      * Lists pending driver requests for a company.
      */
     @GetMapping("/company/{companyId}/pending")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public ResponseEntity<List<DriverRequestResponseDto>> getPendingCompanyRequests(
             @PathVariable Long companyId) {
         companyScopeGuard.requireCompanyScope(companyId);
@@ -141,7 +141,7 @@ public class DriverRequestController {
      * Gets a single driver request by ID.
      */
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public ResponseEntity<DriverRequestResponseDto> getRequest(@PathVariable Long id) {
         companyScopeGuard.requireCompanyScopeForDriverRequest(id);
         try {
@@ -158,7 +158,7 @@ public class DriverRequestController {
      * cannot approve their own request (guarded in the service).
      */
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public ResponseEntity<DriverRequestResponseDto> approveRequest(@PathVariable Long id) {
         companyScopeGuard.requireCompanyScopeForDriverRequest(id);
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
@@ -176,7 +176,7 @@ public class DriverRequestController {
      * Rejects a driver request — records who rejected.
      */
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public ResponseEntity<DriverRequestResponseDto> rejectRequest(
             @PathVariable Long id,
             @RequestBody(required = false) Map<String, String> body) {

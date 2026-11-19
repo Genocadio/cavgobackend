@@ -27,8 +27,11 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import java.util.Arrays;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -54,6 +57,31 @@ class CompanyScopeGuardTest {
         authenticate("1", CompanyUserRole.ADMIN);
 
         assertEquals(99L, guard.requireCompanyScope(99L));
+
+        verifyNoInteractions(companyUserRepository, companyRepository, vehicleRepository,
+                driverRequestRepository, companyAccessRequestRepository, companyAdminAccessRequestRepository);
+    }
+
+    @Test
+    void superAdminIsGlobalUserWithoutCompanyMembership() {
+        authenticate("55", CompanyUserRole.SUPER_ADMIN);
+
+        assertTrue(guard.isSuperAdmin());
+        assertEquals(99L, guard.requireCompanyScope(99L));
+        assertEquals(55L, guard.requireCompanyAdminScope(99L));
+
+        verifyNoInteractions(companyUserRepository, companyRepository, vehicleRepository,
+                driverRequestRepository, companyAccessRequestRepository, companyAdminAccessRequestRepository);
+    }
+
+    @Test
+    void superAdminBypassesResourceLevelScopeChecks() {
+        authenticate("55", CompanyUserRole.SUPER_ADMIN);
+
+        assertDoesNotThrow(() -> guard.requireCompanyScopeForVehicle(404L));
+        assertDoesNotThrow(() -> guard.requireCompanyScopeForDriverRequest(404L));
+        assertDoesNotThrow(() -> guard.requireCompanyScopeForCompanyAccessRequest(404L));
+        assertNull(guard.requireCurrentCompanyScope());
 
         verifyNoInteractions(companyUserRepository, companyRepository, vehicleRepository,
                 driverRequestRepository, companyAccessRequestRepository, companyAdminAccessRequestRepository);

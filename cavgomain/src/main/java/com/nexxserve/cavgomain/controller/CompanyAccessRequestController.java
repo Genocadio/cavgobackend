@@ -142,7 +142,7 @@ public class CompanyAccessRequestController {
      * cannot approve their own request.
      */
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public ResponseEntity<CompanyAccessRequestResponseDto> approveRequest(@PathVariable Long id) {
         companyScopeGuard.requireCompanyScopeForCompanyAccessRequest(id);
         var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
@@ -160,7 +160,7 @@ public class CompanyAccessRequestController {
      * Rejects a company access request.
      */
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN')")
+    @PreAuthorize("hasAnyRole('FLEET_MANAGER','SUPERVISOR','ADMIN','SUPER_ADMIN')")
     public ResponseEntity<CompanyAccessRequestResponseDto> rejectRequest(
             @PathVariable Long id,
             @RequestBody(required = false) Map<String, String> body) {

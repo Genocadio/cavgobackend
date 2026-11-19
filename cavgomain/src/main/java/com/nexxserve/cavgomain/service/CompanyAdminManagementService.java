@@ -53,16 +53,29 @@ public class CompanyAdminManagementService {
 
     public CompanyUserResponseDto updateRole(
             Long companyId, Long callerId, Long staffId, CompanyUserRole newRole) {
+        return updateRole(companyId, callerId, staffId, newRole, false);
+    }
+
+    /**
+     * @param superuser the global SUPER_ADMIN may assign any company role
+     *                  (including ADMIN/SUPERVISOR) and is not bound by the
+     *                  ordinary company admin's assignment restrictions.
+     */
+    public CompanyUserResponseDto updateRole(
+            Long companyId, Long callerId, Long staffId, CompanyUserRole newRole, boolean superuser) {
+        if (newRole == CompanyUserRole.SUPER_ADMIN) {
+            throw new IllegalArgumentException("SUPER_ADMIN is a global role and cannot be a company membership");
+        }
         CompanyUser user = requireCompanyUser(companyId, staffId);
         ensureNotSelf(callerId, staffId);
-        if (user.getRole() == CompanyUserRole.SUPERVISOR
-                || (newRole != null && !ADMIN_ASSIGNABLE_ROLES.contains(newRole))) {
+        if (!superuser && (user.getRole() == CompanyUserRole.SUPERVISOR
+                || (newRole != null && !ADMIN_ASSIGNABLE_ROLES.contains(newRole)))) {
             throw new IllegalArgumentException("Company admins can assign worker, driver, or fleet manager roles only");
         }
         if (user.getRole() == newRole) {
             return CompanyUserResponseDto.fromEntity(user);
         }
-        if (user.getRole() == CompanyUserRole.ADMIN
+        if (!superuser && user.getRole() == CompanyUserRole.ADMIN
                 && companyUserRepository.countByCompanyIdAndRole(companyId, CompanyUserRole.ADMIN) <= 1) {
             throw new IllegalArgumentException("A company must have at least one administrator");
         }
@@ -80,12 +93,16 @@ public class CompanyAdminManagementService {
     }
 
     public void removeFromCompany(Long companyId, Long callerId, Long staffId) {
+        removeFromCompany(companyId, callerId, staffId, false);
+    }
+
+    public void removeFromCompany(Long companyId, Long callerId, Long staffId, boolean superuser) {
         CompanyUser user = requireCompanyUser(companyId, staffId);
         ensureNotSelf(callerId, staffId);
-        if (user.getRole() == CompanyUserRole.SUPERVISOR) {
+        if (!superuser && user.getRole() == CompanyUserRole.SUPERVISOR) {
             throw new IllegalArgumentException("A company administrator cannot remove a supervisor");
         }
-        if (user.getRole() == CompanyUserRole.ADMIN
+        if (!superuser && user.getRole() == CompanyUserRole.ADMIN
                 && companyUserRepository.countByCompanyIdAndRole(companyId, CompanyUserRole.ADMIN) <= 1) {
             throw new IllegalArgumentException("A company must have at least one administrator");
         }
