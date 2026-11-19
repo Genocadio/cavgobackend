@@ -2,6 +2,8 @@ import type { Trip } from "../types";
 import * as carRepository from "../repositories/cars";
 import * as metricsRepository from "../repositories/metrics";
 import * as driverRepository from "../repositories/drivers";
+import * as revenueRepository from "../repositories/revenue";
+import { PACKAGE_DELIVERY_REVENUE } from "../metrics/revenue";
 
 interface TripMetricsUpdateParams {
   trip: Trip;
@@ -78,6 +80,7 @@ export async function updateTripMetrics(params: TripMetricsUpdateParams): Promis
       totalRevenue: carMetrics?.totalRevenue || 0, // Keep revenue unchanged for now
       totalTrips: newTripCount,
       totalDistance: newDistance,
+      packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
     });
 
     console.log(
@@ -98,9 +101,10 @@ export async function updateTripMetrics(params: TripMetricsUpdateParams): Promis
 
       await metricsRepository.upsertDriverMetrics({
         driverId: driverId,
-        totalRevenue: driverMetrics?.totalRevenue || 0, // Keep revenue unchanged for now
+        totalRevenue: driverMetrics?.totalRevenue || 0,
         totalTrips: newTripCount,
         totalDistance: newDistance,
+        packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
       });
 
       console.log(
@@ -109,21 +113,28 @@ export async function updateTripMetrics(params: TripMetricsUpdateParams): Promis
     }
   }
 
+  // Passenger fare is sourced from qualifying bookings, never from trip
+  // route_price/price. Fares only count once the trip is completed; package
+  // delivery fees are tracked in a separate bucket (still zero).
+  const passengerFare =
+    currentStatus === "completed"
+      ? await revenueRepository.getPassengerFareRevenue([trip.id])
+      : 0;
+
   // Update trip-specific metrics for in_progress and completed status
-  // Note: Revenue/fare is always 0 as it will be sourced from bookings data (not yet integrated)
-  // Do not use route_price or price from trip data for metrics
   if (currentStatus === "in_progress") {
     const existingMetrics = await metricsRepository.getTripMetrics(trip.id);
     await metricsRepository.upsertTripMetrics({
       tripId: trip.id,
       companyId: car.companyId,
-      totalFare: 0, // Revenue will come from bookings, not from trip route_price/price
+      totalFare: passengerFare,
       totalDistance: safeTripDistance,
       totalDuration: existingMetrics?.totalDuration || 0,
       startedAt: startedAt || existingMetrics?.startedAt || trip.createdAt,
       completedAt: existingMetrics?.completedAt || null,
       tripCreatedAt: trip.createdAt,
       perDestinationMetrics: existingMetrics?.perDestinationMetrics || [],
+      packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
     });
   } else if (currentStatus === "completed") {
     const existingMetrics = await metricsRepository.getTripMetrics(trip.id);
@@ -134,17 +145,15 @@ export async function updateTripMetrics(params: TripMetricsUpdateParams): Promis
     await metricsRepository.upsertTripMetrics({
       tripId: trip.id,
       companyId: car.companyId,
-      totalFare: 0, // Revenue will come from bookings, not from trip route_price/price
+      totalFare: passengerFare,
       totalDistance: safeTripDistance,
       totalDuration: totalDuration,
       startedAt: computedStartedAt,
       completedAt: computedCompletedAt,
       tripCreatedAt: trip.createdAt,
       perDestinationMetrics: existingMetrics?.perDestinationMetrics || [],
+      packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
     });
-
-    // Revenue for car/driver metrics will be calculated from bookings data (not yet integrated)
-    // So we don't update revenue here - it should remain 0 until bookings are integrated
   }
 }
 

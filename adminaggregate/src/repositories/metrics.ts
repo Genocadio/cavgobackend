@@ -1,4 +1,4 @@
-import { and, count, eq, gte, inArray, lte, ne, sql, sum } from "drizzle-orm";
+import { and, count, eq, gte, inArray, lte, ne, sum } from "drizzle-orm";
 import type { InferModel } from "drizzle-orm";
 import { db } from "../db/client";
 import {
@@ -15,6 +15,9 @@ import type {
   PerDestinationMetrics,
   TripMetrics,
 } from "../types";
+import { resolveDateRange, type DateRange } from "../metrics/dateRange";
+import { PACKAGE_DELIVERY_REVENUE } from "../metrics/revenue";
+import { getPassengerFareRevenue } from "./revenue";
 
 type DriverMetricsRow = InferModel<typeof driverMetrics>;
 type CarMetricsRow = InferModel<typeof carMetrics>;
@@ -31,6 +34,7 @@ const mapDriverMetrics = (row: DriverMetricsRow): DriverMetrics => ({
   totalRevenue: Number(row.totalRevenue),
   totalTrips: row.totalTrips,
   totalDistance: jobDistanceToNumber(row.totalDistance),
+  packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
 });
 
 const mapCarMetrics = (row: CarMetricsRow): CarMetrics => ({
@@ -38,6 +42,7 @@ const mapCarMetrics = (row: CarMetricsRow): CarMetrics => ({
   totalRevenue: Number(row.totalRevenue),
   totalTrips: row.totalTrips,
   totalDistance: jobDistanceToNumber(row.totalDistance),
+  packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
 });
 
 const mapTripDestinationMetrics = (row: TripDestinationMetricsRow): PerDestinationMetrics => ({
@@ -45,6 +50,46 @@ const mapTripDestinationMetrics = (row: TripDestinationMetricsRow): PerDestinati
   numberOfBookings: row.numberOfBookings,
   totalRevenue: Number(row.totalRevenue),
 });
+
+const zeroDriverMetrics = (driverId: string): DriverMetrics => ({
+  driverId,
+  totalRevenue: 0,
+  totalTrips: 0,
+  totalDistance: 0,
+  packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
+});
+
+const zeroCarMetrics = (carId: string): CarMetrics => ({
+  carId,
+  totalRevenue: 0,
+  totalTrips: 0,
+  totalDistance: 0,
+  packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
+});
+
+/** Trip ids owned by a driver through their car assignments, excluding cancellations. */
+async function getDriverTripIds(driverId: string, range?: DateRange): Promise<string[]> {
+  const assignments = await db
+    .select({ id: driverCarAssignments.id })
+    .from(driverCarAssignments)
+    .where(eq(driverCarAssignments.driverId, driverId));
+
+  const assignmentIds = assignments.map((a) => Number(a.id));
+  if (assignmentIds.length === 0) {
+    return [];
+  }
+
+  const conditions = [
+    inArray(trips.driverCarAssignmentId, assignmentIds),
+    ne(trips.status, "cancelled"),
+  ];
+  if (range) {
+    conditions.push(gte(trips.createdAt, range.start), lte(trips.createdAt, range.end));
+  }
+
+  const rows = await db.select({ id: trips.id }).from(trips).where(and(...conditions));
+  return rows.map((row) => row.id);
+}
 
 export async function upsertDriverMetrics(metrics: DriverMetrics): Promise<DriverMetrics> {
   await db
@@ -69,9 +114,55 @@ export async function upsertDriverMetrics(metrics: DriverMetrics): Promise<Drive
   return metrics;
 }
 
+/**
+ * Lifetime stored counters, with passenger fare revenue read live from bookings.
+ * Kept backwards compatible for clients that call `driverMetrics(driverId)`
+ * without date bounds.
+ */
 export async function getDriverMetrics(driverId: string): Promise<DriverMetrics | null> {
   const [row] = await db.select().from(driverMetrics).where(eq(driverMetrics.driverId, driverId));
-  return row ? mapDriverMetrics(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const metrics = mapDriverMetrics(row);
+  return {
+    ...metrics,
+    totalRevenue: await getPassengerFareRevenue(await getDriverTripIds(driverId)),
+  };
+}
+
+/**
+ * Date-scoped driver metrics aggregated from trip_metrics, with fare revenue
+ * from qualifying bookings. Mirrors `getCarMetricsByDateRange`.
+ */
+export async function getDriverMetricsByDateRange(
+  driverId: string,
+  startDate?: string,
+  endDate?: string
+): Promise<DriverMetrics> {
+  const range = resolveDateRange(startDate, endDate);
+  const tripIds = await getDriverTripIds(driverId, range);
+
+  if (tripIds.length === 0) {
+    return zeroDriverMetrics(driverId);
+  }
+
+  const [aggregate] = await db
+    .select({
+      totalTrips: count(),
+      totalDistance: sum(tripMetrics.totalDistance),
+    })
+    .from(tripMetrics)
+    .where(inArray(tripMetrics.tripId, tripIds));
+
+  return {
+    driverId,
+    totalRevenue: await getPassengerFareRevenue(tripIds),
+    totalTrips: aggregate?.totalTrips || 0,
+    totalDistance: Number(aggregate?.totalDistance ?? 0),
+    packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
+  };
 }
 
 export async function upsertCarMetrics(metrics: CarMetrics): Promise<CarMetrics> {
@@ -99,7 +190,28 @@ export async function upsertCarMetrics(metrics: CarMetrics): Promise<CarMetrics>
 
 export async function getCarMetrics(carId: string): Promise<CarMetrics | null> {
   const [row] = await db.select().from(carMetrics).where(eq(carMetrics.carId, carId));
-  return row ? mapCarMetrics(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const metrics = mapCarMetrics(row);
+  const assignments = await db
+    .select({ id: driverCarAssignments.id })
+    .from(driverCarAssignments)
+    .where(eq(driverCarAssignments.carId, carId));
+  const assignmentIds = assignments.map((a) => Number(a.id));
+  if (assignmentIds.length === 0) {
+    return metrics;
+  }
+
+  const rows = await db
+    .select({ id: trips.id })
+    .from(trips)
+    .where(and(inArray(trips.driverCarAssignmentId, assignmentIds), ne(trips.status, "cancelled")));
+  return {
+    ...metrics,
+    totalRevenue: await getPassengerFareRevenue(rows.map((trip) => trip.id)),
+  };
 }
 
 /**
@@ -123,100 +235,52 @@ export async function getCarMetricsByDateRange(
   const assignmentIds = assignments.map((a) => Number(a.id));
 
   if (assignmentIds.length === 0) {
-    // Return zero metrics if no assignments
-    return {
-      carId,
-      totalRevenue: 0,
-      totalTrips: 0,
-      totalDistance: 0,
-    };
+    return zeroCarMetrics(carId);
   }
 
-  // Parse dates and set up date range
-  let startDateTime: Date;
-  let endDateTime: Date;
-
-  if (!startDate && !endDate) {
-    // No dates provided - default to today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    startDateTime = today;
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-    endDateTime = todayEnd;
-  } else if (startDate && !endDate) {
-    // Only start date - from that date onwards
-    startDateTime = new Date(startDate);
-    startDateTime.setHours(0, 0, 0, 0);
-    endDateTime = new Date(); // Current time
-  } else if (startDate && endDate) {
-    // Both dates - date range
-    startDateTime = new Date(startDate);
-    startDateTime.setHours(0, 0, 0, 0);
-    endDateTime = new Date(endDate);
-    endDateTime.setHours(23, 59, 59, 999);
-  } else {
-    // Only end date (shouldn't happen, but handle it)
-    endDateTime = new Date(endDate!);
-    endDateTime.setHours(23, 59, 59, 999);
-    startDateTime = new Date(0); // Beginning of time
-  }
+  const { start: startDateTime, end: endDateTime } = resolveDateRange(startDate, endDate);
 
   // Get trips for this car (to filter by car)
   const carTrips = await db
     .select({ id: trips.id, status: trips.status })
     .from(trips)
-    .where(inArray(trips.driverCarAssignmentId, assignmentIds));
+    .where(
+      and(
+        inArray(trips.driverCarAssignmentId, assignmentIds),
+        gte(trips.createdAt, startDateTime),
+        lte(trips.createdAt, endDateTime)
+      )
+    );
 
-  const carTripIds = carTrips.map((t) => t.id);
-
-  if (carTripIds.length === 0) {
-    return {
-      carId,
-      totalRevenue: 0,
-      totalTrips: 0,
-      totalDistance: 0,
-    };
-  }
-
-  // Filter out cancelled trips
   const nonCancelledTripIds = carTrips
-    .filter((t) => t.status !== "cancelled")
-    .map((t) => t.id);
+    .filter((trip) => trip.status !== "cancelled")
+    .map((trip) => trip.id);
 
   if (nonCancelledTripIds.length === 0) {
-    return {
-      carId,
-      totalRevenue: 0,
-      totalTrips: 0,
-      totalDistance: 0,
-    };
+    return zeroCarMetrics(carId);
   }
 
-  // Aggregate metrics from trip_metrics filtered by date range
-  // Use tripCreatedAt from trip_metrics for date filtering
+  // Aggregate trips/distance from trip_metrics for the date range
   const metricsResult = await db
     .select({
       totalTrips: count(),
       totalDistance: sum(tripMetrics.totalDistance),
-      totalRevenue: sum(tripMetrics.totalFare),
     })
     .from(tripMetrics)
-    .where(
-      and(
-        inArray(tripMetrics.tripId, nonCancelledTripIds),
-        gte(tripMetrics.tripCreatedAt, startDateTime),
-        lte(tripMetrics.tripCreatedAt, endDateTime)
-      )
-    );
+    .where(inArray(tripMetrics.tripId, nonCancelledTripIds));
+
+  const completedTripIds = carTrips
+    .filter((trip) => trip.status === "completed")
+    .map((trip) => trip.id);
 
   const metrics = metricsResult[0];
 
   return {
     carId,
-    totalRevenue: metrics ? Number(metrics.totalRevenue) || 0 : 0,
+    totalRevenue: await getPassengerFareRevenue(completedTripIds),
     totalTrips: metrics?.totalTrips || 0,
-    totalDistance: metrics ? Number(metrics.totalDistance) || 0 : 0,
+    totalDistance: Number(metrics?.totalDistance ?? 0),
+    packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
   };
 }
 
@@ -237,7 +301,7 @@ export async function upsertTripMetrics(metrics: TripMetrics): Promise<TripMetri
     .onConflictDoUpdate({
       target: tripMetrics.tripId,
       set: {
-      companyId: metrics.companyId,
+        companyId: metrics.companyId,
         totalFare: numericString(metrics.totalFare),
         totalDistance: metrics.totalDistance,
         totalDuration: metrics.totalDuration,
@@ -286,8 +350,6 @@ export async function getTripMetrics(tripId: string): Promise<TripMetrics | null
     completedAt: row.completedAt ? row.completedAt.getTime() : null,
     tripCreatedAt: row.tripCreatedAt.getTime(),
     perDestinationMetrics: destinationRows.map(mapTripDestinationMetrics),
+    packageDeliveryRevenue: PACKAGE_DELIVERY_REVENUE,
   };
 }
-
-
-
