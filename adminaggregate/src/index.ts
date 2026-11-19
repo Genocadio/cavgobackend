@@ -2,7 +2,6 @@ import { ApolloServer } from "@apollo/server";
 import { HeaderMap } from "@apollo/server";
 import { ApolloServerPluginLandingPageLocalDefault } from "@apollo/server/plugin/landingPage/default";
 import express from "express";
-import cors from "cors";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { makeServer } from "graphql-ws";
@@ -124,29 +123,11 @@ export async function main(): Promise<void> {
     },
   });
 
-  const isAllowedOrigin = (origin?: string): boolean => {
-    if (!origin) return true;
-    if (origin === "https://cavgo-company.vercel.app") return true;
-    if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:")) {
-      return true;
-    }
-    try {
-      const { protocol, hostname } = new URL(origin);
-      return protocol === "https:" && (hostname === "gocavgo.com" || hostname.endsWith(".gocavgo.com"));
-    } catch {
-      return false;
-    }
-  };
-
   // Handle WebSocket connections
   wsServer.on("connection", (socket, request) => {
-    // Check CORS for WebSocket connections
-    const origin = request.headers.origin;
-    if (origin && !isAllowedOrigin(origin)) {
-      socket.close(1008, "Not allowed by CORS");
-      return;
-    }
-
+    // CORS is handled centrally by the API gateway/edge for HTTP and WS upgrades.
+    // The app does not emit CORS headers or reject origins here to avoid duplicate
+    // Access-Control-* headers when proxied (same policy as cavgomain).
     const closed = wsServerImpl.opened(
       {
         protocol: socket.protocol || "graphql-transport-ws",
@@ -191,24 +172,8 @@ export async function main(): Promise<void> {
 
   await apollo.start();
 
-  // 7.5. Set up CORS middleware
-  app.use(
-    cors({
-      origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps, Postman, or curl)
-        if (!origin) {
-          return callback(null, true);
-        }
-        if (isAllowedOrigin(origin)) {
-          return callback(null, true);
-        }
-        callback(new Error("Not allowed by CORS"));
-      },
-      credentials: true,
-      methods: ["GET", "POST", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"],
-    })
-  );
+  // CORS is handled centrally by the API gateway/edge. Disabled here so this
+  // service does not emit conflicting Access-Control-* headers (see cavgomain).
 
   // 7.75. Push ingestion endpoints
   // The main API pushes this company's vehicles/workers whenever they change
