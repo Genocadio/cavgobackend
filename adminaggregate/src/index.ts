@@ -15,6 +15,7 @@ import * as rabbitmq from "./services/rabbitmq";
 import * as eventHandlers from "./services/eventHandlers";
 import * as tripPolling from "./services/tripPolling";
 import { migrate } from "./db/migrate";
+import { buildAuthContext, requireInternalKey } from "./auth/context";
 
 /**
  * Entry point for the admin aggregator service.
@@ -116,6 +117,10 @@ export async function main(): Promise<void> {
   // 6. Set up WebSocket server for GraphQL subscriptions using graphql-ws
   const wsServerImpl = makeServer({
     schema,
+    context: async (ctx) => {
+      const params = ctx.connectionParams as { Authorization?: string; authorization?: string } | undefined;
+      return { auth: await buildAuthContext(params?.Authorization ?? params?.authorization) };
+    },
   });
 
   // Handle WebSocket connections
@@ -215,6 +220,7 @@ export async function main(): Promise<void> {
   // (see AggregatorSyncService + AGGREGATOR_JSON_FORMAT.md). Upserts keep the
   // local store consistent with the source of truth.
   app.post("/company/:companyId/vehicle", express.json(), async (req, res) => {
+    if (!requireInternalKey(req, res)) return;
     const companyId = String(req.params.companyId ?? "");
     try {
       const vehicles = Array.isArray(req.body) ? req.body : [];
@@ -227,6 +233,7 @@ export async function main(): Promise<void> {
   });
 
   app.post("/company/:companyId/worker", express.json(), async (req, res) => {
+    if (!requireInternalKey(req, res)) return;
     const companyId = String(req.params.companyId ?? "");
     try {
       const workers = Array.isArray(req.body) ? req.body : [];
@@ -254,6 +261,8 @@ export async function main(): Promise<void> {
         }
       });
 
+      const authContext = await buildAuthContext(req.headers.authorization);
+
       const result = await apollo.executeHTTPGraphQLRequest({
         httpGraphQLRequest: {
           method: req.method || "GET",
@@ -261,7 +270,7 @@ export async function main(): Promise<void> {
           search: url.search,
           body: req.method === "POST" ? (req.body || {}) : undefined,
         },
-        context: async () => ({}),
+        context: async () => ({ auth: authContext }),
       });
 
       // Set response status

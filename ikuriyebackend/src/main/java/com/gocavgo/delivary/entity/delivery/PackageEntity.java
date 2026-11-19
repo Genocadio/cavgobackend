@@ -1,6 +1,7 @@
 package com.gocavgo.delivary.entity.delivery;
 
 import com.gocavgo.delivary.enums.delivery.DeliveryType;
+import com.gocavgo.delivary.enums.delivery.PackageOrigin;
 import com.gocavgo.delivary.enums.delivery.PackageStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -50,8 +51,21 @@ public class PackageEntity {
     @Column(name = "company_id")
     private UUID companyId;
 
+    /**
+     * Company id from the trip service ({@code cavgo_trips.company_id}). Kept
+     * separately from {@link #companyId} because the two are different ID spaces.
+     */
+    @Column(name = "company_ref_id")
+    private Long companyRefId;
+
     @Column(name = "trip_id")
     private Long tripId;
+
+    /** PRIVATE until a driver with an active trip takes custody of the package. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "package_origin", nullable = false)
+    @Builder.Default
+    private PackageOrigin packageOrigin = PackageOrigin.PRIVATE;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

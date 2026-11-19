@@ -7,6 +7,7 @@ import com.gocavgo.delivary.security.SecurityUtils;
 import com.gocavgo.delivary.security.NexxauthRoles;
 import com.gocavgo.delivary.enums.delivery.DeliveryType;
 import com.gocavgo.delivary.enums.delivery.PackageEventType;
+import com.gocavgo.delivary.enums.delivery.PackageOrigin;
 import com.gocavgo.delivary.enums.delivery.PackageStatus;
 import com.gocavgo.delivary.enums.delivery.SortOrder;
 import com.gocavgo.delivary.dto.delivery.input.AssignDriverInput;
@@ -21,6 +22,7 @@ import com.gocavgo.delivary.dto.delivery.output.PackageCreationResponse;
 import com.gocavgo.delivary.dto.delivery.output.PackageResponse;
 import com.gocavgo.delivary.dto.delivery.output.TransferAcceptResult;
 import com.gocavgo.delivary.entity.delivery.PackageAssignmentEntity;
+import com.gocavgo.delivary.entity.delivery.PackageCarrierLegEntity;
 import com.gocavgo.delivary.entity.delivery.PackageCustodianEntity;
 import com.gocavgo.delivary.entity.delivery.PackageCustodyEntity;
 import com.gocavgo.delivary.entity.delivery.PackageDetailEntity;
@@ -30,8 +32,10 @@ import com.gocavgo.delivary.entity.delivery.PackageLocationEntity;
 import com.gocavgo.delivary.entity.delivery.PackageMediaEntity;
 import com.gocavgo.delivary.entity.delivery.PackagePersonEntity;
 import com.gocavgo.delivary.entity.delivery.DeliveryCodeEntity;
+import com.gocavgo.delivary.entity.trip.CavgoTripEntity;
 import com.gocavgo.delivary.entity.user.UserEntity;
 import com.gocavgo.delivary.repository.delivery.PackageAssignmentJpaRepository;
+import com.gocavgo.delivary.repository.delivery.PackageCarrierLegJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageCustodianJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageCustodyJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageDetailJpaRepository;
@@ -41,6 +45,7 @@ import com.gocavgo.delivary.repository.delivery.PackageLocationJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageMediaJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackagePersonJpaRepository;
 import com.gocavgo.delivary.repository.delivery.DeliveryCodeJpaRepository;
+import com.gocavgo.delivary.repository.trip.CavgoTripJpaRepository;
 import com.gocavgo.delivary.mapper.delivery.DeliveryMapper;
 import com.gocavgo.delivary.repository.user.UserRepository;
 import com.gocavgo.delivary.enums.notification.NoticeEventType;
@@ -51,6 +56,7 @@ import com.gocavgo.delivary.dto.delivery.output.OfferClaimedEvent;
 import com.gocavgo.delivary.service.subscription.OfferClaimedPublisher;
 import com.gocavgo.delivary.service.subscription.PackageTransferPublisher;
 import com.gocavgo.delivary.service.transfer.TransferService;
+import com.gocavgo.delivary.service.user.UserService;
 import com.gocavgo.delivary.enums.transfer.TransferAcceptorType;
 import com.gocavgo.delivary.enums.transfer.TransferRuleType;
 import com.gocavgo.delivary.enums.transfer.TransferStatus;
@@ -73,9 +79,11 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -96,6 +104,8 @@ public class PackageService {
     private final PackageDetailJpaRepository detailRepo;
     private final PackageMediaJpaRepository mediaRepo;
     private final PackageAssignmentJpaRepository assignmentRepo;
+    private final PackageCarrierLegJpaRepository carrierLegRepo;
+    private final CavgoTripJpaRepository cavgoTripRepo;
     private final PackageEventJpaRepository eventRepo;
     private final PackageCustodyJpaRepository custodyRepo;
     private final PackageCustodianJpaRepository custodianRepo;
@@ -108,6 +118,7 @@ public class PackageService {
     private final TransferService transferService;
     private final TransferJpaRepository transferRepo;
     private final TransferPackageJpaRepository transferPackageRepo;
+    private final UserService userService;
     private final DeliveryMapper deliveryMapper;
     private final StorageService storageService;
     private final com.gocavgo.delivary.repository.user.DriverProfileJpaRepository driverProfileRepo;
@@ -251,6 +262,79 @@ public class PackageService {
         }
     }
 
+    /** Trip statuses that count as a driver's current active trip. */
+    private static final List<String> ACTIVE_TRIP_STATUSES = List.of("IN_PROGRESS", "SCHEDULED");
+
+    /**
+     * Resolves the trip a driver is working when they take custody of a package.
+     *
+     * <p>The tripId stays optional in the GraphQL input for worker/legacy callers.
+     * When supplied, the trip is validated against the driver and its status. When
+     * omitted, the driver's most recent active trip is derived from the trip mirror
+     * ("driver role is matched to their active trip"). Either way, a DRIVER cannot
+     * take custody without a real, active trip so the package always has context
+     * to report on.
+     */
+    private CavgoTripEntity requireActiveTripForDriver(Long driverId, Long tripId) {
+        CavgoTripEntity trip;
+        if (tripId != null) {
+            trip = cavgoTripRepo.findById(tripId)
+                    .orElseThrow(() -> new BusinessValidationException("Trip not found: " + tripId));
+            if (!Objects.equals(trip.getDriverId(), driverId)) {
+                throw new BusinessValidationException("Trip " + tripId + " does not belong to driver " + driverId);
+            }
+            var status = trip.getStatus() == null ? "" : trip.getStatus().toUpperCase(Locale.ROOT);
+            if (!ACTIVE_TRIP_STATUSES.contains(status)) {
+                throw new BusinessValidationException("Trip " + tripId + " is not active (status=" + trip.getStatus() + ")");
+            }
+            return trip;
+        }
+
+        trip = ACTIVE_TRIP_STATUSES.stream()
+                .map(status -> cavgoTripRepo.findTopByDriverIdAndStatusOrderByDepartureTimeDesc(driverId, status))
+                .filter(Objects::nonNull)
+                .max(Comparator.comparing(CavgoTripEntity::getDepartureTime,
+                        Comparator.nullsFirst(Comparator.naturalOrder())))
+                .orElseThrow(() -> new BusinessValidationException(
+                        "Driver " + driverId + " has no active trip — cannot take custody of a package"));
+        return trip;
+    }
+
+    /**
+     * Writes the current trip/company context onto the package and appends an
+     * immutable carrier leg so the driver → trip → vehicle → company chain
+     * survives the short-lived trip mirror.
+     */
+    private void attachDriverContext(PackageEntity pkg, Long driverId, CavgoTripEntity trip,
+                                     CustodianRole role, PackageStatus fromStatus, PackageStatus toStatus) {
+        var now = Instant.now();
+        var companyId = userService.getCompanyIdForUser(driverId);
+
+        pkg.setTripId(trip.getTripId());
+        pkg.setCompanyRefId(trip.getCompanyId());
+        if (companyId != null) {
+            pkg.setCompanyId(companyId);
+        }
+        pkg.setPackageOrigin(PackageOrigin.FLEET);
+        pkg.setUpdatedAt(now);
+        packageRepo.save(pkg);
+
+        carrierLegRepo.save(PackageCarrierLegEntity.builder()
+                .packageId(pkg.getId())
+                .driverId(driverId)
+                .tripId(trip.getTripId())
+                .companyId(companyId)
+                .companyRefId(trip.getCompanyId())
+                .vehicleId(trip.getVehicleId())
+                .vehicleJson(trip.getVehicleJson())
+                .custodianRole(role)
+                .fromStatus(fromStatus == null ? null : fromStatus.name())
+                .toStatus(toStatus == null ? null : toStatus.name())
+                .linkedAt(now)
+                .createdAt(now)
+                .build());
+    }
+
     /**
      * Core logic: accept a single package — update status (CREATED → ACCEPTED for
      * OPEN_ROUTE, CREATED → ORIGIN_OFFICE for FIXED_ROUTE; in-flight packages
@@ -264,9 +348,9 @@ public class PackageService {
         var pkg = packageRepo.findById(packageId)
                 .orElseThrow(() -> new BusinessValidationException("Package not found: " + packageId));
 
-        if (tripId != null) {
-            pkg.setTripId(tripId);
-        }
+        var driverTrip = custodianRole == CustodianRole.DRIVER
+                ? requireActiveTripForDriver(actorId, tripId)
+                : null;
 
         // Re-validate right before mutation — guards against race conditions
         // where the package status was changed (e.g. cancelled) after
@@ -316,8 +400,12 @@ public class PackageService {
             // office worker keeps seeing and acting on it.
             custodianRole = CustodianRole.OFFICE;
         }
-        pkg.setUpdatedAt(Instant.now());
-        packageRepo.save(pkg);
+        if (driverTrip != null) {
+            attachDriverContext(pkg, actorId, driverTrip, custodianRole, previousStatus, newStatus);
+        } else {
+            pkg.setUpdatedAt(Instant.now());
+            packageRepo.save(pkg);
+        }
 
         // Notify previous custodian (if any) that they've been replaced
         priorCustodian.ifPresent(prev -> {
@@ -618,6 +706,7 @@ public class PackageService {
         var assignerRole = SecurityUtils.getCurrentUserRole();
         validationService.validateAssigner(input.assignedBy(), assignerRole);
         validationService.validateDriver(input.driverId());
+        var driverTrip = requireActiveTripForDriver(input.driverId(), input.tripId());
 
         // The assigner must hold current custody (or be trusted office staff) —
         // replaces the old one-time handover-token proof.
@@ -630,11 +719,8 @@ public class PackageService {
             validationService.validateTransition(pkg.getStatus(), PackageStatus.ASSIGNED_DRIVER, pkg.getDeliveryType());
             pkg.setStatus(PackageStatus.ASSIGNED_DRIVER);
         }
-        if (input.tripId() != null) {
-            pkg.setTripId(input.tripId());
-        }
-        pkg.setUpdatedAt(Instant.now());
-        packageRepo.save(pkg);
+        attachDriverContext(pkg, input.driverId(), driverTrip, CustodianRole.DRIVER,
+                previousStatus, pkg.getStatus());
 
         var priorCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId());
 
@@ -817,7 +903,20 @@ public class PackageService {
     public PackageResponse assignPackageCompany(AssignPackageCompanyInput input) {
         var pkg = packageRepo.findById(input.packageId())
                 .orElseThrow(() -> new BusinessValidationException("Package not found: " + input.packageId()));
+
+        // A non-admin may only attach a package to their own company.
+        var callerId = SecurityUtils.getCurrentUserId();
+        var callerCompanyId = callerId == null ? null : userService.getCompanyIdForUser(callerId);
+        if (!SecurityUtils.hasAnyRole(Role.ADMIN, Role.SUPER_ADMIN)
+                && !Objects.equals(callerCompanyId, input.companyId())) {
+            throw new BusinessValidationException("Cannot assign a package to a company you do not belong to");
+        }
+
         pkg.setCompanyId(input.companyId());
+        pkg.setPackageOrigin(PackageOrigin.FLEET);
+        if (pkg.getTripId() != null) {
+            cavgoTripRepo.findById(pkg.getTripId()).ifPresent(t -> pkg.setCompanyRefId(t.getCompanyId()));
+        }
         pkg.setUpdatedAt(Instant.now());
         packageRepo.save(pkg);
         return toResponse(pkg);
@@ -827,9 +926,24 @@ public class PackageService {
     public PackageResponse assignPackageTrip(AssignPackageTripInput input) {
         var pkg = packageRepo.findById(input.packageId())
                 .orElseThrow(() -> new BusinessValidationException("Package not found: " + input.packageId()));
-        pkg.setTripId(input.tripId());
-        pkg.setUpdatedAt(Instant.now());
-        packageRepo.save(pkg);
+
+        var currentDriverId = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId())
+                .filter(c -> c.getRole() == CustodianRole.DRIVER)
+                .map(com.gocavgo.delivary.entity.delivery.PackageCustodianEntity::getUserId)
+                .orElse(null);
+
+        if (currentDriverId != null) {
+            // Repair path: keep the link consistent with the package's current driver.
+            var trip = requireActiveTripForDriver(currentDriverId, input.tripId());
+            attachDriverContext(pkg, currentDriverId, trip, CustodianRole.DRIVER, pkg.getStatus(), pkg.getStatus());
+        } else {
+            if (!SecurityUtils.hasAnyRole(Role.ADMIN, Role.SUPER_ADMIN)) {
+                throw new BusinessValidationException("Only admins may set a trip on a package with no driver");
+            }
+            pkg.setTripId(input.tripId());
+            pkg.setUpdatedAt(Instant.now());
+            packageRepo.save(pkg);
+        }
         return toResponse(pkg);
     }
 
@@ -1478,6 +1592,22 @@ public class PackageService {
         return toResponses(List.of(pkg)).get(0);
     }
 
+    private PackageResponse.CarrierLegResponse toCarrierLegResponse(PackageCarrierLegEntity leg) {
+        return new PackageResponse.CarrierLegResponse(
+                leg.getId(),
+                leg.getDriverId(),
+                leg.getTripId(),
+                leg.getCompanyId(),
+                leg.getCompanyRefId(),
+                leg.getVehicleId(),
+                leg.getVehicleJson(),
+                leg.getCustodianRole(),
+                leg.getFromStatus(),
+                leg.getToStatus(),
+                leg.getLinkedAt()
+        );
+    }
+
     /**
      * Batched assembly of package responses. Instead of running ~10 queries per
      * package (the classic N+1 explosion), every nested collection is fetched
@@ -1524,7 +1654,11 @@ public class PackageService {
         var custodyByPackage = custodyRepo.findByPackageIdInOrderByTimestampAsc(ids).stream()
                 .collect(Collectors.groupingBy(PackageCustodyEntity::getPackageId));
 
-        // ── 5. Open (PENDING/REQUESTED) transfers, batched (2-3 queries) ──
+        // ── 5. Carrier legs (trip/company/vehicle history), batched ──
+        var legsByPackage = carrierLegRepo.findAllByPackageIdIn(ids).stream()
+                .collect(Collectors.groupingBy(PackageCarrierLegEntity::getPackageId));
+
+        // ── 6. Open (PENDING/REQUESTED) transfers, batched (2-3 queries) ──
         var transfersByPackage = transferService.getOpenTransfersByPackageIds(ids);
 
         var results = new ArrayList<PackageResponse>(packages.size());
@@ -1560,8 +1694,12 @@ public class PackageService {
 
             var transfers = transfersByPackage.getOrDefault(packageId, List.of());
 
+            var carrierLegs = legsByPackage.getOrDefault(packageId, List.of()).stream()
+                    .map(this::toCarrierLegResponse)
+                    .toList();
+
             results.add(deliveryMapper.toFullResponse(
-                    pkg, custodians, people, locations, detail, events, custody, transfers
+                    pkg, custodians, people, locations, detail, events, custody, carrierLegs, transfers
             ));
         }
         return results;

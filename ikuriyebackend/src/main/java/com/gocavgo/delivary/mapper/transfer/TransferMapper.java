@@ -31,6 +31,7 @@ public interface TransferMapper {
                 entity.getRequestorId(),
                 entity.getStatus(),
                 transferCode,
+                entity.getTripId(),
                 packages,
                 entity.getCreatedAt(),
                 entity.getUpdatedAt()

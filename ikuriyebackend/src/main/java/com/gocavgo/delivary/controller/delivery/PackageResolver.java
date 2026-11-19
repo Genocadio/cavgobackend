@@ -44,6 +44,7 @@ public class PackageResolver {
     private final com.gocavgo.delivary.controller.graphql.NoticeResolver noticeResolver;
 
     @QueryMapping("package")
+    @PreAuthorize("isAuthenticated()")
     public PackageResponse packageQuery(@Argument UUID id) {
         return packageService.getPackageById(id);
     }
@@ -54,6 +55,7 @@ public class PackageResolver {
     }
 
     @QueryMapping
+    @PreAuthorize("isAuthenticated()")
     public DeliveryPackagePage packagesByCreator(
             @Argument Long creatorId,
             @Argument PackageStatus status,
@@ -65,6 +67,7 @@ public class PackageResolver {
     }
 
     @QueryMapping
+    @PreAuthorize("isAuthenticated()")
     public DeliveryPackagePage packagesByDriver(
             @Argument Long driverId,
             @Argument PackageStatus status,
@@ -76,6 +79,7 @@ public class PackageResolver {
     }
 
     @QueryMapping
+    @PreAuthorize("isAuthenticated()")
     public DeliveryPackagePage packagesByStatus(
             @Argument PackageStatus status,
             @Argument SortOrder order,
@@ -86,6 +90,7 @@ public class PackageResolver {
     }
 
     @QueryMapping
+    @PreAuthorize("isAuthenticated()")
     public DeliveryPackagePage availablePackages(
             @Argument PackageStatus status,
             @Argument SortOrder order,
@@ -111,6 +116,7 @@ public class PackageResolver {
     }
 
     @QueryMapping
+    @PreAuthorize("isAuthenticated()")
     public DeliveryPackagePage packagesByCustodian(
             @Argument CustodianRole role,
             @Argument Long custodianId,
@@ -123,6 +129,7 @@ public class PackageResolver {
     }
 
     @QueryMapping
+    @PreAuthorize("isAuthenticated()")
     public DeliveryPackagePage packagesByUser(
             @Argument Long userId,
             @Argument PackageStatus status,
@@ -171,11 +178,13 @@ public class PackageResolver {
     }
 
     @QueryMapping
+    @PreAuthorize("isAuthenticated()")
     public List<PackageResponse.EventResponse> packageHistory(@Argument UUID packageId) {
         return packageService.getPackageHistory(packageId);
     }
 
     @QueryMapping
+    @PreAuthorize("isAuthenticated()")
     public List<PackageResponse.CustodyResponse> packageCustody(@Argument UUID packageId) {
         return packageService.getPackageCustodyHistory(packageId);
     }

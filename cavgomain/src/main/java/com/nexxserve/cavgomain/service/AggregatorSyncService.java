@@ -32,6 +32,10 @@ public class AggregatorSyncService {
     @Value("${aggregator.base-url:}")
     private String aggregatorBaseUrl;
 
+    /** Shared secret for the aggregator's internal push endpoints. */
+    @Value("${aggregator.internal-api-key:}")
+    private String aggregatorInternalApiKey;
+
     // Store scheduled tasks per company ID
     private final Map<Long, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
 
@@ -102,15 +106,28 @@ public class AggregatorSyncService {
     }
 
     /**
+     * Headers for the aggregator's internal push endpoints, including the shared
+     * secret the aggregator requires (INTERNAL_API_KEY / x-internal-api-key).
+     */
+    private HttpHeaders internalHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        if (aggregatorInternalApiKey != null && !aggregatorInternalApiKey.isEmpty()) {
+            headers.set("x-internal-api-key", aggregatorInternalApiKey);
+        } else {
+            log.warn("aggregator.internal-api-key is not configured — push sync will be rejected by the aggregator");
+        }
+        return headers;
+    }
+
+    /**
      * Sync vehicles to aggregator
      */
     private void syncVehicles(Long companyId, List<InternalVehicleResponseDto> vehicles) {
         String url = aggregatorBaseUrl + "/company/" + companyId + "/vehicle";
         
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<List<InternalVehicleResponseDto>> request = new HttpEntity<>(vehicles, headers);
+            HttpEntity<List<InternalVehicleResponseDto>> request = new HttpEntity<>(vehicles, internalHeaders());
 
             restTemplate.exchange(url, HttpMethod.POST, request, Void.class);
             log.debug("Successfully synced {} vehicles for company {}", vehicles.size(), companyId);
@@ -127,9 +144,7 @@ public class AggregatorSyncService {
         String url = aggregatorBaseUrl + "/company/" + companyId + "/worker";
         
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<List<InternalWorkerResponseDto>> request = new HttpEntity<>(workers, headers);
+            HttpEntity<List<InternalWorkerResponseDto>> request = new HttpEntity<>(workers, internalHeaders());
 
             restTemplate.exchange(url, HttpMethod.POST, request, Void.class);
             log.debug("Successfully synced {} workers for company {}", workers.size(), companyId);

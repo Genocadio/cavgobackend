@@ -21,6 +21,12 @@ public interface CavgoTripJpaRepository extends JpaRepository<CavgoTripEntity, L
      */
     List<CavgoTripEntity> findByDriverIdAndStatus(Long driverId, String status);
 
+    /**
+     * The driver's most recent trip in a given status — the "current active trip"
+     * used when linking a package to a driver's trip at custody handoff.
+     */
+    CavgoTripEntity findTopByDriverIdAndStatusOrderByDepartureTimeDesc(Long driverId, String status);
+
     List<CavgoTripEntity> findByStatus(String status);
 
     /**

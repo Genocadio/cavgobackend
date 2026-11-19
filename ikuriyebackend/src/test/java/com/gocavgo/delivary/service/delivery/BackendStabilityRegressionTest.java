@@ -21,10 +21,12 @@ import com.gocavgo.delivary.enums.user.EmploymentType;
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
 import com.gocavgo.delivary.exception.BusinessValidationException;
+import com.gocavgo.delivary.repository.trip.CavgoTripJpaRepository;
 import com.gocavgo.delivary.repository.user.DriverProfileJpaRepository;
 import com.gocavgo.delivary.repository.user.UserJpaRepository;
 import com.gocavgo.delivary.repository.user.WorkerProfileJpaRepository;
 import com.gocavgo.delivary.service.transfer.TransferService;
+import com.gocavgo.delivary.testsupport.TripTestFixtures;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -66,6 +68,9 @@ class BackendStabilityRegressionTest {
     @Autowired
     private WorkerProfileJpaRepository workerProfileRepo;
 
+    @Autowired
+    private CavgoTripJpaRepository cavgoTripRepo;
+
     private long nextUserId = 4_000_000L;
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -93,6 +98,7 @@ class BackendStabilityRegressionTest {
                 .status(DriverStatus.ONLINE)
                 .createdAt(Instant.now())
                 .build());
+        TripTestFixtures.createActiveTrip(cavgoTripRepo, userId);
     }
 
     private void attachWorkerProfile(Long userId) {

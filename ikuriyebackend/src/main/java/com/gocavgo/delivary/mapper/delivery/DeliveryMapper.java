@@ -45,6 +45,7 @@ public interface DeliveryMapper {
     @Mapping(target = "details", source = "details")
     @Mapping(target = "events", source = "events")
     @Mapping(target = "custody", source = "custody")
+    @Mapping(target = "carrierLegs", source = "carrierLegs")
     @Mapping(target = "transfers", source = "transfers")
     PackageResponse toFullResponse(
             PackageEntity pkg,
@@ -54,6 +55,7 @@ public interface DeliveryMapper {
             PackageResponse.DetailResponse details,
             List<PackageResponse.EventResponse> events,
             List<PackageResponse.CustodyResponse> custody,
+            List<PackageResponse.CarrierLegResponse> carrierLegs,
             List<TransferResponse> transfers
     );
 }

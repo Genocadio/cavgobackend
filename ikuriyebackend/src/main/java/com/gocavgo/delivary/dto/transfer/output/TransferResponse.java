@@ -18,6 +18,8 @@ public record TransferResponse(
         Long requestorId,
         TransferStatus status,
         String transferCode,
+        /** Trip attached to this transfer hop, when one was supplied. */
+        Long tripId,
         List<TransferPackageResponse> packages,
         Instant createdAt,
         Instant updatedAt

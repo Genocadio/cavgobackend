@@ -15,7 +15,9 @@ import com.gocavgo.delivary.enums.transfer.TransferStatus;
 import com.gocavgo.delivary.enums.user.*;
 import com.gocavgo.delivary.repository.notification.NoticeRepository;
 import com.gocavgo.delivary.repository.notification.NoticeViewerRepository;
+import com.gocavgo.delivary.repository.trip.CavgoTripJpaRepository;
 import com.gocavgo.delivary.repository.user.DriverProfileJpaRepository;
+import com.gocavgo.delivary.testsupport.TripTestFixtures;
 import com.gocavgo.delivary.repository.user.UserJpaRepository;
 import com.gocavgo.delivary.service.transfer.TransferService;
 import org.junit.jupiter.api.DisplayName;
@@ -52,6 +54,9 @@ class FixedRouteMultiHopLifecycleTest {
 
     @Autowired
     private DriverProfileJpaRepository driverProfileRepo;
+
+    @Autowired
+    private CavgoTripJpaRepository cavgoTripRepo;
 
     @Autowired
     private NoticeRepository noticeRepo;
@@ -91,6 +96,7 @@ class FixedRouteMultiHopLifecycleTest {
                 .createdAt(Instant.now())
                 .build();
         driverProfileRepo.save(profile);
+        TripTestFixtures.createActiveTrip(cavgoTripRepo, userId);
     }
 
     private PackageResponse.CustodianResponse lastCustodian(PackageResponse pkg) {

@@ -156,6 +156,31 @@ type PackageCustodian {
     assignedAt: String!
 }
 
+"Whether a package is private or handled under a company (fleet)."
+enum PackageOrigin {
+    PRIVATE
+    FLEET
+}
+
+"One driver's trip/company/vehicle context at a custody handoff."
+type PackageCarrierLeg {
+    id: ID!
+    driverId: ID!
+    "The driver's active trip at handoff. Null for private packages."
+    tripId: ID
+    "Driver's company in the cavgomain office-UUID space."
+    companyId: ID
+    "Company id from the trip service, for admin joins."
+    companyRefId: ID
+    vehicleId: ID
+    "JSON vehicle snapshot from the trip service."
+    vehicleJson: String
+    custodianRole: CustodianRole!
+    fromStatus: String
+    toStatus: String
+    linkedAt: String!
+}
+
 "A delivery package — the core domain entity."
 type DeliveryPackage {
     "Internal UUID"
@@ -168,10 +193,22 @@ type DeliveryPackage {
     status: PackageStatus!
     "User who created the package"
     creatorId: ID!
-    "Company associated with the package"
+    "Company associated with the package (cavgomain office UUID)"
     companyId: ID
-    "Trip identifier for grouped shipments"
+    "Company id from the trip service (Long), for admin joins"
+    companyRefId: ID
+    "Current trip identifier for grouped shipments"
     tripId: ID
+    "PRIVATE or FLEET — admin focuses on FLEET packages"
+    packageOrigin: PackageOrigin!
+    "All trip ids this package has travelled under, one per driver leg"
+    tripIds: [ID!]!
+    "All company ids (office UUIDs) this package has travelled under"
+    companyIds: [ID!]!
+    "All trip-service company ids this package has travelled under"
+    companyRefIds: [ID!]!
+    "Per-driver trip/company/vehicle context, oldest first"
+    carrierLegs: [PackageCarrierLeg!]!
     "History of custodians who held this package"
     custodians: [PackageCustodian!]!
     "Sender and receiver information"
@@ -590,6 +627,8 @@ type Transfer {
     matchCompanyId: ID
     "Optional user filter"
     matchUserId: ID
+    "Trip attached to this transfer hop, when supplied by the accepting driver"
+    tripId: ID
     "User who requested this transfer (CONFIRM mode)"
     requestorId: ID
     "Current status"

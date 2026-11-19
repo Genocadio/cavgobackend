@@ -2,6 +2,15 @@ import { gql } from "graphql-tag";
 import * as db from "../db";
 import type { Car, Driver, Trip, Destination } from "../types";
 import { pubsub, TRIGGERS } from "../services/pubsub";
+import {
+  assertCarAccess,
+  assertCompanyAccess,
+  assertDriverAccess,
+  assertTripAccess,
+  type AuthContext,
+} from "../auth/context";
+
+type Context = { auth?: AuthContext };
 
 const typeDefs = gql`
   enum DriverStatus {
@@ -344,22 +353,30 @@ const resolvers = {
     },
   },
   Query: {
-    driver: async (_: unknown, { id }: { id: string }) => {
+    driver: async (_: unknown, { id }: { id: string }, ctx: Context) => {
+      await assertDriverAccess(ctx.auth, id);
       const driver = await db.driverRepository.getDriverById(id);
       return driver ? wrapDriver(driver) : null;
     },
-    car: async (_: unknown, { id }: { id: string }) => {
+    car: async (_: unknown, { id }: { id: string }, ctx: Context) => {
+      await assertCarAccess(ctx.auth, id);
       const car = await db.carRepository.getCarById(id);
       return car ? wrapCar(car) : null;
     },
-    tripsByCar: async (_: unknown, { carId }: { carId: string }) =>
-      (await db.tripRepository.getTripsByCarId(carId)).map(wrapTrip),
-    tripsByDriver: async (_: unknown, { driverId }: { driverId: string }) =>
-      (await db.tripRepository.getTripsByDriverId(driverId)).map(wrapTrip),
+    tripsByCar: async (_: unknown, { carId }: { carId: string }, ctx: Context) => {
+      await assertCarAccess(ctx.auth, carId);
+      return (await db.tripRepository.getTripsByCarId(carId)).map(wrapTrip);
+    },
+    tripsByDriver: async (_: unknown, { driverId }: { driverId: string }, ctx: Context) => {
+      await assertDriverAccess(ctx.auth, driverId);
+      return (await db.tripRepository.getTripsByDriverId(driverId)).map(wrapTrip);
+    },
     carsByCompany: async (
       _: unknown,
-      { companyId, limit, offset }: { companyId: string; limit?: number; offset?: number }
+      { companyId, limit, offset }: { companyId: string; limit?: number; offset?: number },
+      ctx: Context
     ) => {
+      assertCompanyAccess(ctx.auth, companyId);
       const result = await db.carRepository.getCarsByCompany(companyId, limit, offset);
       return {
         items: result.items.map(wrapCar),
@@ -368,12 +385,16 @@ const resolvers = {
         offset: result.offset,
       };
     },
-    driversByCompany: async (_: unknown, { companyId }: { companyId: string }) =>
-      (await db.driverRepository.getDriversByCompany(companyId)).map(wrapDriver),
+    driversByCompany: async (_: unknown, { companyId }: { companyId: string }, ctx: Context) => {
+      assertCompanyAccess(ctx.auth, companyId);
+      return (await db.driverRepository.getDriversByCompany(companyId)).map(wrapDriver);
+    },
     getCarsByCompany: async (
       _: unknown,
-      { companyId, limit, offset }: { companyId: string; limit?: number; offset?: number }
+      { companyId, limit, offset }: { companyId: string; limit?: number; offset?: number },
+      ctx: Context
     ) => {
+      assertCompanyAccess(ctx.auth, companyId);
       const result = await db.carRepository.getCarsByCompany(companyId, limit, offset);
       return {
         items: result.items.map(wrapCar),
@@ -382,35 +403,51 @@ const resolvers = {
         offset: result.offset,
       };
     },
-    getDriversByCompany: async (_: unknown, { companyId }: { companyId: string }) =>
-      (await db.driverRepository.getDriversByCompany(companyId)).map(wrapDriver),
-    driverMetrics: async (_: unknown, { driverId }: { driverId: string }) =>
-      db.metricsRepository.getDriverMetrics(driverId),
+    getDriversByCompany: async (_: unknown, { companyId }: { companyId: string }, ctx: Context) => {
+      assertCompanyAccess(ctx.auth, companyId);
+      return (await db.driverRepository.getDriversByCompany(companyId)).map(wrapDriver);
+    },
+    driverMetrics: async (_: unknown, { driverId }: { driverId: string }, ctx: Context) => {
+      await assertDriverAccess(ctx.auth, driverId);
+      return db.metricsRepository.getDriverMetrics(driverId);
+    },
     carMetrics: async (
       _: unknown,
-      { carId, startDate, endDate }: { carId: string; startDate?: string; endDate?: string }
+      { carId, startDate, endDate }: { carId: string; startDate?: string; endDate?: string },
+      ctx: Context
     ) => {
+      await assertCarAccess(ctx.auth, carId);
       if (startDate || endDate) {
-        // Use date range filtering
         return db.metricsRepository.getCarMetricsByDateRange(carId, startDate, endDate);
-      } else {
-        // Default: return today's metrics
-        return db.metricsRepository.getCarMetricsByDateRange(carId);
       }
+      return db.metricsRepository.getCarMetricsByDateRange(carId);
     },
-    tripMetrics: async (_: unknown, { tripId }: { tripId: string }) =>
-      db.metricsRepository.getTripMetrics(tripId),
-    companyDashboard: async (_: unknown, { companyId }: { companyId: string }) =>
-      db.companyRepository.getCompanyDashboardStats(companyId),
+    tripMetrics: async (_: unknown, { tripId }: { tripId: string }, ctx: Context) => {
+      await assertTripAccess(ctx.auth, tripId);
+      return db.metricsRepository.getTripMetrics(tripId);
+    },
+    companyDashboard: async (_: unknown, { companyId }: { companyId: string }, ctx: Context) => {
+      assertCompanyAccess(ctx.auth, companyId);
+      return db.companyRepository.getCompanyDashboardStats(companyId);
+    },
     companyMetrics: async (
       _: unknown,
-      { companyId, startTime, endTime }: { companyId: string; startTime?: number; endTime?: number }
-    ) => db.companyMetricsRepository.getCompanyPeriodMetrics(companyId, startTime, endTime),
-    tripsByCompany: async (_: unknown, { companyId }: { companyId: string }) =>
-      (await db.tripRepository.getTripsByCompanyId(companyId)).map(wrapTrip),
-    getActiveCompanyTrips: async (_: unknown, { companyId }: { companyId: string }) =>
-      (await db.tripRepository.getActiveTripsByCompanyId(companyId)).map(wrapTrip),
-    getTripSnapshot: async (_: unknown, { tripId }: { tripId: string }) => {
+      { companyId, startTime, endTime }: { companyId: string; startTime?: number; endTime?: number },
+      ctx: Context
+    ) => {
+      assertCompanyAccess(ctx.auth, companyId);
+      return db.companyMetricsRepository.getCompanyPeriodMetrics(companyId, startTime, endTime);
+    },
+    tripsByCompany: async (_: unknown, { companyId }: { companyId: string }, ctx: Context) => {
+      assertCompanyAccess(ctx.auth, companyId);
+      return (await db.tripRepository.getTripsByCompanyId(companyId)).map(wrapTrip);
+    },
+    getActiveCompanyTrips: async (_: unknown, { companyId }: { companyId: string }, ctx: Context) => {
+      assertCompanyAccess(ctx.auth, companyId);
+      return (await db.tripRepository.getActiveTripsByCompanyId(companyId)).map(wrapTrip);
+    },
+    getTripSnapshot: async (_: unknown, { tripId }: { tripId: string }, ctx: Context) => {
+      await assertTripAccess(ctx.auth, tripId);
       // Try existing snapshot first
       const existing = await db.snapshotRepository.getSnapshot(tripId);
       if (existing) return existing;
@@ -426,7 +463,8 @@ const resolvers = {
   },
   Subscription: {
     activeCompanyTrips: {
-      subscribe: async (_: unknown, { companyId }: { companyId: string }) => {
+      subscribe: async (_: unknown, { companyId }: { companyId: string }, ctx: Context) => {
+        assertCompanyAccess(ctx.auth, companyId);
         // Get initial data
         const initialTrips = (await db.tripRepository.getActiveTripsByCompanyId(companyId)).map(wrapTrip);
         
@@ -452,7 +490,8 @@ const resolvers = {
       },
     },
     trip: {
-      subscribe: async (_: unknown, { tripId }: { tripId: string }) => {
+      subscribe: async (_: unknown, { tripId }: { tripId: string }, ctx: Context) => {
+        await assertTripAccess(ctx.auth, tripId);
         // Get initial trip data
         const initialTrip = await db.tripRepository.getTripById(tripId);
         
@@ -478,7 +517,8 @@ const resolvers = {
       },
     },
     tripSnapshot: {
-      subscribe: async (_: unknown, { tripId }: { tripId: string }) => {
+      subscribe: async (_: unknown, { tripId }: { tripId: string }, ctx: Context) => {
+        await assertTripAccess(ctx.auth, tripId);
         // Get initial snapshot data
         const initialSnapshot = await db.snapshotRepository.getSnapshot(tripId);
         

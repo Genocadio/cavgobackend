@@ -19,6 +19,12 @@ public interface PackageJpaRepository extends JpaRepository<PackageEntity, UUID>
     Page<PackageEntity> findByStatus(PackageStatus status, Pageable pageable);
     Page<PackageEntity> findByStatusAndIdNotIn(PackageStatus status, java.util.Collection<UUID> ids, Pageable pageable);
 
+    Page<PackageEntity> findByCompanyId(UUID companyId, Pageable pageable);
+
+    Page<PackageEntity> findByCompanyRefId(Long companyRefId, Pageable pageable);
+
+    Page<PackageEntity> findByTripId(Long tripId, Pageable pageable);
+
     @org.springframework.data.jpa.repository.Query("SELECT p FROM PackageEntity p WHERE p.id IN :ids AND p.updatedAt >= :since ORDER BY p.updatedAt DESC")
     List<PackageEntity> findByIdInAndUpdatedAtGreaterThanEqual(@org.springframework.data.repository.query.Param("ids") java.util.Collection<UUID> ids, @org.springframework.data.repository.query.Param("since") java.time.Instant since);
 

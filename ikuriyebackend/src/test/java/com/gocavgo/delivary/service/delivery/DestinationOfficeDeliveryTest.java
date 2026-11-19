@@ -14,8 +14,10 @@ import com.gocavgo.delivary.enums.transfer.TransferRuleType;
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
 import com.gocavgo.delivary.repository.notification.NoticeViewerRepository;
+import com.gocavgo.delivary.repository.trip.CavgoTripJpaRepository;
 import com.gocavgo.delivary.repository.user.UserJpaRepository;
 import com.gocavgo.delivary.service.transfer.TransferService;
+import com.gocavgo.delivary.testsupport.TripTestFixtures;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -58,6 +60,9 @@ class DestinationOfficeDeliveryTest {
 
     @Autowired
     private NoticeViewerRepository noticeViewerRepo;
+
+    @Autowired
+    private CavgoTripJpaRepository cavgoTripRepo;
 
     @Autowired
     private com.gocavgo.delivary.repository.notification.NoticeRepository noticeRepo;
@@ -104,6 +109,9 @@ class DestinationOfficeDeliveryTest {
                 .updatedAt(Instant.now())
                 .build();
         userRepo.save(user);
+        if (role == Role.DRIVER) {
+            TripTestFixtures.createActiveTrip(cavgoTripRepo, user.getId());
+        }
         return user.getId();
     }
 

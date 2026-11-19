@@ -14,8 +14,10 @@ import com.gocavgo.delivary.enums.transfer.TransferRuleType;
 import com.gocavgo.delivary.enums.transfer.TransferStatus;
 import com.gocavgo.delivary.enums.user.Role;
 import com.gocavgo.delivary.enums.user.UserStatus;
+import com.gocavgo.delivary.repository.trip.CavgoTripJpaRepository;
 import com.gocavgo.delivary.repository.user.UserJpaRepository;
 import com.gocavgo.delivary.service.transfer.TransferService;
+import com.gocavgo.delivary.testsupport.TripTestFixtures;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -52,6 +54,9 @@ class FixedRouteTransferAcceptTest {
     @Autowired
     private UserJpaRepository userRepo;
 
+    @Autowired
+    private CavgoTripJpaRepository cavgoTripRepo;
+
     // ── Helpers ────────────────────────────────────────────────────────────
 
     private long nextUserId = 2_000_000L;
@@ -75,6 +80,9 @@ class FixedRouteTransferAcceptTest {
                 .updatedAt(Instant.now())
                 .build();
         userRepo.save(user);
+        if (role == Role.DRIVER) {
+            TripTestFixtures.createActiveTrip(cavgoTripRepo, user.getId());
+        }
         return user.getId();
     }
 
