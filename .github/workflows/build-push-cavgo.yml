@@ -84,6 +84,7 @@ jobs:
 
       - name: Build and push postgres
         if: ${{ needs.detect-changes.outputs.postgres == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -96,6 +97,7 @@ jobs:
 
       - name: Build and push eureka
         if: ${{ needs.detect-changes.outputs.eureka == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./Eurekacavgo
@@ -107,6 +109,7 @@ jobs:
 
       - name: Build and push main
         if: ${{ needs.detect-changes.outputs.main == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./cavgomain
@@ -118,6 +121,7 @@ jobs:
 
       - name: Build and push gateway
         if: ${{ needs.detect-changes.outputs.gateway == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./Cavgogateway
@@ -129,6 +133,7 @@ jobs:
 
       - name: Build and push ridehail
         if: ${{ needs.detect-changes.outputs.ridehail == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./ridehail
@@ -140,6 +145,7 @@ jobs:
 
       - name: Build and push trips
         if: ${{ needs.detect-changes.outputs.trips == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./cavgotrips
@@ -151,6 +157,7 @@ jobs:
 
       - name: Build and push booking
         if: ${{ needs.detect-changes.outputs.booking == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./cavgoBooking
@@ -162,6 +169,7 @@ jobs:
 
       - name: Build and push mqtt
         if: ${{ needs.detect-changes.outputs.mqtt == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./cavgomqt
@@ -173,6 +181,7 @@ jobs:
 
       - name: Build and push ussd
         if: ${{ needs.detect-changes.outputs.ussd == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./ussdService
@@ -184,6 +193,7 @@ jobs:
 
       - name: Build and push navigation
         if: ${{ needs.detect-changes.outputs.navigation == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./Navigation
@@ -195,6 +205,7 @@ jobs:
 
       - name: Build and push adminaggregate
         if: ${{ needs.detect-changes.outputs.adminaggregate == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./adminaggregate
@@ -206,6 +217,7 @@ jobs:
 
       - name: Build and push ikuriyebackend
         if: ${{ needs.detect-changes.outputs.ikuriye == 'true' || github.event_name == 'workflow_dispatch' }}
+        continue-on-error: true
         uses: docker/build-push-action@v5
         with:
           context: ./ikuriyebackend
