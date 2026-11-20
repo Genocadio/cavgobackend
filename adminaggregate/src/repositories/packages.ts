@@ -108,6 +108,12 @@ export async function upsertPackageSnapshot(snapshot: CompanyPackage): Promise<v
   }
 }
 
+export interface PackageActivityFilters {
+  tripId?: string | null | undefined;
+  carId?: string | null | undefined;
+  driverId?: string | null | undefined;
+}
+
 /**
  * Company-scoped package activity. A package is "sent by this company" when it
  * carries the company id directly or any carrier leg does, and it was either
@@ -118,7 +124,8 @@ export async function upsertPackageSnapshot(snapshot: CompanyPackage): Promise<v
 export async function getCompanyPackageActivity(
   companyId: string,
   range: DateRange,
-  statuses?: readonly PackageStatus[] | null
+  statuses?: readonly PackageStatus[] | null,
+  filters?: PackageActivityFilters
 ): Promise<CompanyPackageActivity> {
   const inCompany = sql`(
     ${packages.companyId} = ${companyId}
@@ -139,12 +146,44 @@ export async function getCompanyPackageActivity(
     )
   )`;
 
+  const conditions = [inCompany, inRange];
+  const tripId = filters?.tripId ?? null;
+  const carId = filters?.carId ?? null;
+  const driverId = filters?.driverId ?? null;
+
+  if (tripId) {
+    conditions.push(sql`(
+      ${packages.tripId} = ${tripId}
+      OR EXISTS (
+        SELECT 1 FROM package_carrier_legs leg
+        WHERE leg.package_id = ${packages.id}
+          AND leg.trip_id = ${tripId}
+      )
+    )`);
+  }
+
+  if (carId) {
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM package_carrier_legs leg
+      WHERE leg.package_id = ${packages.id}
+        AND leg.vehicle_id = ${carId}
+    )`);
+  }
+
+  if (driverId) {
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM package_carrier_legs leg
+      WHERE leg.package_id = ${packages.id}
+        AND leg.driver_id = ${driverId}
+    )`);
+  }
+
   // Fetch the full in-scope window so the summary counts all statuses, then
   // apply the requested status filter to the returned `packages` list.
   const rows = await db
     .select()
     .from(packages)
-    .where(and(inCompany, inRange))
+    .where(and(...conditions))
     .orderBy(desc(packages.createdAt));
 
   if (rows.length === 0) {

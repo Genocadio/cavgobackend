@@ -373,6 +373,9 @@ const typeDefs = gql`
       startDate: String
       endDate: String
       statuses: [PackageStatus!]
+      tripId: ID
+      carId: ID
+      driverId: ID
     ): CompanyPackageActivity
   }
 
@@ -566,7 +569,18 @@ const resolvers = {
         startDate,
         endDate,
         statuses,
-      }: { companyId: string; startDate?: string; endDate?: string; statuses?: PackageStatus[] },
+        tripId,
+        carId,
+        driverId,
+      }: {
+        companyId: string;
+        startDate?: string;
+        endDate?: string;
+        statuses?: PackageStatus[];
+        tripId?: string;
+        carId?: string;
+        driverId?: string;
+      },
       ctx: Context
     ) => {
       assertCompanyAccess(ctx.auth, companyId);
@@ -574,7 +588,12 @@ const resolvers = {
       return db.packageRepository.getCompanyPackageActivity(
         companyId,
         resolveDateRange(startDate, endDate),
-        requested ?? ACTIVE_PACKAGE_STATUSES
+        requested ?? ACTIVE_PACKAGE_STATUSES,
+        {
+          tripId: tripId ?? null,
+          carId: carId ?? null,
+          driverId: driverId ?? null,
+        }
       );
     },
   },
