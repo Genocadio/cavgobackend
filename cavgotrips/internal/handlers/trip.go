@@ -180,6 +180,24 @@ func (h *TripHandler) GetTrips(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cargo-only vehicles cannot be shown in passenger bookings/trip listings.
+	passengerTrips := make([]models.Trip, 0, len(trips))
+	for _, t := range trips {
+		if t.Vehicle.ServiceType == "CARGO" {
+			continue
+		}
+		passengerTrips = append(passengerTrips, t)
+	}
+	if len(passengerTrips) != len(trips) {
+		removed := int64(len(trips) - len(passengerTrips))
+		if total >= removed {
+			total -= removed
+		} else {
+			total = int64(len(passengerTrips))
+		}
+	}
+	trips = passengerTrips
+
 	// Extract trip IDs for session
 	tripIDs := make([]int64, len(trips))
 	for i, trip := range trips {

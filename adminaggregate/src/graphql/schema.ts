@@ -29,6 +29,12 @@ const typeDefs = gql`
     OCCUPIED
   }
 
+  enum VehicleServiceType {
+    PASSENGER
+    CARGO
+    PASSENGER_CARGO
+  }
+
   enum TripStatus {
     scheduled
     in_progress
@@ -103,6 +109,8 @@ const typeDefs = gql`
     id: ID!
     plate: String!
     model: String!
+    vehicleType: String
+    serviceType: VehicleServiceType!
     capacity: Int!
     status: VehicleStatus!
     isOnline: Boolean!

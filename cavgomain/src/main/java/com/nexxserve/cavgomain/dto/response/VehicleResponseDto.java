@@ -4,6 +4,7 @@ import com.nexxserve.cavgomain.entity.Vehicle;
 import com.nexxserve.cavgomain.entity.VehicleAssignment;
 import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.enums.AssignmentStatus;
+import com.nexxserve.cavgomain.enums.VehicleServiceType;
 import com.nexxserve.cavgomain.enums.VehicleStatus;
 import com.nexxserve.cavgomain.enums.VehicleType;
 import lombok.Data;
@@ -20,6 +21,7 @@ public class VehicleResponseDto {
     private int capacity;
     private String licensePlate;
     private VehicleType vehicleType;
+    private VehicleServiceType serviceType;
     private VehicleStatus status;
     private String createdAt;
     private String updatedAt;
@@ -39,6 +41,7 @@ public class VehicleResponseDto {
         dto.setCapacity(entity.getCapacity());
         dto.setLicensePlate(entity.getLicensePlate());
         dto.setVehicleType(entity.getVehicleType());
+        dto.setServiceType(entity.getServiceType() != null ? entity.getServiceType() : VehicleServiceType.PASSENGER_CARGO);
         dto.setStatus(entity.getStatus());
         dto.setCreatedAt(entity.getCreatedAt().toString());
         dto.setUpdatedAt(entity.getUpdatedAt() != null ? entity.getUpdatedAt().toString() : null);

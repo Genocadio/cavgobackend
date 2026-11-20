@@ -93,6 +93,12 @@ func (s *bookingService) CreateBooking(ctx context.Context, req *models.BookingR
 		return nil, fmt.Errorf("trip is not available: status is %s", trip.Status)
 	}
 
+	// Cargo-only vehicles have 0 passenger seats and cannot be booked by passengers
+	if trip.Seats <= 0 {
+		fmt.Printf("[BookingService] [STEP 3.1/8] ERROR: Trip has no passenger seats (cargo-only or invalid): tripId=%d seats=%d\n", trip.ID, trip.Seats)
+		return nil, fmt.Errorf("trip is not available for passenger bookings")
+	}
+
 	// Validate bookable location based on trip status and location progression
 	fmt.Printf("[BookingService] [STEP 3.1/8] Validating bookable location: pickupLocationId=%s tripStatus=%s\n", req.PickupLocationID, trip.Status)
 	if err := s.snapshotService.ValidateBookableLocation(trip, req.PickupLocationID); err != nil {

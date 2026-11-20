@@ -157,7 +157,9 @@ public class GlobalExceptionHandler {
 
         String message = "Request body is missing or malformed";
         if (ex.getMessage() != null) {
-            if (ex.getMessage().contains("VehicleType")) {
+            if (ex.getMessage().contains("VehicleServiceType")) {
+                message = "Invalid value for serviceType. Allowed values: PASSENGER, CARGO, PASSENGER_CARGO";
+            } else if (ex.getMessage().contains("VehicleType")) {
                 message = "Invalid value for vehicleType. Allowed values: SEDAN, SUV, TRUCK, VAN, MOTORCYCLE, BUS, MINIBUS";
             } else if (ex.getCause() != null && ex.getCause().getMessage() != null) {
                 // Include more details from the root cause

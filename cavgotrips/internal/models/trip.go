@@ -21,7 +21,21 @@ type Vehicle struct {
 	CompanyName  string         `json:"company_name"`
 	Capacity     int            `json:"capacity"`
 	LicensePlate string         `json:"license_plate"`
+	ServiceType  string         `json:"service_type,omitempty"`
 	Driver       DriverSnapshot `json:"driver"`
+}
+
+// IsPassengerCapable returns true when the vehicle can be used for passenger bookings.
+// Defaults to true for legacy/unknown service types.
+func (v Vehicle) IsPassengerCapable() bool {
+	switch v.ServiceType {
+	case "CARGO":
+		return false
+	case "PASSENGER", "PASSENGER_CARGO", "":
+		return true
+	default:
+		return true
+	}
 }
 
 // Trip represents a snapshot usage of a route

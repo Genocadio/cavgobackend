@@ -29,6 +29,11 @@ export const vehicleStatusEnum = pgEnum("vehicle_status_enum", [
   "OUT_OF_SERVICE",
   "OCCUPIED",
 ]);
+export const vehicleServiceTypeEnum = pgEnum("vehicle_service_type_enum", [
+  "PASSENGER",
+  "CARGO",
+  "PASSENGER_CARGO",
+]);
 export const tripStatusEnum = pgEnum("trip_status_enum", [
   "scheduled",
   "in_progress",
@@ -108,6 +113,7 @@ export const cars = pgTable("cars", {
   model: text("model").notNull(),
   make: text("make"),
   vehicleType: text("vehicle_type"),
+  serviceType: vehicleServiceTypeEnum("service_type").notNull().default("PASSENGER_CARGO"),
   capacity: integer("capacity").notNull(),
   status: vehicleStatusEnum("status").notNull(),
   isOnline: boolean("is_online").notNull().default(false),

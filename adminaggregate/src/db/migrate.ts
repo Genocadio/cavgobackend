@@ -37,6 +37,14 @@ export async function migrate(): Promise<void> {
 
     await client.query(`
       DO $$ BEGIN
+        CREATE TYPE vehicle_service_type_enum AS ENUM ('PASSENGER', 'CARGO', 'PASSENGER_CARGO');
+      EXCEPTION
+        WHEN duplicate_object THEN null;
+      END $$;
+    `);
+
+    await client.query(`
+      DO $$ BEGIN
         CREATE TYPE trip_status_enum AS ENUM ('scheduled', 'in_progress', 'completed', 'cancelled');
       EXCEPTION
         WHEN duplicate_object THEN null;
@@ -133,6 +141,7 @@ export async function migrate(): Promise<void> {
         model TEXT NOT NULL,
         make TEXT,
         vehicle_type TEXT,
+        service_type vehicle_service_type_enum NOT NULL DEFAULT 'PASSENGER_CARGO',
         capacity INTEGER NOT NULL,
         status vehicle_status_enum NOT NULL,
         is_online BOOLEAN NOT NULL DEFAULT false,
@@ -352,8 +361,7 @@ export async function migrate(): Promise<void> {
       CREATE INDEX IF NOT EXISTS package_carrier_legs_linked_at_idx ON package_carrier_legs(linked_at);
     `);
 
-    // Alter car_locations table to make bearing and accuracy nullable (for existing tables)
-    // This handles cases where the table already exists with NOT NULL constraints
+    // Alter existing tables for backward-compatible schema evolution
     await client.query(`
       DO $$ 
       BEGIN
@@ -384,6 +392,15 @@ export async function migrate(): Promise<void> {
           AND column_name = 'order'
         ) THEN
           ALTER TABLE trip_destinations ADD COLUMN "order" INTEGER;
+        END IF;
+
+        -- Add service_type to cars for passenger/cargo capability (defaults to both for old data/apps)
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'cars'
+          AND column_name = 'service_type'
+        ) THEN
+          ALTER TABLE cars ADD COLUMN service_type vehicle_service_type_enum NOT NULL DEFAULT 'PASSENGER_CARGO';
         END IF;
       END $$;
     `);

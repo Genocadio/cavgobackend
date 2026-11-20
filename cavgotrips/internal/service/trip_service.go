@@ -171,6 +171,7 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		CompanyName  string `json:"companyName"`
 		Capacity     int    `json:"capacity"`
 		LicensePlate string `json:"licensePlate"`
+		ServiceType  string `json:"serviceType"`
 		Driver       *struct {
 			ID        int64  `json:"id"`
 			FirstName string `json:"firstName"`
@@ -206,17 +207,28 @@ func (s *TripService) CreateTrip(request *models.CreateTripRequest) (*models.Tri
 		driverPhone = vehicleResp.Driver.Phone
 	}
 
+	serviceType := vehicleResp.ServiceType
+	if serviceType == "" {
+		serviceType = "PASSENGER_CARGO"
+	}
+
 	vehicle := models.Vehicle{
 		ID:           vehicleResp.ID,
 		CompanyID:    vehicleResp.CompanyID,
 		CompanyName:  vehicleResp.CompanyName,
 		Capacity:     vehicleResp.Capacity,
 		LicensePlate: vehicleResp.LicensePlate,
+		ServiceType:  serviceType,
 		Driver: models.DriverSnapshot{
 			ID:    driverID,
 			Name:  driverName,
 			Phone: driverPhone,
 		},
+	}
+
+	// Cargo-only vehicles cannot be used for passenger trips/bookings.
+	if !vehicle.IsPassengerCapable() {
+		return nil, models.NewValidationError("vehicle is cargo-only and cannot be used for passenger trips")
 	}
 
 	// Determine trip price: use provided price or route price

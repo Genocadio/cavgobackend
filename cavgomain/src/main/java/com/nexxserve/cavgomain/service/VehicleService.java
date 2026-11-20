@@ -48,6 +48,7 @@ public class VehicleService {
 
     // CRUD methods
     public VehicleResponseDto createVehicle(VehicleRequestDto vehicle) {
+        vehicle.validateForServiceType();
         if (vehicleRepository.existsByLicensePlate(vehicle.getLicensePlate())) {
             throw new IllegalArgumentException("A vehicle with license plate '" + vehicle.getLicensePlate() + "' already exists. Please use a different license plate.");
         }
@@ -69,6 +70,7 @@ public class VehicleService {
      * company (via nexxauthUserId).
      */
     public VehicleCreateResult createVehicleWithPassword(VehicleRequestDto vehicle, Long authUserId) {
+        vehicle.validateForServiceType();
         if (vehicleRepository.existsByLicensePlate(vehicle.getLicensePlate())) {
             throw new IllegalArgumentException("A vehicle with license plate '" + vehicle.getLicensePlate() + "' already exists. Please use a different license plate.");
         }
@@ -79,7 +81,7 @@ public class VehicleService {
         newVehicle.setPasswordHash(passwordEncoder.encode(initialPassword));
 
         Vehicle saved = vehicleRepository.save(newVehicle);
-        
+
         // Initialize vehicle settings with defaults
         VehicleSettings settings = new VehicleSettings();
         settings.setVehicle(saved);
@@ -89,11 +91,11 @@ public class VehicleService {
         settings.setAppmode(false);
         settings.setSimulate(false);
         VehicleSettings savedSettings = settingsRepository.save(settings);
-        
+
         // Publish settings to RabbitMQ on vehicle registration
         VehicleSettingsMessage message = VehicleSettingsMessage.fromEntity(savedSettings, saved.getLicensePlate());
         settingsPublisher.publishSettingsUpdate(message, saved.getId());
-        
+
         // Trigger immediate aggregator sync for vehicle creation
         try {
             aggregatorSyncService.syncCompanyDataImmediately(saved.getCompany().getId());
@@ -232,11 +234,14 @@ public class VehicleService {
 
 
     public VehicleResponseDto updateVehicle(Long id, VehicleRequestDto updated) {
+        updated.validateForServiceType();
         Vehicle vehicle = getVehicle(id);
         vehicle.setMake(updated.getMake());
         vehicle.setModel(updated.getModel());
         vehicle.setLicensePlate(updated.getLicensePlate());
         vehicle.setVehicleType(updated.getVehicleType());
+        vehicle.setServiceType(updated.resolvedServiceType());
+        vehicle.setCapacity(updated.resolvedCapacity());
         vehicle.setStatus(updated.getStatus());
         Vehicle updatedVehicle = vehicleRepository.save(vehicle);
         eventMessagePublisher.publishVehicleEvent("UPDATE", VehicleResponseDto.fromEntity(updatedVehicle));

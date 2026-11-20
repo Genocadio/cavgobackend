@@ -29,6 +29,8 @@ export interface InternalVehicle {
   plate?: string | null;
   model?: string | null;
   make?: string | null;
+  vehicleType?: string | null;
+  serviceType?: string | null;
   capacity?: number | null;
   connectionStatus?: string | null;
   operationalStatus?: string | null;
@@ -99,12 +101,17 @@ export function mapInternalVehicleToCar(vehicle: InternalVehicle, fallbackCompan
     throw new Error(`Vehicle mapper: operationalStatus is required for vehicle ${vehicle.id}`);
   }
 
+  const serviceType = vehicle.serviceType === "PASSENGER" || vehicle.serviceType === "CARGO" || vehicle.serviceType === "PASSENGER_CARGO"
+    ? vehicle.serviceType
+    : "PASSENGER_CARGO";
+
   return {
     id: String(vehicle.id),
     plate: vehicle.plate,
     make: vehicle.make ?? "",
     model: vehicle.model,
-    vehicleType: null,
+    vehicleType: vehicle.vehicleType ?? null,
+    serviceType,
     capacity: Number(vehicle.capacity),
     status: vehicle.operationalStatus as VehicleStatus,
     isOnline: vehicle.connectionStatus === "ONLINE",

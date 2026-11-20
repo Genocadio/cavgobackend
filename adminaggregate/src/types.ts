@@ -1,6 +1,7 @@
 export type Status = "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION";
 export type CompanyStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED";
 export type VehicleStatus = "AVAILABLE" | "MAINTENANCE" | "OUT_OF_SERVICE" | "OCCUPIED";
+export type VehicleServiceType = "PASSENGER" | "CARGO" | "PASSENGER_CARGO";
 
 export interface Company {
   id: string;
@@ -40,6 +41,7 @@ export interface Car {
   make: string;
   model: string;
   vehicleType: string | null;
+  serviceType: VehicleServiceType;
   capacity: number;
   status: VehicleStatus;
   isOnline: boolean;
@@ -230,6 +232,7 @@ export interface VehicleResponseDto {
   capacity: number;
   licensePlate: string;
   vehicleType: string;
+  serviceType?: VehicleServiceType | null;
   status: VehicleStatus;
   createdAt: string;
   updatedAt: string;

@@ -1,6 +1,7 @@
 package com.nexxserve.cavgomain.entity;
 
 import com.nexxserve.cavgomain.enums.VehicleStatus;
+import com.nexxserve.cavgomain.enums.VehicleServiceType;
 import com.nexxserve.cavgomain.enums.VehicleType;
 import jakarta.persistence.*;
 import lombok.*;
@@ -47,6 +48,10 @@ public class Vehicle extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "vehicle_type")
     private VehicleType vehicleType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "service_type")
+    private VehicleServiceType serviceType = VehicleServiceType.PASSENGER_CARGO;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status")

@@ -67,6 +67,8 @@ import com.gocavgo.delivary.entity.transfer.TransferEntity;
 import com.gocavgo.delivary.entity.transfer.TransferPackageEntity;
 import com.gocavgo.delivary.repository.transfer.TransferJpaRepository;
 import com.gocavgo.delivary.repository.transfer.TransferPackageJpaRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -269,6 +271,7 @@ public class PackageService {
 
     /** Trip statuses that count as a driver's current active trip. */
     private static final List<String> ACTIVE_TRIP_STATUSES = List.of("IN_PROGRESS", "SCHEDULED");
+    private static final ObjectMapper VEHICLE_JSON_MAPPER = new ObjectMapper();
 
     /**
      * Resolves the trip a driver is working when they take custody of a package.
@@ -279,6 +282,8 @@ public class PackageService {
      * ("driver role is matched to their active trip"). Either way, a DRIVER cannot
      * take custody without a real, active trip so the package always has context
      * to report on.
+     *
+     * <p>Passenger-only vehicles cannot be used for package shipping/delivery.
      */
     private CavgoTripEntity requireActiveTripForDriver(Long driverId, Long tripId) {
         CavgoTripEntity trip;
@@ -292,17 +297,52 @@ public class PackageService {
             if (!ACTIVE_TRIP_STATUSES.contains(status)) {
                 throw new BusinessValidationException("Trip " + tripId + " is not active (status=" + trip.getStatus() + ")");
             }
-            return trip;
+        } else {
+            trip = ACTIVE_TRIP_STATUSES.stream()
+                    .map(status -> cavgoTripRepo.findTopByDriverIdAndStatusOrderByDepartureTimeDesc(driverId, status))
+                    .filter(Objects::nonNull)
+                    .max(Comparator.comparing(CavgoTripEntity::getDepartureTime,
+                            Comparator.nullsFirst(Comparator.naturalOrder())))
+                    .orElseThrow(() -> new BusinessValidationException(
+                            "Driver " + driverId + " has no active trip — cannot take custody of a package"));
         }
-
-        trip = ACTIVE_TRIP_STATUSES.stream()
-                .map(status -> cavgoTripRepo.findTopByDriverIdAndStatusOrderByDepartureTimeDesc(driverId, status))
-                .filter(Objects::nonNull)
-                .max(Comparator.comparing(CavgoTripEntity::getDepartureTime,
-                        Comparator.nullsFirst(Comparator.naturalOrder())))
-                .orElseThrow(() -> new BusinessValidationException(
-                        "Driver " + driverId + " has no active trip — cannot take custody of a package"));
+        validateTripVehicleCanCarryPackages(trip);
         return trip;
+    }
+
+    /**
+     * Passenger-only vehicles cannot be used for shipping/cargo delivery.
+     * Defaults to PASSENGER_CARGO when service type is unknown (old data/trips).
+     */
+    private void validateTripVehicleCanCarryPackages(CavgoTripEntity trip) {
+        String serviceType = resolveTripVehicleServiceType(trip);
+        if ("PASSENGER".equalsIgnoreCase(serviceType)) {
+            throw new BusinessValidationException(
+                    "Vehicle for trip " + trip.getTripId() + " is passenger-only and cannot be used for package shipping");
+        }
+    }
+
+    private String resolveTripVehicleServiceType(CavgoTripEntity trip) {
+        String vehicleJson = trip.getVehicleJson();
+        if (vehicleJson == null || vehicleJson.isBlank()) {
+            return "PASSENGER_CARGO";
+        }
+        try {
+            JsonNode node = VEHICLE_JSON_MAPPER.readTree(vehicleJson);
+            if (node == null || node.isNull()) {
+                return "PASSENGER_CARGO";
+            }
+            JsonNode serviceType = node.get("serviceType");
+            if (serviceType == null || serviceType.isNull()) {
+                serviceType = node.get("service_type");
+            }
+            if (serviceType == null || serviceType.isNull() || serviceType.asText().isBlank()) {
+                return "PASSENGER_CARGO";
+            }
+            return serviceType.asText().trim().toUpperCase(Locale.ROOT);
+        } catch (Exception e) {
+            return "PASSENGER_CARGO";
+        }
     }
 
     /**

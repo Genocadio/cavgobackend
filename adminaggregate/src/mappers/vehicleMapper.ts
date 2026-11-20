@@ -29,6 +29,7 @@ export function mapVehicleResponseDtoToCar(dto: VehicleResponseDto): Car {
     make: dto.make,
     model: dto.model,
     vehicleType: dto.vehicleType || null,
+    serviceType: dto.serviceType || "PASSENGER_CARGO",
     capacity: dto.capacity,
     status: dto.status,
     isOnline: false, // Default value, not provided in DTO
