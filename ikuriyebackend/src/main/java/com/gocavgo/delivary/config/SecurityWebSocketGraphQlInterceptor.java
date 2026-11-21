@@ -75,7 +75,7 @@ public class SecurityWebSocketGraphQlInterceptor implements WebSocketGraphQlInte
                         ? cavgoSyncClient.syncUserAndGetResult(claims.userId()) : null;
 
                 var authorities = tokenRoles.stream()
-                        .filter(role -> cavgoSyncClient.isRoleEffective(role, cavgomainUser, claims.userId()))
+                        .filter(role -> cavgoSyncClient.isRoleEffective(role, cavgomainUser, claims.userId(), claims.roles()))
                         .map(role -> new SimpleGrantedAuthority("ROLE_" + role.name()))
                         .toList();
 

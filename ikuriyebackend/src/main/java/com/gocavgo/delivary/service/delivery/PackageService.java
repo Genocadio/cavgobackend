@@ -58,6 +58,7 @@ import com.gocavgo.delivary.service.subscription.OfferClaimedPublisher;
 import com.gocavgo.delivary.service.subscription.PackageTransferPublisher;
 import com.gocavgo.delivary.service.transfer.TransferService;
 import com.gocavgo.delivary.service.user.UserService;
+import com.gocavgo.delivary.util.AfterCommitActions;
 import com.gocavgo.delivary.enums.transfer.TransferAcceptorType;
 import com.gocavgo.delivary.enums.transfer.TransferRuleType;
 import com.gocavgo.delivary.enums.transfer.TransferStatus;
@@ -245,28 +246,34 @@ public class PackageService {
 
         // Publish to real-time subscription subscribers if a transfer was auto-created
         if (transferResponse != null) {
-            packageTransferPublisher.publish(response);
+            AfterCommitActions.run(() -> packageTransferPublisher.publish(response));
         }
 
         publishPackageSnapshot(pkg);
         return response;
     }
 
-    /**
-     * Pre-validates that ALL packages in a transfer can be handed over:
-     * they must not be in a terminal status (COMPLETED / CANCELLED).
-     * CREATED packages advance to ACCEPTED; in-flight packages keep their
-     * current status and simply change custodian. Throws at the first invalid
-     * package — fail-fast before any package is mutated.
-     */
-    private void validateAllPackagesAcceptable(List<TransferPackageEntity> transferPackages, Long actorId) {
-        for (var tp : transferPackages) {
-            var pkg = packageRepo.findById(tp.getPackageId())
-                    .orElseThrow(() -> new com.gocavgo.delivary.exception.BusinessValidationException("Package not found: " + tp.getPackageId()));
+    private void validateAllPackagesAcceptable(List<PackageEntity> packages) {
+        for (var pkg : packages) {
             if (pkg.getStatus() == PackageStatus.COMPLETED || pkg.getStatus() == PackageStatus.CANCELLED) {
-                throw new com.gocavgo.delivary.exception.BusinessValidationException("Cannot accept a package with status: " + pkg.getStatus());
+                throw new BusinessValidationException("Cannot accept a package with status: " + pkg.getStatus());
             }
         }
+    }
+
+    private List<PackageEntity> loadTransferPackagesInOrder(List<TransferPackageEntity> transferPackages) {
+        var ids = transferPackages.stream().map(TransferPackageEntity::getPackageId).toList();
+        var byId = packageRepo.findAllById(ids).stream()
+                .collect(Collectors.toMap(PackageEntity::getId, Function.identity(), (first, second) -> first));
+        var ordered = new ArrayList<PackageEntity>(transferPackages.size());
+        for (var tp : transferPackages) {
+            var pkg = byId.get(tp.getPackageId());
+            if (pkg == null) {
+                throw new BusinessValidationException("Package not found: " + tp.getPackageId());
+            }
+            ordered.add(pkg);
+        }
+        return ordered;
     }
 
     /** Trip statuses that count as a driver's current active trip. */
@@ -352,8 +359,12 @@ public class PackageService {
      */
     private void attachDriverContext(PackageEntity pkg, Long driverId, CavgoTripEntity trip,
                                      CustodianRole role, PackageStatus fromStatus, PackageStatus toStatus) {
+        attachDriverContext(pkg, driverId, trip, userService.getCompanyIdForUser(driverId), role, fromStatus, toStatus);
+    }
+
+    private void attachDriverContext(PackageEntity pkg, Long driverId, CavgoTripEntity trip, UUID companyId,
+                                     CustodianRole role, PackageStatus fromStatus, PackageStatus toStatus) {
         var now = Instant.now();
-        var companyId = userService.getCompanyIdForUser(driverId);
 
         pkg.setTripId(trip.getTripId());
         pkg.setCompanyRefId(trip.getCompanyId());
@@ -433,23 +444,66 @@ public class PackageService {
         }
     }
 
+    private void publishPackageSnapshots(List<PackageEntity> packages) {
+        if (!packageAggregatorSyncClient.isEnabled() || packages.isEmpty()) {
+            return;
+        }
+        try {
+            var ids = packages.stream().map(PackageEntity::getId).toList();
+            var legsByPackageId = carrierLegRepo.findAllByPackageIdIn(ids).stream()
+                    .collect(Collectors.groupingBy(PackageCarrierLegEntity::getPackageId));
+            for (var pkg : packages) {
+                var legs = legsByPackageId.getOrDefault(pkg.getId(), List.of());
+                var snapshot = new PackageAggregatorSyncClient.PackageSnapshot(
+                        pkg.getId(),
+                        pkg.getTrackingCode(),
+                        pkg.getDeliveryType() == null ? null : pkg.getDeliveryType().name(),
+                        pkg.getPackageOrigin() == null ? null : pkg.getPackageOrigin().name(),
+                        pkg.getStatus() == null ? null : pkg.getStatus().name(),
+                        pkg.getCompanyId(),
+                        pkg.getCompanyRefId(),
+                        pkg.getTripId(),
+                        pkg.getCreatedAt(),
+                        pkg.getUpdatedAt(),
+                        legs.stream()
+                                .map(leg -> new PackageAggregatorSyncClient.CarrierLeg(
+                                        leg.getId(),
+                                        leg.getDriverId(),
+                                        leg.getTripId(),
+                                        leg.getCompanyId(),
+                                        leg.getCompanyRefId(),
+                                        leg.getVehicleId(),
+                                        leg.getLinkedAt(),
+                                        leg.getFromStatus(),
+                                        leg.getToStatus()))
+                                .toList()
+                );
+
+                if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            packageAggregatorSyncClient.publishPackage(snapshot);
+                        }
+                    });
+                } else {
+                    packageAggregatorSyncClient.publishPackage(snapshot);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to prepare package snapshots for aggregator: count={}, error={}",
+                    packages.size(), e.getMessage());
+        }
+    }
+
     /**
      * Core logic: accept a single package — update status (CREATED → ACCEPTED for
      * OPEN_ROUTE, CREATED → ORIGIN_OFFICE for FIXED_ROUTE; in-flight packages
      * keep their status and swap custodian), add custodian, record custody and event.
+     * Response assembly is intentionally deferred so batch callers can build responses once.
      */
-    private AcceptOfferResponse acceptSinglePackage(UUID packageId, Long actorId, CustodianRole custodianRole) {
-        return acceptSinglePackage(packageId, actorId, custodianRole, null);
-    }
-
-    private AcceptOfferResponse acceptSinglePackage(UUID packageId, Long actorId, CustodianRole custodianRole, Long tripId) {
-        var pkg = packageRepo.findById(packageId)
-                .orElseThrow(() -> new BusinessValidationException("Package not found: " + packageId));
-
-        var driverTrip = custodianRole == CustodianRole.DRIVER
-                ? requireActiveTripForDriver(actorId, tripId)
-                : null;
-
+    private PackageEntity acceptPackageEntity(PackageEntity pkg, Long actorId, CustodianRole custodianRole,
+                                              CavgoTripEntity driverTrip, UUID actorCompanyId) {
         // Re-validate right before mutation — guards against race conditions
         // where the package status was changed (e.g. cancelled) after
         // pre-validation but before the actual status update.
@@ -460,6 +514,7 @@ public class PackageService {
         var previousStatus = pkg.getStatus();
         var priorCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId());
         PackageStatus newStatus = null;
+        var effectiveCustodianRole = custodianRole;
         if (previousStatus == PackageStatus.CREATED) {
             // A DRIVER accepting from the sender directly already holds the package
             // (any delivery type) → PICKED_UP, so they can deliver or transfer onward
@@ -489,17 +544,17 @@ public class PackageService {
             pkg.setStatus(newStatus);
             // Custody role OFFICE (not WORKER) — mirrors updateCustodianForStatus's
             // DESTINATION_OFFICE handling so all office staff can see the package.
-            custodianRole = CustodianRole.OFFICE;
+            effectiveCustodianRole = CustodianRole.OFFICE;
         } else if (custodianRole == CustodianRole.WORKER
                 && pkg.getDeliveryType() == DeliveryType.FIXED_ROUTE
                 && (previousStatus == PackageStatus.DESTINATION_OFFICE || previousStatus == PackageStatus.READY_FOR_COLLECTION)) {
             // Package is already office-held (e.g. handed between office staff) — record
             // the acceptor under an OFFICE row too, not a private WORKER row, so every
             // office worker keeps seeing and acting on it.
-            custodianRole = CustodianRole.OFFICE;
+            effectiveCustodianRole = CustodianRole.OFFICE;
         }
         if (driverTrip != null) {
-            attachDriverContext(pkg, actorId, driverTrip, custodianRole, previousStatus, newStatus);
+            attachDriverContext(pkg, actorId, driverTrip, actorCompanyId, effectiveCustodianRole, previousStatus, newStatus);
         } else {
             pkg.setUpdatedAt(Instant.now());
             packageRepo.save(pkg);
@@ -512,7 +567,7 @@ public class PackageService {
             }
         });
 
-        saveCustodian(pkg.getId(), actorId, custodianRole);
+        saveCustodian(pkg.getId(), actorId, effectiveCustodianRole);
 
         // Notify: package status changed + custodian assigned
         var notifyStatus = newStatus != null ? newStatus : PackageStatus.ACCEPTED;
@@ -522,12 +577,11 @@ public class PackageService {
         var fromEntity = priorCustodian
                 .map(c -> c.getRole().name())
                 .orElse("SENDER");
-        saveCustody(pkg.getId(), fromEntity, custodianRole.name(),
-                "Accepted by " + custodianRole.name().toLowerCase());
+        saveCustody(pkg.getId(), fromEntity, effectiveCustodianRole.name(),
+                "Accepted by " + effectiveCustodianRole.name().toLowerCase());
         saveEvent(pkg.getId(), mapStatusToEvent(notifyStatus), actorId, "Package accepted");
 
-        publishPackageSnapshot(pkg);
-        return new AcceptOfferResponse(toResponse(pkg));
+        return pkg;
     }
 
     @Transactional
@@ -542,6 +596,25 @@ public class PackageService {
 
         if (transferEntity.getRuleType() == TransferRuleType.CONFIRM) {
             throw new BusinessValidationException("CONFIRM transfers must use acceptTransfer (CONFIRM mode) then confirmTransfer");
+        }
+        if (transferEntity.getStatus() == TransferStatus.DONE) {
+            // A lost response can make the client retry acceptTransfer. If this
+            // actor is already the current custodian of every package in the
+            // transfer, replay the result without re-mutating anything.
+            var existingLinks = transferPackageRepo.findByTransferId(transferId);
+            var existingPackages = loadTransferPackagesInOrder(existingLinks);
+            boolean acceptedByActor = !existingPackages.isEmpty() && existingPackages.stream()
+                    .allMatch(pkg -> custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId())
+                            .map(custodian -> Objects.equals(custodian.getUserId(), actorId))
+                            .orElse(false));
+            if (acceptedByActor) {
+                log.info("acceptPackageByTransfer: idempotent replay actorId={}, transferId={}", actorId, transferId);
+                var replayResponses = toResponses(existingPackages).stream()
+                        .map(AcceptOfferResponse::new)
+                        .toList();
+                var replayTransfer = transferService.toResponse(transferEntity, existingLinks, null);
+                return new TransferAcceptResult(replayTransfer, replayResponses);
+            }
         }
         if (transferEntity.getStatus() != TransferStatus.PENDING) {
             throw new BusinessValidationException("Transfer is not open for acceptance (status=" + transferEntity.getStatus() + ")");
@@ -568,6 +641,7 @@ public class PackageService {
             actorRole = Role.DRIVER;
         }
         validationService.validateAcceptor(actorId, actorRole);
+        final var eventRole = actorRole;
 
         // Validate that the acceptor's role matches the transfer's acceptorType
         validationService.validateAcceptorType(transferEntity.getAcceptorType(), actorRole, transferId);
@@ -580,19 +654,28 @@ public class PackageService {
             throw new BusinessValidationException("Transfer has no packages");
         }
 
-        // ★ Pre-validate ALL packages before accepting any (fail-fast)
-        validateAllPackagesAcceptable(transferPackages, actorId);
+        var packages = loadTransferPackagesInOrder(transferPackages);
 
-        // Accept all packages
-        var acceptResults = new ArrayList<AcceptOfferResponse>();
-        for (var tp : transferPackages) {
-            acceptResults.add(acceptSinglePackage(tp.getPackageId(), actorId, custodianRole, tripId));
+        // ★ Pre-validate ALL packages before accepting any (fail-fast)
+        validateAllPackagesAcceptable(packages);
+
+        var driverTrip = custodianRole == CustodianRole.DRIVER
+                ? requireActiveTripForDriver(actorId, tripId)
+                : null;
+        var actorCompanyId = driverTrip != null ? userService.getCompanyIdForUser(actorId) : null;
+
+        // Accept all packages (mutations/notices) without per-package response assembly.
+        var acceptedPackages = new ArrayList<PackageEntity>(packages.size());
+        for (var pkg : packages) {
+            acceptedPackages.add(acceptPackageEntity(pkg, actorId, custodianRole, driverTrip, actorCompanyId));
         }
 
         // Complete the transfer
         transferEntity.setStatus(TransferStatus.DONE);
-        if (tripId != null) {
-            transferEntity.setTripId(tripId);
+        // Persist the derived trip too, not just a caller-supplied ID, so the
+        // transfer record stays consistent with packages/carrier legs.
+        if (driverTrip != null) {
+            transferEntity.setTripId(driverTrip.getTripId());
         }
         transferEntity.setUpdatedAt(Instant.now());
         transferService.saveTransferEntity(transferEntity);
@@ -602,21 +685,26 @@ public class PackageService {
         noticeService.notifyTransferEvent(transferEntity,
                 NoticeEventMapper.fromTransferStatus(TransferStatus.DONE), actorId, TransferStatus.PENDING);
 
-        // Broadcast OfferClaimedEvent for each package so other drivers/workers watching the open pool see it marked taken
-        for (var acceptResult : acceptResults) {
-            var pkgResp = acceptResult.deliveryPackage();
-            offerClaimedPublisher.publish(new OfferClaimedEvent(
+        // Batch-build responses once for all accepted packages.
+        var packageResponses = toResponses(acceptedPackages);
+        var acceptResults = new ArrayList<AcceptOfferResponse>(packageResponses.size());
+        for (var pkgResp : packageResponses) {
+            acceptResults.add(new AcceptOfferResponse(pkgResp));
+            // Broadcast OfferClaimedEvent only after commit so a rollback cannot
+            // make subscribers see a package as taken when it was never accepted.
+            AfterCommitActions.run(() -> offerClaimedPublisher.publish(new OfferClaimedEvent(
                     pkgResp.id(),
                     pkgResp.trackingCode(),
                     transferId,
                     actorId,
-                    actorRole.name(),
+                    eventRole.name(),
                     Instant.now().toString()
-            ));
+            )));
         }
 
-        var allPackages = transferPackageRepo.findByTransferId(transferId);
-        var transferResp = transferService.toResponse(transferEntity, allPackages, null);
+        publishPackageSnapshots(acceptedPackages);
+
+        var transferResp = transferService.toResponse(transferEntity, transferPackages, null);
 
         return new TransferAcceptResult(transferResp, acceptResults);
     }
@@ -637,9 +725,9 @@ public class PackageService {
 
         // The requestor must exist and be ACTIVE
         var requestor = userRepository.findById(requestorId)
-                .orElseThrow(() -> new com.gocavgo.delivary.exception.BusinessValidationException("Requestor not found: " + requestorId));
+                .orElseThrow(() -> new BusinessValidationException("Requestor not found: " + requestorId));
         if (requestor.getStatus() != com.gocavgo.delivary.enums.user.UserStatus.ACTIVE) {
-            throw new com.gocavgo.delivary.exception.BusinessValidationException("Requestor is not ACTIVE");
+            throw new BusinessValidationException("Requestor is not ACTIVE");
         }
 
         // Resolve the requestor's role from their profile to determine custodian role.
@@ -648,30 +736,50 @@ public class PackageService {
         // Get all packages in the transfer
         var transferPackages = transferPackageRepo.findByTransferId(transferId);
         if (transferPackages.isEmpty()) {
-            throw new com.gocavgo.delivary.exception.BusinessValidationException("Transfer has no packages");
+            throw new BusinessValidationException("Transfer has no packages");
         }
 
+        var packages = loadTransferPackagesInOrder(transferPackages);
+
         // ★ Pre-validate ALL packages before accepting any (fail-fast)
-        validateAllPackagesAcceptable(transferPackages, requestorId);
+        validateAllPackagesAcceptable(packages);
 
-        // Accept all packages
-        var results = new ArrayList<PackageResponse>();
-        for (var tp : transferPackages) {
-            acceptSinglePackage(tp.getPackageId(), requestorId, custodianRole, tripId);
-            var pkg = packageRepo.findById(tp.getPackageId()).orElseThrow();
-            var pkgResp = toResponse(pkg);
-            results.add(pkgResp);
+        var driverTrip = custodianRole == CustodianRole.DRIVER
+                ? requireActiveTripForDriver(requestorId, tripId)
+                : null;
+        var actorCompanyId = driverTrip != null ? userService.getCompanyIdForUser(requestorId) : null;
 
-            // Broadcast OfferClaimedEvent so all drivers/workers see it marked taken
-            offerClaimedPublisher.publish(new OfferClaimedEvent(
+        // The trip may have been derived from the driver's active trip rather
+        // than supplied by the caller — write it back to the transfer record.
+        if (driverTrip != null) {
+            transferRepo.findById(transferId).ifPresent(transfer -> {
+                transfer.setTripId(driverTrip.getTripId());
+                transferRepo.save(transfer);
+            });
+        }
+
+        // Accept all packages (mutations/notices) without per-package response assembly.
+        var acceptedPackages = new ArrayList<PackageEntity>(packages.size());
+        for (var pkg : packages) {
+            acceptedPackages.add(acceptPackageEntity(pkg, requestorId, custodianRole, driverTrip, actorCompanyId));
+        }
+
+        // Batch-build responses once for all accepted packages.
+        var results = toResponses(acceptedPackages);
+        for (var pkgResp : results) {
+            // Broadcast OfferClaimedEvent only after commit so a rollback cannot
+            // make subscribers see a package as taken when it was never accepted.
+            AfterCommitActions.run(() -> offerClaimedPublisher.publish(new OfferClaimedEvent(
                     pkgResp.id(),
                     pkgResp.trackingCode(),
                     transferId,
                     requestorId,
                     custodianRole.name(),
                     Instant.now().toString()
-            ));
+            )));
         }
+
+        publishPackageSnapshots(acceptedPackages);
 
         return results;
     }
@@ -818,8 +926,8 @@ public class PackageService {
             validationService.validateTransition(pkg.getStatus(), PackageStatus.ASSIGNED_DRIVER, pkg.getDeliveryType());
             pkg.setStatus(PackageStatus.ASSIGNED_DRIVER);
         }
-        attachDriverContext(pkg, input.driverId(), driverTrip, CustodianRole.DRIVER,
-                previousStatus, pkg.getStatus());
+        attachDriverContext(pkg, input.driverId(), driverTrip, userService.getCompanyIdForUser(input.driverId()),
+                CustodianRole.DRIVER, previousStatus, pkg.getStatus());
 
         var priorCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId());
 
@@ -1037,7 +1145,8 @@ public class PackageService {
         if (currentDriverId != null) {
             // Repair path: keep the link consistent with the package's current driver.
             var trip = requireActiveTripForDriver(currentDriverId, input.tripId());
-            attachDriverContext(pkg, currentDriverId, trip, CustodianRole.DRIVER, pkg.getStatus(), pkg.getStatus());
+            attachDriverContext(pkg, currentDriverId, trip, userService.getCompanyIdForUser(currentDriverId),
+                    CustodianRole.DRIVER, pkg.getStatus(), pkg.getStatus());
         } else {
             if (!SecurityUtils.hasAnyRole(Role.ADMIN, Role.SUPER_ADMIN)) {
                 throw new BusinessValidationException("Only admins may set a trip on a package with no driver");

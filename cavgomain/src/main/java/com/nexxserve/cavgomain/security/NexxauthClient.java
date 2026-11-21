@@ -13,6 +13,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -39,6 +40,7 @@ public class NexxauthClient {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.ALWAYS)
+            .connectTimeout(Duration.ofSeconds(5))
             .build();
 
     public NexxauthClient(
@@ -137,6 +139,7 @@ public class NexxauthClient {
         try {
             var builder = HttpRequest.newBuilder()
                     .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(10))
                     .header("Authorization", "Bearer " + clientToken)
                     .header("X-Client-Id", clientId)
                     .header("Content-Type", "application/json");
@@ -159,8 +162,12 @@ public class NexxauthClient {
         } catch (NexxauthApiException e) {
             throw e;
         } catch (Exception e) {
-            log.error("Nexxauth {} {} failed: {}", method, url, e.getMessage());
-            throw new NexxauthApiException(0, "Nexxauth request failed: " + e.getMessage());
+            // Some Java exceptions (e.g. ConnectException) have a null message;
+            // include the class and cause so failures are diagnosable.
+            log.error("Nexxauth {} {} failed: {}: {}", method, url,
+                    e.getClass().getSimpleName(), e.getMessage(), e);
+            throw new NexxauthApiException(0, "Nexxauth request failed: "
+                    + e.getClass().getSimpleName() + ": " + e.getMessage(), e);
         }
     }
 
@@ -265,6 +272,11 @@ public class NexxauthClient {
 
         public NexxauthApiException(int status, String message) {
             super(message);
+            this.status = status;
+        }
+
+        public NexxauthApiException(int status, String message, Throwable cause) {
+            super(message, cause);
             this.status = status;
         }
 

@@ -45,6 +45,19 @@ class CavgomainSyncClientApprovalTest {
     }
 
     @Test
+    void fleetManagerMembershipSatisfiesWorkerOnlyWhenTokenSaysFleetManager() {
+        var tokenRoles = java.util.List.of("FLEET_MANAGER");
+
+        assertTrue(enabled.isRoleEffective(Role.WORKER, membership(1L, "FLEET_MANAGER"), 7L, tokenRoles));
+        // A plain WORKER token must not borrow a FLEET_MANAGER membership.
+        assertFalse(enabled.isRoleEffective(Role.WORKER, membership(1L, "FLEET_MANAGER"), 7L,
+                java.util.List.of("WORKER")));
+        // A fleet-manager token with a normal WORKER membership is also valid.
+        assertTrue(enabled.isRoleEffective(Role.WORKER, membership(1L, "WORKER"), 7L, tokenRoles));
+        assertFalse(enabled.isRoleEffective(Role.WORKER, membership(null, "FLEET_MANAGER"), 7L, tokenRoles));
+    }
+
+    @Test
     void privilegedRolesFailClosedWhenSyncUnconfigured() {
         assertFalse(disabled.isRoleEffective(Role.DRIVER, membership(1L, "DRIVER"), 7L));
         assertFalse(disabled.isRoleEffective(Role.WORKER, membership(1L, "WORKER"), 7L));

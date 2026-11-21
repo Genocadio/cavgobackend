@@ -17,6 +17,7 @@ import com.gocavgo.delivary.repository.notification.NoticeRepository;
 import com.gocavgo.delivary.repository.notification.NoticeViewerRepository;
 import com.gocavgo.delivary.repository.transfer.TransferPackageJpaRepository;
 import com.gocavgo.delivary.service.subscription.NoticePublisher;
+import com.gocavgo.delivary.util.AfterCommitActions;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -164,24 +165,84 @@ public class NoticeService {
      * carries the status change (previousStatus → PENDING_CONFIRMATION) plus the
      * one-time delivery code. It is delivered ONLY to the people on the package
      * (sender/receiver) — never to custodians, so the delivery can only be
-     * confirmed by the parties the code was meant for. Must be called inside
-     * the same transaction that transitions the package to PENDING_CONFIRMATION.
+     * confirmed by the parties the code was meant for. Sender and receiver receive
+     * role-appropriate messages. Must be called inside the same transaction that
+     * transitions the package to PENDING_CONFIRMATION.
      */
     @Transactional
     public void notifyDeliveryCodeIssued(PackageEntity pkg, String deliveryCode, Long actorId, PackageStatus previousStatus) {
-        var recipients = resolveDeliveryCodeRecipients(pkg.getId(), actorId);
-        if (recipients.isEmpty()) {
+        var persons = personRepo.findByPackageId(pkg.getId()).stream()
+                .filter(p -> p.getUserId() != null)
+                .toList();
+        if (persons.isEmpty()) {
             log.debug("notifyDeliveryCodeIssued: no recipients for package={}", pkg.getId());
             return;
         }
 
         var payload = buildDeliveryCodePayload(pkg, deliveryCode, actorId, previousStatus);
-        var notice = saveNotice(NoticeResourceType.PACKAGE, pkg.getId(),
-                NoticeEventType.PACKAGE_DELIVERY_INITIATED, actorId,
-                payload, pkg.getTrackingCode());
-        saveViewers(notice.getId(), recipients);
-        log.debug("notifyDeliveryCodeIssued: notice={} for package={}, {} recipient(s)",
-                notice.getId(), pkg.getId(), recipients.size());
+
+        var senderRecipients = persons.stream()
+                .filter(p -> p.getRole() == com.gocavgo.delivary.enums.delivery.PersonRole.SENDER)
+                .map(com.gocavgo.delivary.entity.delivery.PackagePersonEntity::getUserId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        var receiverRecipients = persons.stream()
+                .filter(p -> p.getRole() == com.gocavgo.delivary.enums.delivery.PersonRole.RECEIVER)
+                .map(com.gocavgo.delivary.entity.delivery.PackagePersonEntity::getUserId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        var otherRecipients = persons.stream()
+                .filter(p -> p.getRole() != com.gocavgo.delivary.enums.delivery.PersonRole.SENDER
+                        && p.getRole() != com.gocavgo.delivary.enums.delivery.PersonRole.RECEIVER)
+                .map(com.gocavgo.delivary.entity.delivery.PackagePersonEntity::getUserId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        excludeActor(senderRecipients, NoticeEventType.PACKAGE_DELIVERY_INITIATED, actorId);
+        excludeActor(receiverRecipients, NoticeEventType.PACKAGE_DELIVERY_INITIATED, actorId);
+        excludeActor(otherRecipients, NoticeEventType.PACKAGE_DELIVERY_INITIATED, actorId);
+
+        // A user can appear in multiple roles in edge cases; avoid duplicate/conflicting notices.
+        receiverRecipients.removeAll(senderRecipients);
+        otherRecipients.removeAll(senderRecipients);
+        otherRecipients.removeAll(receiverRecipients);
+
+        if (!receiverRecipients.isEmpty()) {
+            var title = "Delivery confirmation needed";
+            var message = pkg.getTrackingCode() != null
+                    ? String.format("Package %s is ready for delivery confirmation. Use the delivery code to confirm receipt.", pkg.getTrackingCode())
+                    : "Your package is ready for delivery confirmation. Use the delivery code to confirm receipt.";
+            var notice = saveNotice(NoticeResourceType.PACKAGE, pkg.getId(), NoticeEventType.PACKAGE_DELIVERY_INITIATED,
+                    actorId, title, message, payload);
+            saveViewers(notice.getId(), receiverRecipients);
+            log.debug("notifyDeliveryCodeIssued: receiver notice={} for package={}, {} recipient(s)",
+                    notice.getId(), pkg.getId(), receiverRecipients.size());
+        }
+
+        if (!senderRecipients.isEmpty()) {
+            var title = "Delivery confirmation pending";
+            var message = pkg.getTrackingCode() != null
+                    ? String.format("Package %s is awaiting delivery confirmation. Share the delivery code with the receiver if needed so delivery can be confirmed.", pkg.getTrackingCode())
+                    : "Your package is awaiting delivery confirmation. Share the delivery code with the receiver if needed so delivery can be confirmed.";
+            var notice = saveNotice(NoticeResourceType.PACKAGE, pkg.getId(), NoticeEventType.PACKAGE_DELIVERY_INITIATED,
+                    actorId, title, message, payload);
+            saveViewers(notice.getId(), senderRecipients);
+            log.debug("notifyDeliveryCodeIssued: sender notice={} for package={}, {} recipient(s)",
+                    notice.getId(), pkg.getId(), senderRecipients.size());
+        }
+
+        if (!otherRecipients.isEmpty()) {
+            var title = "Delivery confirmation pending";
+            var message = pkg.getTrackingCode() != null
+                    ? String.format("Package %s is awaiting delivery confirmation. Use the delivery code to confirm delivery if necessary.", pkg.getTrackingCode())
+                    : "This package is awaiting delivery confirmation. Use the delivery code to confirm delivery if necessary.";
+            var notice = saveNotice(NoticeResourceType.PACKAGE, pkg.getId(), NoticeEventType.PACKAGE_DELIVERY_INITIATED,
+                    actorId, title, message, payload);
+            saveViewers(notice.getId(), otherRecipients);
+            log.debug("notifyDeliveryCodeIssued: notice={} for package={}, {} recipient(s)",
+                    notice.getId(), pkg.getId(), otherRecipients.size());
+        }
+
+        if (receiverRecipients.isEmpty() && senderRecipients.isEmpty() && otherRecipients.isEmpty()) {
+            log.debug("notifyDeliveryCodeIssued: no eligible recipients for package={} after actor/role filtering", pkg.getId());
+        }
     }
 
     // ── Recipient resolution ────────────────────────────────────────────
@@ -207,18 +268,7 @@ public class NoticeService {
         return excludeActor(userIds, eventType, actorId);
     }
 
-    /**
-     * Recipients for the delivery code: ONLY the people on the package
-     * (sender/receiver). Custodians (drivers/workers) are deliberately
-     * excluded so they never receive the code.
-     */
-    private Set<Long> resolveDeliveryCodeRecipients(UUID packageId, Long actorId) {
-        var userIds = personRepo.findByPackageId(packageId).stream()
-                .map(p -> p.getUserId())
-                .filter(u -> u != null)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        return excludeActor(userIds, NoticeEventType.PACKAGE_DELIVERY_INITIATED, actorId);
-    }
+
 
     private Set<Long> resolveTransferRecipients(TransferEntity transfer, NoticeEventType eventType, Long actorId) {
         var userIds = new LinkedHashSet<Long>();
@@ -306,11 +356,18 @@ public class NoticeService {
                                      NoticeEventType eventType, Long actorId,
                                      String payload, String trackingCodeOrNull) {
         var templates = TEMPLATES.get(eventType);
-        var title = templates[0];
+        var title = templates != null ? templates[0] : eventType.name();
+        var messageTemplate = templates != null ? templates[1] : "An update is available.";
         var message = trackingCodeOrNull != null
-                ? String.format(templates[1], trackingCodeOrNull)
-                : templates[1];
+                ? String.format(messageTemplate, trackingCodeOrNull)
+                : messageTemplate;
 
+        return saveNotice(resourceType, resourceId, eventType, actorId, title, message, payload);
+    }
+
+    private NoticeEntity saveNotice(NoticeResourceType resourceType, UUID resourceId,
+                                     NoticeEventType eventType, Long actorId,
+                                     String title, String message, String payload) {
         var notice = NoticeEntity.builder()
                 .resourceType(resourceType)
                 .resourceId(resourceId)
@@ -342,7 +399,8 @@ public class NoticeService {
         if (notice != null) {
             for (var viewer : saved) {
                 var response = new NoticeResolver.NoticeResponse(notice, viewer);
-                noticePublisher.publish(new NoticePublisher.NoticeEvent(viewer.getUserId(), response));
+                AfterCommitActions.run(() -> noticePublisher.publish(
+                        new NoticePublisher.NoticeEvent(viewer.getUserId(), response)));
             }
         }
     }
@@ -421,10 +479,18 @@ public class NoticeService {
      */
     private List<PackageEntity> resolveTransferPackages(UUID transferId) {
         var transferPackages = transferPackageRepo.findByTransferId(transferId);
-        return transferPackages.stream()
-                .map(tp -> packageRepo.findById(tp.getPackageId()))
-                .filter(java.util.Optional::isPresent)
-                .map(java.util.Optional::get)
+        if (transferPackages.isEmpty()) {
+            return List.of();
+        }
+        var ids = transferPackages.stream()
+                .map(TransferPackageEntity::getPackageId)
+                .toList();
+        var byId = packageRepo.findAllById(ids).stream()
+                .collect(java.util.stream.Collectors.toMap(PackageEntity::getId,
+                        java.util.function.Function.identity(), (first, second) -> first));
+        return ids.stream()
+                .map(byId::get)
+                .filter(java.util.Objects::nonNull)
                 .toList();
     }
 

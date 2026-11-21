@@ -168,13 +168,16 @@ client) against the org API:
 
 Role names must match the local enum lower-cased (`super_admin`, `admin`,
 `customer`, `worker`, `driver`) so `@PreAuthorize` checks recognize them in user
-tokens; `isDefault` on a role auto-assigns it to new registrations. Reads are
-Admin/Super Admin, writes are Super Admin only.
+tokens; `fleet_manager` is accepted as an alias for `worker` (cavgomain treats
+non-driver company staff as office workers). `isDefault` on a role auto-assigns
+it to new registrations. Reads are Admin/Super Admin, writes are Super Admin
+only.
 
 Role names are kept identical in both systems: Nexxauth roles are the local enum
 names lower-cased (`super_admin`, `admin`, `customer`, `worker`, `driver`),
 mapped by `NexxauthRoles`. Provision those five roles once in the Nexxauth
-organisation.
+organisation; the `fleet_manager` company role from cavgomain is mapped onto
+`worker` and needs an approved cavgomain membership to take effect.
 
 ## 8. Local user id = Nexxauth user id
 

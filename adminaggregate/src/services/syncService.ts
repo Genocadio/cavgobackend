@@ -33,16 +33,24 @@ export async function syncAllData(): Promise<void> {
   // 1. Fetch all companies and upsert
   console.log("Fetching companies...");
   const companiesDto = await mainApiClient.fetchCompanies();
+  let skippedCompanies = 0;
   for (const companyDto of companiesDto) {
-    const company = mapCompanyResponseDtoToCompany(companyDto);
-    const existing = await companyRepository.getCompanyById(company.id);
-    if (existing) {
-      await companyRepository.updateCompany(company);
-    } else {
-      await companyRepository.createCompany(company);
+    try {
+      const company = mapCompanyResponseDtoToCompany(companyDto);
+      const existing = await companyRepository.getCompanyById(company.id);
+      if (existing) {
+        await companyRepository.updateCompany(company);
+      } else {
+        await companyRepository.createCompany(company);
+      }
+    } catch (error) {
+      // One malformed remote company must not prevent vehicles, drivers and
+      // trips for every other company from syncing.
+      skippedCompanies++;
+      console.error(`[SYNC] Skipping company ${companyDto.id}:`, error);
     }
   }
-  console.log(`Synced ${companiesDto.length} companies`);
+  console.log(`Synced ${companiesDto.length - skippedCompanies} companies (${skippedCompanies} skipped)`);
 
   // 2. For each company, sync vehicles and drivers
   for (const companyDto of companiesDto) {

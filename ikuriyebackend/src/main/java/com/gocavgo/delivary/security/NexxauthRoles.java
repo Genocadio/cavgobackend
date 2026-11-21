@@ -18,8 +18,11 @@ import java.util.Map;
  *
  * <p>The contract: the Nexxauth organisation must provision roles named exactly
  * like the local enum names lower-cased ({@code super_admin}, {@code admin},
- * {@code customer}, {@code worker}, {@code driver}). Any unknown role name from
- * the token is ignored for authorization (it grants nothing locally).
+ * {@code customer}, {@code worker}, {@code driver}). {@code fleet_manager} is
+ * accepted as an alias for {@code worker}: cavgomain treats every non-driver
+ * company user as an office worker for delivery operations. Any other unknown
+ * role name from the token is ignored for authorization (it grants nothing
+ * locally).
  */
 public final class NexxauthRoles {
 
@@ -56,8 +59,13 @@ public final class NexxauthRoles {
      */
     public static Role fromNexxauthName(String name) {
         if (name == null || name.isBlank()) return null;
+        var normalized = name.trim().toUpperCase(Locale.ROOT);
+        // A fleet manager is an office worker in the delivery domain. Mapping
+        // here (rather than widening every @PreAuthorize) keeps one local role
+        // per operation while preserving cavgomain's company role semantics.
+        if ("FLEET_MANAGER".equals(normalized)) return Role.WORKER;
         try {
-            return Role.valueOf(name.trim().toUpperCase(Locale.ROOT));
+            return Role.valueOf(normalized);
         } catch (IllegalArgumentException e) {
             return null;
         }

@@ -21,12 +21,18 @@ public class GraphQLSecurityExceptionHandler {
     @GraphQlExceptionHandler
     public GraphQLError handleAccessDenied(AccessDeniedException ex, DataFetchingEnvironment env) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        var path = env.getExecutionStepInfo() != null ? env.getExecutionStepInfo().getPath() : null;
         if (auth == null || !auth.isAuthenticated()) {
+            log.warn("Unauthenticated GraphQL access denied at {}: {}", path, ex.getMessage());
             return GraphQLError.newError()
                     .message("Unauthenticated: valid authentication required")
                     .extensions(Map.of("code", "UNAUTHENTICATED"))
                     .build();
         }
+        // Denials are client-visible but were previously silent in the logs,
+        // making role/config mistakes (e.g. unknown NeXXauth roles) invisible.
+        log.warn("GraphQL access denied at {} for user={} authorities={}: {}",
+                path, auth.getName(), auth.getAuthorities(), ex.getMessage());
         return GraphQLError.newError()
                 .message("Forbidden: you do not have permission to perform this action")
                 .extensions(Map.of("code", "FORBIDDEN"))

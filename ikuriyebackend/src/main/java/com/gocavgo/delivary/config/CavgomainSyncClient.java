@@ -14,6 +14,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * Client that syncs users with cavgomain.
@@ -199,6 +201,18 @@ public class CavgomainSyncClient {
      * @param userId the Nexxauth user id (for logging)
      */
     public boolean isRoleEffective(Role role, CavgomainUser user, Long userId) {
+        return isRoleEffective(role, user, userId, List.of());
+    }
+
+    /**
+     * Same check, but also considers the token's original role names. A
+     * {@code fleet_manager} token is mapped to local {@code WORKER}; cavgomain
+     * stores that membership as {@code FLEET_MANAGER}, so an approved fleet
+     * manager must satisfy the WORKER gate without letting a plain WORKER token
+     * borrow a FLEET_MANAGER membership.
+     */
+    public boolean isRoleEffective(Role role, CavgomainUser user, Long userId,
+                                   Collection<String> tokenRoleNames) {
         if (role != Role.DRIVER && role != Role.WORKER) {
             return true;
         }
@@ -206,7 +220,10 @@ public class CavgomainSyncClient {
             log.warn("Denying ROLE_{} for userId={}: cavgomain approval check is not configured", role, userId);
             return false;
         }
-        boolean approved = user != null && user.hasApprovedRole(role.name());
+        boolean fleetManagerToken = role == Role.WORKER && tokenRoleNames != null && tokenRoleNames.stream()
+                .anyMatch(name -> name != null && "FLEET_MANAGER".equalsIgnoreCase(name.trim()));
+        boolean approved = user != null && (user.hasApprovedRole(role.name())
+                || (fleetManagerToken && user.hasApprovedRole("FLEET_MANAGER")));
         if (!approved) {
             log.info("Denying ROLE_{} for userId={}: no approved company membership in cavgomain", role, userId);
         }

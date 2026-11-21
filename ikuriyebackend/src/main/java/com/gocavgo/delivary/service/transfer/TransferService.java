@@ -21,6 +21,7 @@ import com.gocavgo.delivary.service.delivery.PackageValidationService;
 import com.gocavgo.delivary.mapper.transfer.TransferMapper;
 import com.gocavgo.delivary.entity.transfer.TransferPackageEntity;
 import com.gocavgo.delivary.service.notification.NoticeService;
+import com.gocavgo.delivary.util.AfterCommitActions;
 import com.gocavgo.delivary.entity.delivery.PackageEntity;
 import com.gocavgo.delivary.repository.delivery.PackageJpaRepository;
 import com.gocavgo.delivary.repository.transfer.TransferJpaRepository;
@@ -124,8 +125,8 @@ public class TransferService {
                 input.ruleType() == TransferRuleType.SECURE ? rawCode : null);
         log.info("createTransfer: done id={}, ruleType={}", entity.getId(), input.ruleType());
 
-        // Publish to real-time subscription for target acceptor
-        transferCreatedPublisher.publish(new TransferEvent(response));
+        // Publish to real-time subscription only after the transfer is committed.
+        AfterCommitActions.run(() -> transferCreatedPublisher.publish(new TransferEvent(response)));
 
         return response;
     }
@@ -257,6 +258,7 @@ public class TransferService {
 
             // Validate that the requestor's role matches the transfer's acceptorType
             validationService.validateAcceptorType(transfer.getAcceptorType(), actorRole, transfer.getId());
+            final var eventRole = actorRole;
 
             var previousStatus = transfer.getStatus();
             transfer.setRequestorId(actorId);
@@ -273,17 +275,25 @@ public class TransferService {
             var packages = transferPackageRepo.findByTransferId(transfer.getId());
 
             // Broadcast OfferClaimedEvent so other drivers/workers see it immediately marked taken
-            for (var tp : packages) {
-                var pkgOpt = packageRepo.findById(tp.getPackageId());
-                var trackingCode = pkgOpt.map(PackageEntity::getTrackingCode).orElse("");
-                offerClaimedPublisher.publish(new OfferClaimedEvent(
-                        tp.getPackageId(),
-                        trackingCode,
-                        transfer.getId(),
-                        actorId,
-                        actorRole.name(),
-                        Instant.now().toString()
-                ));
+            if (!packages.isEmpty()) {
+                var packageIds = packages.stream()
+                        .map(TransferPackageEntity::getPackageId)
+                        .toList();
+                var packagesById = packageRepo.findAllById(packageIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(PackageEntity::getId,
+                                java.util.function.Function.identity(), (first, second) -> first));
+                for (var tp : packages) {
+                    var pkg = packagesById.get(tp.getPackageId());
+                    var trackingCode = pkg == null ? "" : pkg.getTrackingCode();
+                    AfterCommitActions.run(() -> offerClaimedPublisher.publish(new OfferClaimedEvent(
+                            tp.getPackageId(),
+                            trackingCode,
+                            transfer.getId(),
+                            actorId,
+                            eventRole.name(),
+                            Instant.now().toString()
+                    )));
+                }
             }
 
             var transferResp = toResponse(transfer, packages, null);
@@ -645,6 +655,9 @@ public class TransferService {
                 transferRepo.save(oldTransfer);
             }
         }
+        // The single-open-transfer DB trigger sees inserts at flush time. Flush
+        // the removals now so the new links are not rejected by the old rows.
+        transferPackageRepo.flush();
     }
 
     private void assertOwner(TransferEntity transfer, Long actorId) {

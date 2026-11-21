@@ -211,8 +211,8 @@ export interface CompanyPeriodMetrics {
 export interface CompanyResponseDto {
   id: number;
   companyName: string;
-  email: string;
-  phone: string;
+  email?: string | null;
+  phone?: string | null;
   address: string;
   city: string;
   companyCode: string;
