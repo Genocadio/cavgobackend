@@ -31,6 +31,9 @@ public record PackageResponse(
         List<EventResponse> events,
         List<CustodyResponse> custody,
         List<TransferResponse> transfers,
+        Instant deliveredAt,
+        /** Storage-backed URL; GraphQL resolver masks this for non-participants. */
+        String proofPhotoUrl,
         Instant createdAt,
         Instant updatedAt
 ) {

@@ -122,6 +122,10 @@ type User {
     updatedAt: String!
     "Driver online/offline status — only populated for DRIVER-role users"
     driverStatus: String
+    "Average delivery rating for DRIVER-role users. Null when unrated."
+    averageRating: Float
+    "Number of delivery ratings received by DRIVER-role users."
+    ratingCount: Int!
 }
 
 "Type of media link."
@@ -223,10 +227,32 @@ type DeliveryPackage {
     custody: [PackageCustody!]!
     "Open transfers containing this package (PENDING or REQUESTED). Frontend can use transfer.ruleType to determine if a code is required."
     transfers: [Transfer!]!
+    "ISO-8601 timestamp when the package was marked DELIVERED. Null before delivery."
+    deliveredAt: String
+    "Optional proof-of-delivery photo URL. Null unless the viewer is a package participant or staff."
+    proofPhotoUrl: String
+    "The authenticated client's rating for this delivery, if they have submitted one."
+    myRating: DeliveryRating
+    "Average rating of the driver who completed this delivery, when available."
+    driverAverageRating: Float
+    "Number of ratings received by the driver who completed this delivery."
+    driverRatingCount: Int!
     "ISO-8601 timestamp of creation"
     createdAt: String!
     "ISO-8601 timestamp of last update"
     updatedAt: String!
+}
+
+"Optional feedback submitted by a package sender or receiver after delivery."
+type DeliveryRating {
+    id: ID!
+    packageId: ID!
+    "Score from 1 to 5."
+    score: Int!
+    "Optional comment, visible only to the authenticated client who submitted it."
+    comment: String
+    "ISO-8601 timestamp when the rating was submitted."
+    createdAt: String!
 }
 
 "Privacy-safe tracking view for shareable public links."
@@ -521,6 +547,8 @@ input ConfirmDeliveryInput {
     packageId: ID!
     "Six-digit delivery code received via the notice feed"
     deliveryCode: String!
+    "Optional proof-of-delivery photo. Pass the mediaId returned by POST /api/files/upload."
+    proofPhotoUrl: String
 }
 
 "Input: regenerate the delivery code for a package. Only allowed while the package is PENDING_CONFIRMATION."
@@ -962,6 +990,10 @@ type Mutation {
     initiateDelivery(input: InitiateDeliveryInput!): DeliveryCodeResult!
     "Confirm delivery: verifies the delivery code and sets the package to DELIVERED. Callable by the sender, receiver, or the custodian who initiated delivery."
     confirmDelivery(input: ConfirmDeliveryInput!): DeliveryPackage!
+    "Attach or replace a proof-of-delivery photo within 5 minutes of delivery. Current delivering driver/worker only."
+    attachDeliveryProofPhoto(packageId: ID!, proofPhotoUrl: String!): DeliveryPackage!
+    "Rate a delivered package once per client, within 30 days. Sender and receiver only; score must be 1-5."
+    rateDelivery(packageId: ID!, score: Int!, comment: String): DeliveryRating!
     "Regenerate the delivery code while the package is PENDING_CONFIRMATION. Invalidates the previous code and re-publishes the new one to the notice feed. Current custodian only."
     regenerateDeliveryCode(input: RegenerateDeliveryCodeInput!): DeliveryCodeResult!
     "Create a new transfer with one or more packages. If ruleType is SECURE, a transfer code is generated and returned. Requires authentication."

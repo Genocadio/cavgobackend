@@ -6,6 +6,7 @@ import com.gocavgo.delivary.exception.BusinessValidationException;
 import com.gocavgo.delivary.security.SecurityUtils;
 import com.gocavgo.delivary.security.NexxauthRoles;
 import com.gocavgo.delivary.enums.delivery.DeliveryType;
+import com.gocavgo.delivary.enums.delivery.MediaType;
 import com.gocavgo.delivary.enums.delivery.PackageEventType;
 import com.gocavgo.delivary.enums.delivery.PackageOrigin;
 import com.gocavgo.delivary.enums.delivery.PackageStatus;
@@ -46,6 +47,7 @@ import com.gocavgo.delivary.repository.delivery.PackageLocationJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageMediaJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackagePersonJpaRepository;
 import com.gocavgo.delivary.repository.delivery.DeliveryCodeJpaRepository;
+import com.gocavgo.delivary.repository.delivery.DeliveryRatingJpaRepository;
 import com.gocavgo.delivary.repository.trip.CavgoTripJpaRepository;
 import com.gocavgo.delivary.mapper.delivery.DeliveryMapper;
 import com.gocavgo.delivary.repository.user.UserRepository;
@@ -60,6 +62,7 @@ import com.gocavgo.delivary.service.subscription.PackageTransferPublisher;
 import com.gocavgo.delivary.service.transfer.TransferService;
 import com.gocavgo.delivary.service.user.UserService;
 import com.gocavgo.delivary.util.AfterCommitActions;
+import com.gocavgo.delivary.util.DeliveryWindowUtil;
 import com.gocavgo.delivary.enums.transfer.TransferAcceptorType;
 import com.gocavgo.delivary.enums.transfer.TransferRuleType;
 import com.gocavgo.delivary.enums.transfer.TransferStatus;
@@ -85,6 +88,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
@@ -117,6 +121,7 @@ public class PackageService {
     private final PackageCustodyJpaRepository custodyRepo;
     private final PackageCustodianJpaRepository custodianRepo;
     private final DeliveryCodeJpaRepository deliveryCodeRepo;
+    private final DeliveryRatingJpaRepository ratingRepo;
     private final DeliveryCodeRateLimiter deliveryCodeRateLimiter;
     private final UserRepository userRepository;
     private final NoticeService noticeService;
@@ -867,6 +872,18 @@ public class PackageService {
      */
     @Transactional
     public PackageResponse confirmDelivery(Long actorId, UUID packageId, String deliveryCode) {
+        return confirmDelivery(actorId, packageId, deliveryCode, null);
+    }
+
+    /**
+     * Confirms delivery and optionally attaches an uploaded proof photo. The
+     * proof value is the mediaId returned by POST /api/files/upload; it is
+     * stored as storage keys on the package so it never leaks through the
+     * ordinary package media carousel.
+     */
+    @Transactional
+    public PackageResponse confirmDelivery(Long actorId, UUID packageId, String deliveryCode,
+                                           String proofPhotoMediaId) {
         var pkg = packageRepo.findById(packageId)
                 .orElseThrow(() -> new BusinessValidationException("Package not found: " + packageId));
 
@@ -877,7 +894,68 @@ public class PackageService {
         validateConfirmingActor(pkg, actorId);
         verifyDeliveryCode(pkg.getId(), deliveryCode);
 
+        if (proofPhotoMediaId != null && !proofPhotoMediaId.isBlank()) {
+            applyProofPhoto(pkg, resolveProofPhotoMedia(proofPhotoMediaId));
+        }
+
         return applyTransition(pkg, actorId, PackageStatus.DELIVERED, "Delivery confirmed");
+    }
+
+    /**
+     * Attaches or replaces a proof-of-delivery photo for 5 minutes after the
+     * DELIVERED transition. Only the driver/worker who handled the package may
+     * call this; the DTO URL is later masked by the GraphQL field resolver.
+     */
+    @Transactional
+    public PackageResponse attachDeliveryProofPhoto(Long actorId, UUID packageId, String proofPhotoMediaId) {
+        return attachDeliveryProofPhoto(actorId, packageId, proofPhotoMediaId, Instant.now());
+    }
+
+    @Transactional
+    public PackageResponse attachDeliveryProofPhoto(Long actorId, UUID packageId, String proofPhotoMediaId,
+                                                    Instant now) {
+        var pkg = packageRepo.findById(packageId)
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + packageId));
+
+        if (pkg.getStatus() != PackageStatus.DELIVERED && pkg.getStatus() != PackageStatus.COMPLETED) {
+            throw new BusinessValidationException("Proof photos can only be added after delivery");
+        }
+        validateProofActor(pkg, actorId);
+
+        var deliveredAt = resolveDeliveredAt(pkg);
+        if (!DeliveryWindowUtil.isWithin(deliveredAt, now, DeliveryWindowUtil.PROOF_PHOTO_WINDOW)) {
+            throw new BusinessValidationException("Proof photos can only be added within 5 minutes of delivery");
+        }
+
+        var oldMediaId = pkg.getProofPhotoMediaId();
+        applyProofPhoto(pkg, resolveProofPhotoMedia(proofPhotoMediaId));
+        packageRepo.save(pkg);
+
+        if (oldMediaId != null && !oldMediaId.equals(pkg.getProofPhotoMediaId())) {
+            deleteProofMedia(oldMediaId);
+        }
+        return toResponse(pkg);
+    }
+
+    /** True when the authenticated user may see this package's proof photo. */
+    public boolean canViewProofPhoto(UUID packageId, Long actorId, Role role) {
+        if (actorId == null || packageId == null) return false;
+        if (role == Role.ADMIN || role == Role.SUPER_ADMIN || role == Role.WORKER) return true;
+
+        var pkg = packageRepo.findById(packageId).orElse(null);
+        if (pkg == null) return false;
+        if (pkg.getCreatorId() != null && pkg.getCreatorId().equals(actorId)) return true;
+
+        var isPerson = personRepo.findByPackageId(packageId).stream()
+                .anyMatch(p -> p.getUserId() != null && p.getUserId().equals(actorId));
+        if (isPerson) return true;
+
+        var isDriver = carrierLegRepo.findByPackageIdOrderByLinkedAtDesc(packageId).stream()
+                .anyMatch(leg -> actorId.equals(leg.getDriverId()));
+        if (isDriver) return true;
+
+        return custodianRepo.findByPackageId(packageId).stream()
+                .anyMatch(c -> c.getUserId() != null && c.getUserId().equals(actorId));
     }
 
     /**
@@ -1005,8 +1083,12 @@ public class PackageService {
     private PackageResponse applyTransition(PackageEntity pkg, Long actorId, PackageStatus status,
                                             String notes) {
         var previousStatus = pkg.getStatus();
+        var now = Instant.now();
         pkg.setStatus(status);
-        pkg.setUpdatedAt(Instant.now());
+        pkg.setUpdatedAt(now);
+        if (status == PackageStatus.DELIVERED && pkg.getDeliveredAt() == null) {
+            pkg.setDeliveredAt(now);
+        }
         packageRepo.save(pkg);
 
         updateCustodianForStatus(pkg, actorId);
@@ -1270,6 +1352,59 @@ public class PackageService {
         throw new BusinessValidationException("Only the current custodian or office staff can initiate delivery");
     }
 
+    private PackageMediaEntity resolveProofPhotoMedia(String proofPhotoMediaId) {
+        UUID mediaId;
+        try {
+            mediaId = UUID.fromString(proofPhotoMediaId.trim());
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessValidationException("proofPhotoUrl must be the mediaId returned by the upload endpoint");
+        }
+        var media = mediaRepo.findById(mediaId)
+                .orElseThrow(() -> new BusinessValidationException("Proof photo media not found: " + mediaId));
+        if (media.getMediaType() != MediaType.PICTURE) {
+            throw new BusinessValidationException("Proof photo must be an image");
+        }
+        return media;
+    }
+
+    private void applyProofPhoto(PackageEntity pkg, PackageMediaEntity media) {
+        pkg.setProofPhotoMediaId(media.getId());
+        pkg.setProofPhotoStoragePath(media.getStoragePath());
+        pkg.setProofPhotoBucket(media.getBucket());
+        pkg.setProofPhotoStorageMode(media.getStorageMode());
+    }
+
+    private void deleteProofMedia(UUID mediaId) {
+        mediaRepo.findById(mediaId).ifPresent(media -> {
+            storageService.deleteFile(media.getBucket(), media.getStoragePath(), media.getStorageMode());
+            mediaRepo.delete(media);
+        });
+    }
+
+    private void validateProofActor(PackageEntity pkg, Long actorId) {
+        var isLatestCarrier = carrierLegRepo.findByPackageIdOrderByLinkedAtDesc(pkg.getId()).stream()
+                .findFirst()
+                .map(leg -> actorId.equals(leg.getDriverId()))
+                .orElse(false);
+        if (isLatestCarrier) return;
+
+        var isLatestCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(pkg.getId())
+                .map(c -> actorId.equals(c.getUserId())
+                        && (c.getRole() == CustodianRole.DRIVER || c.getRole() == CustodianRole.WORKER))
+                .orElse(false);
+        if (isLatestCustodian) return;
+
+        throw new BusinessValidationException("Only the delivering driver or worker can add proof of delivery");
+    }
+
+    /** Uses the immutable business timestamp, falling back to the DELIVERED event. */
+    private Instant resolveDeliveredAt(PackageEntity pkg) {
+        if (pkg.getDeliveredAt() != null) return pkg.getDeliveredAt();
+        return eventRepo.findFirstByPackageIdAndEventTypeOrderByCreatedAtDesc(pkg.getId(), PackageEventType.DELIVERED)
+                .map(PackageEventEntity::getCreatedAt)
+                .orElse(pkg.getUpdatedAt());
+    }
+
     /**
      * Delivery can be confirmed by the sender, the receiver, the current
      * custodian (e.g. the driver who initiated), or trusted office staff
@@ -1324,7 +1459,14 @@ public class PackageService {
         // 2. Delete media DB rows
         mediaRepo.deleteByPackageId(packageId);
 
+        // 2b. Delete the dedicated proof photo (stored with packageId=null so it
+        // never appears in the ordinary media carousel).
+        if (pkg.getProofPhotoMediaId() != null) {
+            deleteProofMedia(pkg.getProofPhotoMediaId());
+        }
+
         // 3. Delete related DB rows (order matters for FK constraints)
+        ratingRepo.deleteByPackageId(packageId);
         deliveryCodeRepo.findByPackageId(packageId).ifPresent(deliveryCodeRepo::delete);
         eventRepo.deleteByPackageId(packageId);
         custodyRepo.deleteByPackageId(packageId);
@@ -1962,8 +2104,16 @@ public class PackageService {
                     .map(this::toCarrierLegResponse)
                     .toList();
 
+            var proofPhotoUrl = pkg.getProofPhotoStoragePath() == null
+                    ? null
+                    : storageService.getFileUrl(
+                            pkg.getProofPhotoBucket(),
+                            pkg.getProofPhotoStoragePath(),
+                            pkg.getProofPhotoStorageMode());
+
             results.add(deliveryMapper.toFullResponse(
-                    pkg, custodians, people, locations, detail, events, custody, carrierLegs, transfers
+                    pkg, custodians, people, locations, detail, events, custody, carrierLegs,
+                    transfers, proofPhotoUrl
             ));
         }
         return results;

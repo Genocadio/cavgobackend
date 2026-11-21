@@ -401,7 +401,8 @@ public class PackageResolver {
             return cached.get();
         }
 
-        var response = packageService.confirmDelivery(authenticatedUserId, input.packageId(), input.deliveryCode());
+        var response = packageService.confirmDelivery(
+                authenticatedUserId, input.packageId(), input.deliveryCode(), input.proofPhotoUrl());
         idempotencyService.recordResponse(input.idempotencyKey(), authenticatedUserId, "confirmDelivery", response);
         return response;
     }

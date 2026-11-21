@@ -8,9 +8,14 @@ import java.util.UUID;
 public record ConfirmDeliveryInput(
         String idempotencyKey,
         @NotNull UUID packageId,
-        @NotBlank String deliveryCode
+        @NotBlank String deliveryCode,
+        String proofPhotoUrl
 ) {
     public ConfirmDeliveryInput(@NotNull UUID packageId, @NotBlank String deliveryCode) {
-        this(null, packageId, deliveryCode);
+        this(null, packageId, deliveryCode, null);
+    }
+
+    public ConfirmDeliveryInput(String idempotencyKey, @NotNull UUID packageId, @NotBlank String deliveryCode) {
+        this(idempotencyKey, packageId, deliveryCode, null);
     }
 }

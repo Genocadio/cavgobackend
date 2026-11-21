@@ -74,6 +74,23 @@ public class PackageEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    /** Immutable business timestamp for the DELIVERED transition. */
+    @Column(name = "delivered_at")
+    private Instant deliveredAt;
+
+    /** Media row backing the optional proof-of-delivery photo. */
+    @Column(name = "proof_photo_media_id")
+    private UUID proofPhotoMediaId;
+
+    @Column(name = "proof_photo_storage_path", columnDefinition = "TEXT")
+    private String proofPhotoStoragePath;
+
+    @Column(name = "proof_photo_bucket")
+    private String proofPhotoBucket;
+
+    @Column(name = "proof_photo_storage_mode")
+    private String proofPhotoStorageMode;
+
     @PreUpdate
     public void preUpdate() {
         this.updatedAt = Instant.now();
