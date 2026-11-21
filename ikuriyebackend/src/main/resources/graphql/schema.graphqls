@@ -229,6 +229,34 @@ type DeliveryPackage {
     updatedAt: String!
 }
 
+"Privacy-safe tracking view for shareable public links."
+type PublicTrackedPackage {
+    "Public-facing tracking code (e.g. CAV-XXXXXXXX)"
+    trackingCode: String!
+    "Type of delivery (OPEN or FIXED_ROUTE)"
+    deliveryType: String!
+    "Current lifecycle status"
+    status: String!
+    "Origin place name only — no coordinates or sender identity"
+    origin: String!
+    "Destination place name only — no coordinates or receiver identity"
+    destination: String!
+    "ISO-8601 timestamp of creation"
+    createdAt: String!
+    "ISO-8601 timestamp of last update"
+    updatedAt: String!
+    "Status timeline without actor ids or free-text notes"
+    events: [PublicTrackingEvent!]!
+}
+
+"Minimal timeline entry exposed to unauthenticated tracking-link viewers."
+type PublicTrackingEvent {
+    "Event type name, e.g. TRANSIT_STARTED"
+    eventType: String!
+    "ISO-8601 timestamp"
+    createdAt: String!
+}
+
 "Paginated delivery package results."
 type DeliveryPackagePage {
     "List of packages for the current page."
@@ -702,8 +730,10 @@ type Query {
     roles: [OrgRole!]!
     "Get a package by internal UUID."
     package(id: ID!): DeliveryPackage
-    "Get a package by its public tracking code."
+    "Get a package by its public tracking code. Full projection — prefer publicTracking for shareable links."
     packageByTrackingCode(code: String!): DeliveryPackage
+    "Get a privacy-safe tracking view by public tracking code. No authentication required."
+    publicTracking(code: String!): PublicTrackedPackage
     "Get all packages created by a specific user."
     packagesByCreator(
         creatorId: ID!

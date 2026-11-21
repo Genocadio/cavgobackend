@@ -22,7 +22,10 @@ import com.gocavgo.delivary.dto.delivery.output.DeliveryCodeResult;
 import com.gocavgo.delivary.dto.delivery.output.DeliveryPackagePage;
 import com.gocavgo.delivary.dto.delivery.output.PackageCreationResponse;
 import com.gocavgo.delivary.dto.delivery.output.PackageResponse;
+import com.gocavgo.delivary.dto.delivery.output.PublicTrackedPackage;
 import com.gocavgo.delivary.exception.BusinessValidationException;
+import com.gocavgo.delivary.service.delivery.PublicTrackingRateLimiter;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.graphql.data.method.annotation.Argument;
@@ -31,6 +34,8 @@ import org.springframework.graphql.data.method.annotation.QueryMapping;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.List;
 import java.util.UUID;
@@ -44,6 +49,7 @@ public class PackageResolver {
     private final CavgomainSyncClient cavgoSyncClient;
     private final com.gocavgo.delivary.service.idempotency.IdempotencyService idempotencyService;
     private final com.gocavgo.delivary.controller.graphql.NoticeResolver noticeResolver;
+    private final PublicTrackingRateLimiter publicTrackingRateLimiter;
 
     @QueryMapping("package")
     @PreAuthorize("isAuthenticated()")
@@ -54,6 +60,32 @@ public class PackageResolver {
     @QueryMapping
     public PackageResponse packageByTrackingCode(@Argument String code) {
         return packageService.getPackageByTrackingCode(code);
+    }
+
+    /**
+     * Privacy-safe lookup for shareable public tracking links. No authentication
+     * required, but throttled because the tracking code is a bearer capability.
+     */
+    @QueryMapping
+    public PublicTrackedPackage publicTracking(@Argument String code) {
+        publicTrackingRateLimiter.checkRateLimit(clientKey());
+        return packageService.getPublicTracking(code);
+    }
+
+    private String clientKey() {
+        try {
+            HttpServletRequest request =
+                    ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
+            String forwarded = request.getHeader("X-Forwarded-For");
+            if (forwarded != null && !forwarded.isBlank()) {
+                return forwarded.split(",")[0].trim();
+            }
+            String realIp = request.getHeader("X-Real-IP");
+            if (realIp != null && !realIp.isBlank()) return realIp.trim();
+            return request.getRemoteAddr();
+        } catch (IllegalStateException e) {
+            return "unknown";
+        }
     }
 
     @QueryMapping

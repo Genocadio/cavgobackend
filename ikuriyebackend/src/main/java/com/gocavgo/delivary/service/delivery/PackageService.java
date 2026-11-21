@@ -20,6 +20,7 @@ import com.gocavgo.delivary.dto.delivery.output.DeliveryCodeResult;
 import com.gocavgo.delivary.dto.delivery.output.DeliveryPackagePage;
 import com.gocavgo.delivary.dto.delivery.output.PackageCreationResponse;
 import com.gocavgo.delivary.dto.delivery.output.PackageResponse;
+import com.gocavgo.delivary.dto.delivery.output.PublicTrackedPackage;
 import com.gocavgo.delivary.dto.delivery.output.TransferAcceptResult;
 import com.gocavgo.delivary.entity.delivery.PackageAssignmentEntity;
 import com.gocavgo.delivary.entity.delivery.PackageCarrierLegEntity;
@@ -1358,6 +1359,50 @@ public class PackageService {
         var pkg = packageRepo.findByTrackingCode(code)
                 .orElseThrow(() -> new BusinessValidationException("Package not found: " + code));
         return toResponse(pkg);
+    }
+
+    /**
+     * Narrow projection for shareable public links. Only routing place names and
+     * event types are exposed — never people, exact coordinates, declared value,
+     * media, custodians, vehicle JSON, company/trip ids or free-text notes.
+     */
+    @Transactional(readOnly = true)
+    public PublicTrackedPackage getPublicTracking(String code) {
+        String cleanCode = code == null ? "" : code.trim().toUpperCase(Locale.ROOT);
+        var pkg = packageRepo.findByTrackingCode(cleanCode)
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + cleanCode));
+
+        var locations = locationRepo.findByPackageId(pkg.getId());
+        String origin = locations.stream()
+                .filter(location -> location.getType() == com.gocavgo.delivary.enums.delivery.LocationType.ORIGIN)
+                .map(com.gocavgo.delivary.entity.delivery.PackageLocationEntity::getPlaceName)
+                .filter(name -> name != null && !name.isBlank())
+                .findFirst()
+                .orElse("Origin");
+        String destination = locations.stream()
+                .filter(location -> location.getType() == com.gocavgo.delivary.enums.delivery.LocationType.DESTINATION)
+                .map(com.gocavgo.delivary.entity.delivery.PackageLocationEntity::getPlaceName)
+                .filter(name -> name != null && !name.isBlank())
+                .findFirst()
+                .orElse("Destination");
+
+        List<PublicTrackedPackage.PublicTrackingEvent> events = eventRepo
+                .findByPackageIdOrderByCreatedAtAsc(pkg.getId())
+                .stream()
+                .map(event -> new PublicTrackedPackage.PublicTrackingEvent(
+                        event.getEventType().name(), event.getCreatedAt()))
+                .toList();
+
+        return new PublicTrackedPackage(
+                pkg.getTrackingCode(),
+                pkg.getDeliveryType().name(),
+                pkg.getStatus().name(),
+                origin,
+                destination,
+                pkg.getCreatedAt(),
+                pkg.getUpdatedAt(),
+                events
+        );
     }
 
     @Transactional(readOnly = true)
