@@ -293,7 +293,8 @@ class ConfirmTransferCustomerRequestorTest {
                 null,
                 null
         );
-        var creation = packageService.createPackage(workerOwnerId, Role.WORKER, null, input);
+        var creation = packageService.createPackage(workerOwnerId, Role.WORKER, null, 42L, input);
+        assertThat(creation.deliveryPackage().companyRefId()).isEqualTo(42L);
         var transferId = creation.transfer().id();
 
         // Owner (same user) tries to request their own transfer → should fail

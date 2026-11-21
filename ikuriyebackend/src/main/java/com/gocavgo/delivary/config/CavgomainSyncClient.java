@@ -137,6 +137,15 @@ public class CavgomainSyncClient {
     }
 
     /**
+     * Numeric cavgomain company id ({@code companies.id}) for this user, or
+     * {@code null} when the user is unknown or cavgomain is unavailable.
+     */
+    public Long getCompanyIdForUser(Long userId) {
+        var user = syncUserAndGetResult(userId);
+        return user == null ? null : user.companyId();
+    }
+
+    /**
      * Legacy fire-and-forget sync — sends the user to cavgomain so it mirrors
      * the same user. Non-blocking; errors are logged and swallowed.
      *

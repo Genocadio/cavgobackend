@@ -135,6 +135,12 @@ public class PackageService {
 
     @Transactional
     public PackageCreationResponse createPackage(Long creatorId, Role role, UUID companyId, CreatePackageInput input) {
+        return createPackage(creatorId, role, companyId, null, input);
+    }
+
+    @Transactional
+    public PackageCreationResponse createPackage(Long creatorId, Role role, UUID companyId, Long companyRefId,
+                                                 CreatePackageInput input) {
         validationService.validateCreator(creatorId, role);
 
         PackageStatus initialStatus;
@@ -167,6 +173,7 @@ public class PackageService {
                 .status(initialStatus)
                 .creatorId(creatorId)
                 .companyId(companyId)
+                .companyRefId(companyRefId)
                 .createdAt(Instant.now())
                 .updatedAt(Instant.now())
                 .build();

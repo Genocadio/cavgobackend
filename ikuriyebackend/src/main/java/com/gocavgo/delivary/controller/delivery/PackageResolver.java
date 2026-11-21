@@ -1,5 +1,6 @@
 package com.gocavgo.delivary.controller.delivery;
 
+import com.gocavgo.delivary.config.CavgomainSyncClient;
 import com.gocavgo.delivary.security.NexxauthRoles;
 import com.gocavgo.delivary.service.user.UserService;
 import com.gocavgo.delivary.enums.user.Role;
@@ -40,6 +41,7 @@ public class PackageResolver {
 
     private final PackageService packageService;
     private final UserService userService;
+    private final CavgomainSyncClient cavgoSyncClient;
     private final com.gocavgo.delivary.service.idempotency.IdempotencyService idempotencyService;
     private final com.gocavgo.delivary.controller.graphql.NoticeResolver noticeResolver;
 
@@ -223,6 +225,11 @@ public class PackageResolver {
         }
 
         UUID companyId = null;
+        // cavgomain owns the numeric company id used by adminaggregate/cavgocompany.
+        // FLEET_MANAGER tokens arrive locally as WORKER after the approval gate.
+        Long companyRefId = (role == Role.WORKER || role == Role.DRIVER)
+                ? cavgoSyncClient.getCompanyIdForUser(creatorId)
+                : null;
 
         var resolvedInput = new CreatePackageInput(
                 input.idempotencyKey(),
@@ -237,7 +244,7 @@ public class PackageResolver {
                 input.transferMatchUserId()
         );
 
-        var response = packageService.createPackage(creatorId, role, companyId, resolvedInput);
+        var response = packageService.createPackage(creatorId, role, companyId, companyRefId, resolvedInput);
         idempotencyService.recordResponse(input.idempotencyKey(), creatorId, "createPackage", response);
         return response;
     }
