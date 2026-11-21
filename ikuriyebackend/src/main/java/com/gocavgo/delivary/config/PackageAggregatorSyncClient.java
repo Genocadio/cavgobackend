@@ -18,6 +18,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Publishes a minimal package projection to adminaggregate's key-guarded push
@@ -29,9 +32,11 @@ import java.util.UUID;
  * statuses needed for company-scoped "sent today by car/trip/driver" reporting.
  *
  * <p>If either setting is missing the client is disabled and every call is a
- * no-op, so local/test environments never attempt network I/O. Delivery is
- * fire-and-forget: a failed push is logged, never propagated to the package
- * mutation that triggered it.
+ * no-op, so local/test environments never attempt network I/O. That state (and
+ * a consecutive-failure streak) is surfaced by
+ * {@link PackageAggregatorSyncHealthIndicator} on {@code /actuator/health}.
+ * Delivery is fire-and-forget: a failed push is logged, never propagated to the
+ * package mutation that triggered it.
  */
 @Component
 public class PackageAggregatorSyncClient {
@@ -41,26 +46,90 @@ public class PackageAggregatorSyncClient {
 
     private final String baseUrl;
     private final String apiKey;
+    private final int failureThreshold;
     private final HttpClient httpClient = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(3))
             .build();
 
+    // Exposed to PackageAggregatorSyncHealthIndicator so a disabled client or a
+    // failing push streak is visible on /actuator/health instead of being
+    // silently swallowed by the fire-and-forget delivery path.
+    private final AtomicInteger consecutiveFailures = new AtomicInteger();
+    private final AtomicReference<Instant> lastSuccessAt = new AtomicReference<>();
+    private final AtomicReference<Instant> lastFailureAt = new AtomicReference<>();
+    private final AtomicReference<String> lastFailureDetail = new AtomicReference<>();
+    private final AtomicBoolean degradedLogged = new AtomicBoolean();
+
     public PackageAggregatorSyncClient(
             @Value("${aggregator.base-url:}") String baseUrl,
-            @Value("${aggregator.internal-api-key:}") String apiKey
+            @Value("${aggregator.internal-api-key:}") String apiKey,
+            @Value("${aggregator.sync.failure-threshold:5}") int failureThreshold
     ) {
         this.baseUrl = (baseUrl == null || baseUrl.isBlank()) ? null : baseUrl.replaceAll("/+$", "");
         this.apiKey = (apiKey == null || apiKey.isBlank()) ? null : apiKey;
+        this.failureThreshold = failureThreshold > 0 ? failureThreshold : 5;
         if (isEnabled()) {
-            log.info("PackageAggregatorSyncClient initialised — endpoint: {}/internal/packages", this.baseUrl);
+            log.info("PackageAggregatorSyncClient initialised — endpoint: {}/internal/packages (failure threshold: {})",
+                    this.baseUrl, this.failureThreshold);
         } else {
-            log.info("PackageAggregatorSyncClient disabled — AGGREGATOR_BASE_URL / AGGREGATOR_INTERNAL_API_KEY not set");
+            log.warn("PackageAggregatorSyncClient disabled — AGGREGATOR_BASE_URL / AGGREGATOR_INTERNAL_API_KEY not set; "
+                    + "package snapshots will NOT reach adminaggregate");
         }
     }
 
     public boolean isEnabled() {
         return baseUrl != null && apiKey != null;
+    }
+
+    /** Push endpoint used by this client, or {@code null} when not configured. */
+    public String getEndpoint() {
+        return baseUrl == null ? null : baseUrl + "/internal/packages";
+    }
+
+    public int getConsecutiveFailures() {
+        return consecutiveFailures.get();
+    }
+
+    public int getFailureThreshold() {
+        return failureThreshold;
+    }
+
+    public Instant getLastSuccessAt() {
+        return lastSuccessAt.get();
+    }
+
+    public Instant getLastFailureAt() {
+        return lastFailureAt.get();
+    }
+
+    public String getLastFailureDetail() {
+        return lastFailureDetail.get();
+    }
+
+    public boolean isDegraded() {
+        return isEnabled() && getConsecutiveFailures() >= failureThreshold;
+    }
+
+    /** Package-private for the health-indicator unit tests. */
+    void recordSuccess() {
+        consecutiveFailures.set(0);
+        degradedLogged.set(false);
+        lastFailureAt.set(null);
+        lastFailureDetail.set(null);
+        lastSuccessAt.set(Instant.now());
+    }
+
+    /** Package-private for the health-indicator unit tests. */
+    void recordFailure(String detail) {
+        int failures = consecutiveFailures.incrementAndGet();
+        lastFailureAt.set(Instant.now());
+        lastFailureDetail.set(detail);
+        if (isDegraded() && degradedLogged.compareAndSet(false, true)) {
+            log.warn("Package sync degraded — {} consecutive failures (threshold {}, last: {}). "
+                            + "Check adminaggregate availability and the internal API key.",
+                    failures, failureThreshold, detail);
+        }
     }
 
     /** Minimal package fields needed by the aggregator for company reporting. */
@@ -111,17 +180,21 @@ public class PackageAggregatorSyncClient {
             httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                     .thenAccept(response -> {
                         if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                            recordSuccess();
                             log.debug("Package sync OK for package={}, status={}", snapshot.packageId(), response.statusCode());
                         } else {
+                            recordFailure("HTTP " + response.statusCode());
                             log.warn("Package sync returned status={} for package={} (body={})",
                                     response.statusCode(), snapshot.packageId(), response.body());
                         }
                     })
                     .exceptionally(ex -> {
+                        recordFailure(ex.getMessage());
                         log.warn("Package sync failed for package={}: {}", snapshot.packageId(), ex.getMessage());
                         return null;
                     });
         } catch (Exception e) {
+            recordFailure(e.getMessage());
             log.warn("Package sync error for package={}: {}", snapshot.packageId(), e.getMessage());
         }
     }

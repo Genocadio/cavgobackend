@@ -75,6 +75,9 @@ cavgomain:
 aggregator:
   base-url: ${AGGREGATOR_BASE_URL:}
   internal-api-key: ${AGGREGATOR_INTERNAL_API_KEY:}
+  sync:
+    # Consecutive failed pushes before /actuator/health reports this client DOWN.
+    failure-threshold: ${AGGREGATOR_SYNC_FAILURE_THRESHOLD:5}
 
 eureka:
   client:

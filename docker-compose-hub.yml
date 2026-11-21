@@ -470,6 +470,8 @@ services:
       TRIPS_BASE_URL: http://cavgotrips:${PORT_TRIPS:-6080}
       NEXXAUTH_PUBLIC_KEY: ${NEXXAUTH_HUB_PUBLIC_KEY:-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0b5n8Swo0KRi11RfAU8wRptBv2MR8M7Px5wMwf/zyCiPITLSKWUiCE851q5K2yxehk6tXEbDw5C8H1S3g4cupQsaHMQ/zmMl1eLP8lsPQpePKk5OIkK5XPWGWXw9SWsX/OtqP+C9vYKLOvwFFT49jtk0pJ73LAkvgkC4HrfEcWsJ4Fhz4C2bZZmVRdgvTmQ9w9BVJurub8XVLRqQIgmAM6L2h/4I1fnvqOL2kGvkpBMi1BSycpOZdb2Vyo8615eyYfNzHd5+/tKTu0969lX86MAirNzqi641RXVaYYXvntnAT2s4qQtm3xr366W8sCjsWFMcbzlhJ0IxFgBHWG7InwIDAQAB}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-nx-internal-dev-change-me}
+      # /health marks the package projection stale past this age (seconds).
+      PACKAGE_SYNC_STALE_SECONDS: ${PACKAGE_SYNC_STALE_SECONDS:-86400}
     ports:
       - "${PORT_ADMINAGGREGATE:-4000}:4000"
     depends_on:
@@ -483,6 +485,12 @@ services:
         condition: service_healthy
     networks:
       - cavgo-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # Ikuriye Backend Service
   ikuriyebackend:

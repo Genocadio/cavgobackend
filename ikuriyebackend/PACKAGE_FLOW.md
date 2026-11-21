@@ -96,6 +96,11 @@ package_custody            — append-only log of every custody transfer (from �
 package_events             — append-only audit timeline of every action
 ```
 
+> **Company id fields:** `company_id` is the legacy office UUID; `company_ref_id`
+> is the numeric cavgomain company id used by trips and company reporting. They
+> are different ID spaces and must never be compared. See
+> [`docs/COMPANY_IDS.md`](../docs/COMPANY_IDS.md).
+
 ---
 
 ## 4. Delivery Types

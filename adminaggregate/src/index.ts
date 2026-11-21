@@ -11,6 +11,7 @@ import { typeDefs, resolvers } from "./graphql";
 import * as syncService from "./services/syncService";
 import * as pushSyncService from "./services/pushSyncService";
 import * as packageSyncService from "./services/packageSyncService";
+import * as syncStatusService from "./services/syncStatusService";
 import * as rabbitmq from "./services/rabbitmq";
 import * as eventHandlers from "./services/eventHandlers";
 import * as tripPolling from "./services/tripPolling";
@@ -174,6 +175,22 @@ export async function main(): Promise<void> {
 
   // CORS is handled centrally by the API gateway/edge. Disabled here so this
   // service does not emit conflicting Access-Control-* headers (see cavgomain).
+
+  // Observability endpoint. No auth: it only exposes aggregate freshness data,
+  // never package contents or secrets. Used by the container healthcheck and by
+  // uptime monitors to spot a stalled ikuriyebackend -> adminaggregate push path.
+  app.get("/health", async (_req, res) => {
+    try {
+      const status = await syncStatusService.getPackageSyncStatus();
+      res.status(200).json({ status: "ok", packageSync: status });
+    } catch (error) {
+      console.error("[HEALTH] Failed to read package sync status:", error);
+      res.status(503).json({
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
 
   // 7.75. Push ingestion endpoints
   // The main API pushes this company's vehicles/workers whenever they change

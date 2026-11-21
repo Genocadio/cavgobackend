@@ -451,6 +451,8 @@ services:
       TRIPS_BASE_URL: http://cavgotrips:${PORT_TRIPS:-6080}
       NEXXAUTH_PUBLIC_KEY: ${NEXXAUTH_PUBLIC_KEY:-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2G52RDx6567hgWYJPe2xSdHvsvYSfEkYtw+gBmGsUAGE0lLrgTgtT0tMlx/J7ADAU4byULpGNdJcb87P0iwcT32cqyeGlOpkgxgGkRKC7V4h4HdwVHLf78IT00pWAVdTK+K7MNzcJGB5/qOond0WWkgto803MpYUPabvVTsD2r6FyPy3f5WokFKsrHGO8KTPKQ0oYdRYcZ+1aO2QjJO4PMIUg9k2pquB+OJmCYVeGxi0tpNCYIoWZoYIQbUIRzfRTi/p8yRE1INlfnxYNTBQWEQHs0zplYSSr+H2gNBMAJfJ7tLVZ/Lc6OWUQJBJ5n8rOKH66VWYWbFbRUL6UOfmGQIDAQAB}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-nx-internal-dev-change-me}
+      # /health marks the package projection stale past this age (seconds).
+      PACKAGE_SYNC_STALE_SECONDS: ${PACKAGE_SYNC_STALE_SECONDS:-86400}
     ports:
       - "${PORT_ADMINAGGREGATE:-4000}:4000"
     depends_on:
@@ -464,6 +466,12 @@ services:
         condition: service_healthy
     networks:
       - cavgo-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
   # Navigation Service (Java)
   navigation:
     build:

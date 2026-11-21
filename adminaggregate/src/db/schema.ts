@@ -54,9 +54,11 @@ export const paymentTypeEnum = pgEnum("payment_type_enum", ["cash", "epayment", 
  * Package domain mirrors the minimal projection pushed by ikuriyebackend.
  * Customer names/phones/addresses are deliberately not stored here.
  *
- * Note: `companyId` is the cavgomain office UUID, while `companyRefId` is the
- * trip-service Long id used for admin joins. Both are kept as text so a single
- * table can hold both ID spaces without bigint/JS precision surprises.
+ * Note: `companyId` is the legacy office UUID, while `companyRefId` is the
+ * numeric cavgomain/adminaggregate company id used by company-scoped queries.
+ * Both are kept as text so a single table can hold both ID spaces without
+ * bigint/JS precision surprises. See docs/COMPANY_IDS.md — never join one to
+ * the other.
  */
 export const packageStatusEnum = pgEnum("package_status_enum", [
   "CREATED",

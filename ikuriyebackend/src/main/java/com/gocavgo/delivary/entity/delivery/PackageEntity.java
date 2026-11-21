@@ -52,8 +52,9 @@ public class PackageEntity {
     private UUID companyId;
 
     /**
-     * Company id from the trip service ({@code cavgo_trips.company_id}). Kept
-     * separately from {@link #companyId} because the two are different ID spaces.
+     * Numeric cavgomain company id ({@code companies.id}), also used by
+     * cavgotrips and adminaggregate. This — not {@link #companyId} — is the key
+     * for company-scoped package reporting. See {@code docs/COMPANY_IDS.md}.
      */
     @Column(name = "company_ref_id")
     private Long companyRefId;
