@@ -20,7 +20,7 @@ public class FirebaseService {
 
     private static final Logger logger = LoggerFactory.getLogger(FirebaseService.class);
 
-    @Autowired
+    @Autowired(required = false)
     private FirebaseMessaging firebaseMessaging;
 
     @Value("${firebase.topic.default:general}")
@@ -62,6 +62,11 @@ public class FirebaseService {
 
             // Remove "/topics/" prefix if present (Firebase handles both formats)
             String cleanTopic = topic.startsWith("/topics/") ? topic.substring(8) : topic;
+
+            if (firebaseMessaging == null) {
+                logger.debug("Firebase push disabled; skipping topic '{}'", cleanTopic);
+                return null;
+            }
 
             logger.info("📤 Sending message to topic: {}", cleanTopic);
             logger.debug("📦 Message data: {}", data);
@@ -123,6 +128,11 @@ public class FirebaseService {
 
             // Remove "/topics/" prefix if present (Firebase handles both formats)
             String cleanTopic = topic.startsWith("/topics/") ? topic.substring(8) : topic;
+
+            if (firebaseMessaging == null) {
+                logger.debug("Firebase push disabled; skipping topic '{}'", cleanTopic);
+                return null;
+            }
 
             logger.info("📤 Sending message to topic: {} with collapse key: {}", cleanTopic, collapseKey);
             logger.debug("📦 Message data: {}", data);

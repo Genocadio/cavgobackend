@@ -31,10 +31,10 @@ public class FirebaseConfig {
                 String credentialsPath = System.getenv("GOOGLE_APPLICATION_CREDENTIALS");
                 
                 if (credentialsPath == null || credentialsPath.isEmpty()) {
-                    throw new IllegalStateException(
-                        "GOOGLE_APPLICATION_CREDENTIALS environment variable is not set. " +
-                        "Please set it to the path of your Firebase service account JSON file."
-                    );
+                    // FCM is optional in deployments that do not use push notifications.
+                    // Returning no bean lets FirebaseService start with push disabled.
+                    logger.warn("⚠️ GOOGLE_APPLICATION_CREDENTIALS is not set — Firebase push notifications are disabled");
+                    return null;
                 }
 
                 logger.info("Initializing Firebase Admin SDK with credentials from: {}", credentialsPath);
