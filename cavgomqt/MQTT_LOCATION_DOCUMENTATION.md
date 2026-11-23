@@ -13,6 +13,29 @@ vehicles/{carId}/location/batch
 - **{carId}**: The unique ID of the vehicle (string).
 - **QoS**: 1 (At least once delivery).
 
+The Android client also publishes a JSON fallback channel while signed in:
+
+```
+users/{userId}/location/update
+```
+
+- Payload: `{ "userId", "vehicleId"?, "latitude", "longitude", "speed" (m/s), "bearing"?, "accuracy"?, "timestamp" }`
+- The backend consumes this topic and forwards it to the same vehicle-location fanout when `vehicleId` is present.
+
+## 🔗 Channel map (driver GPS / trip data)
+
+| Channel | Producer → consumer | Payload / units |
+| --- | --- | --- |
+| `vehicles/{vehicleId}/location/batch` | Android → cavgomqt | Protobuf `LocationBatch`; speed **m/s**, timestamp **ms** |
+| `users/{userId}/location/update` | Android → cavgomqt | JSON; speed **m/s**, timestamp **ms**, requires `vehicleId` for car updates |
+| `vehicle.location.updates.fanout` (RabbitMQ) | cavgomqt → cavgomain + adminaggregate | `VehicleLocationUpdateMessage`; `current_speed` **km/h** |
+| `cavgomqt.location.updates` (RabbitMQ) | cavgomqt → adminaggregate | `NavigaLocationUpdateEvent`; raw GPS speed **m/s**, converted to km/h by the consumer |
+| `cavgomqt.trip.updates` (RabbitMQ) | cavgomqt → cavgotrips + adminaggregate | `NavigaTripUpdateEvent`; `currentLocation.speed` **m/s**, converted to km/h by consumers |
+| `car/{vehicleId}/trip` | cavgomqt → Android | Trip lifecycle event; Android uses it to trigger a state reload |
+| `car/{vehicleId}/trip/updates` | cavgomqt → Android | Flat `NavigaTripDto`; waypoint progress + `currentLocation.speed` **m/s** (Android converts for UI) |
+
+`trip/{tripId}/booking*`, `car/{vehicleId}/ping`, and `car/{vehicleId}/settings` are configured but are not part of the driver location/speed path.
+
 ## 📦 Payload Format (Protobuf)
 
 The payload is a binary Protobuf message. To decode it, you will need the following schema definition.
@@ -45,7 +68,7 @@ message LocationBatch {
 The client uses an **Adaptive Batching** strategy. A single message arriving on the topic may contain one or multiple points.
 
 - **Real-time Tracking**: When the vehicle is moving (> 1m/s), a batch is sent every **10 seconds**.
-- **Heartbeat**: When the vehicle is stationary, a batch (likely containing 1 point) is sent every **5 minutes**.
+- **Heartbeat**: When the vehicle is stationary, flushes are throttled to **60 seconds**; the client still holds a 5-minute heartbeat constant for connection keepalive tuning.
 - **Durable Replay**: If the device was offline, the next message may contain **many points** (the entire history of the offline period).
 
 ## 🛠️ Consumer Implementation (Java/Spring)

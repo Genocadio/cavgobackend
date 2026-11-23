@@ -551,7 +551,10 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
         lat: event.trip.currentLocation.latitude,
         lng: event.trip.currentLocation.longitude,
       },
-      speed: event.trip.currentLocation.speed,
+      // Naviga publishes m/s; cars.current_location stores km/h.
+      speed: typeof event.trip.currentLocation.speed === "number"
+        ? event.trip.currentLocation.speed * 3.6
+        : 0,
       bearing: event.trip.currentLocation.heading ?? 0,
       timestamp: new Date(event.trip.currentLocation.timestamp).getTime(),
     };
@@ -619,7 +622,8 @@ export async function handleNavigaLocationUpdate(message: Buffer): Promise<void>
         driverId,
         latitude: location.latitude,
         longitude: location.longitude,
-        speed: location.speed,
+        // This fanout carries raw GPS samples in m/s; stored speed is km/h.
+        speed: typeof location.speed === "number" ? location.speed * 3.6 : 0,
         bearing: location.heading,
         accuracy: location.accuracy,
         timestamp: new Date(location.timestamp).getTime(),
@@ -644,7 +648,7 @@ export async function handleNavigaLocationUpdate(message: Buffer): Promise<void>
           lat: latestLocation.latitude,
           lng: latestLocation.longitude,
         },
-        speed: latestLocation.speed,
+        speed: typeof latestLocation.speed === "number" ? latestLocation.speed * 3.6 : 0,
         bearing: latestLocation.heading ?? 0,
         timestamp: new Date(latestLocation.timestamp).getTime(),
       };

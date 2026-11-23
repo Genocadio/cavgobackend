@@ -37,6 +37,15 @@ public class MqttLocationListenerService {
     @Autowired
     private RabbitMQNavigaLocationUpdatePublisher rabbitMQNavigaLocationUpdatePublisher;
 
+    @Autowired
+    private RabbitMQVehicleLocationPublisherService vehicleLocationPublisherService;
+
+    @Autowired
+    private VehicleRegistryService vehicleRegistryService;
+
+    /** Guards against replaying older batches into the current-location stores, per vehicle. */
+    private final java.util.Map<String, Long> lastPublishedTimestamps = new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
      * Process incoming location batch message from MQTT
      * 
@@ -74,6 +83,10 @@ public class MqttLocationListenerService {
                 // Collect all GPS updates for batch sending to Naviga
                 java.util.List<com.nexxserve.cavgomqt.dto.naviga.NavigaGpsUpdateRequest> gpsUpdates = 
                     new java.util.ArrayList<>();
+
+                // Track the newest valid point for current-location / speed stores.
+                LocationPoint latestValidPoint = null;
+                long latestValidTimestamp = Long.MIN_VALUE;
 
                 // Process and log each location point
                 for (int i = 0; i < batch.getPointsCount(); i++) {
@@ -134,7 +147,17 @@ public class MqttLocationListenerService {
                     );
                     
                     gpsUpdates.add(gpsUpdate);
+
+                    if (point.getTimestamp() > latestValidTimestamp) {
+                        latestValidTimestamp = point.getTimestamp();
+                        latestValidPoint = point;
+                    }
                 }
+
+                // Publish the newest fix to the canonical vehicle-location fanout.
+                // This keeps car current-location, car_locations history and admin speed
+                // fresh even when there is no active Naviga trip.
+                publishVehicleLocationUpdate(batch.getVehicleId(), latestValidPoint);
 
                 // Send all GPS updates in a single batch to Naviga API
                 if (!gpsUpdates.isEmpty()) {
@@ -171,8 +194,9 @@ public class MqttLocationListenerService {
                                     rabbitError.getMessage());
                         }
                         
-                        // Step 2: Send GPS batch to Naviga API as normal
-                        // NavigaService will validate registry presence and log outcomes
+                        // Step 2: Send GPS batch to Naviga API as normal.
+                        // A missing active trip is logged by Naviga, but the batch is no
+                        // longer dropped — current-location stores were already updated above.
                         navigaService.updateGpsBatch(batch.getVehicleId(), gpsUpdates);
                     } catch (Exception e) {
                         logger.warn("⚠️ Failed to send GPS batch to Naviga API: {}", e.getMessage());
@@ -197,5 +221,64 @@ public class MqttLocationListenerService {
 
         logger.info("✅ Finished processing location batch");
         logger.info("═══════════════════════════════════════════════════════════════");
+    }
+
+    /**
+     * Fan out the newest decoded fix to the vehicle-location exchange.
+     *
+     * MQTT GPS speed is metres/second; the vehicle-location contract used by
+     * cavgomain/adminaggregate is km/h, so conversion happens here exactly once.
+     */
+    private void publishVehicleLocationUpdate(String carId, LocationPoint point) {
+        if (carId == null || carId.trim().isEmpty() || point == null) {
+            return;
+        }
+
+        long timestamp = point.getTimestamp() > 0 ? point.getTimestamp() : System.currentTimeMillis();
+        Long previous = lastPublishedTimestamps.get(carId);
+        if (previous != null && timestamp <= previous) {
+            logger.debug("Skipping stale current-location publish for carId={} (ts={} <= {})",
+                    carId, timestamp, previous);
+            return;
+        }
+
+        double speedMs = point.getSpeed();
+        if (!Double.isFinite(speedMs) || speedMs < 0) {
+            speedMs = 0;
+        }
+        double speedKmh = speedMs * 3.6d;
+
+        Double bearing = null;
+        if (point.hasBearing() && Double.isFinite(point.getBearing())) {
+            bearing = (double) point.getBearing();
+        }
+        Double accuracy = null;
+        if (point.hasAccuracy() && Double.isFinite(point.getAccuracy())) {
+            accuracy = (double) point.getAccuracy();
+        }
+
+        try {
+            vehicleLocationPublisherService.publishLocationUpdate(
+                    carId,
+                    "ONLINE",
+                    timestamp,
+                    point.getLat(),
+                    point.getLng(),
+                    speedKmh,
+                    accuracy,
+                    bearing
+            );
+            lastPublishedTimestamps.put(carId, timestamp);
+            logger.info("📤 Published vehicle location fanout: carId={} speed={} km/h", carId, speedKmh);
+        } catch (Exception e) {
+            logger.warn("⚠️ Failed to publish vehicle location fanout for carId={}: {}",
+                    carId, e.getMessage());
+        }
+
+        try {
+            vehicleRegistryService.updateVehicleStatus(Long.valueOf(carId), true, timestamp);
+        } catch (NumberFormatException e) {
+            logger.debug("Vehicle id is not numeric; skipping registry status update: {}", carId);
+        }
     }
 }

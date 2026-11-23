@@ -8,6 +8,7 @@ import com.nexxserve.cavgomqt.service.NavigaService;
 import com.nexxserve.cavgomqt.service.MqttLocationListenerService;
 import com.nexxserve.cavgomqt.dto.mqtt.BookingBundle;
 import com.nexxserve.cavgomqt.dto.incoming.IncomingVehicleStatusData;
+import com.nexxserve.cavgomqt.dto.incoming.IncomingUserLocationData;
 import com.nexxserve.cavgomqt.dto.VehicleLocationUpdateMessage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
@@ -192,6 +193,11 @@ public class MqttConfiguration {
         return new DirectChannel();
     }
 
+    @Bean
+    public MessageChannel userLocationChannel() {
+        return new DirectChannel();
+    }
+
     // === OUTBOUND CHANNELS ===
 
     @Bean
@@ -354,6 +360,28 @@ public class MqttConfiguration {
         adapter.setQos(1); // QoS 1 as per documentation
         adapter.setOutputChannel(locationBatchChannel());
         logger.info("✅ Location batch inbound adapter configured");
+        return adapter;
+    }
+
+    @Bean
+    public MessageProducer userLocationInbound() {
+        String adapterClientId = clientId + "-user-location-" + System.currentTimeMillis();
+        String topic = "users/+/location/update";
+        logger.info("🔔 Setting up MQTT inbound adapter (JSON):");
+        logger.info("  - Topic: {}", topic);
+        logger.info("  - Adapter Client ID: {}", adapterClientId);
+        logger.info("  - Broker: {}", brokerUrl);
+
+        MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
+                brokerUrl,
+                adapterClientId,
+                mqttClientFactory(),
+                topic);
+        adapter.setCompletionTimeout(10000);
+        adapter.setConverter(new DefaultPahoMessageConverter());
+        adapter.setQos(1);
+        adapter.setOutputChannel(userLocationChannel());
+        logger.info("✅ User location inbound adapter configured");
         return adapter;
     }
 
@@ -649,6 +677,86 @@ public class MqttConfiguration {
 
             // Delegate to location listener service for processing
             locationListenerService.processLocationBatch(topic, payload);
+        };
+    }
+
+    @Bean
+    @ServiceActivator(inputChannel = "userLocationChannel")
+    public MessageHandler userLocationHandler() {
+        return message -> {
+            logger.info("👤 ✅ MQTT MESSAGE ARRIVED: users/+/location/update");
+
+            String payload = String.valueOf(message.getPayload());
+            String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
+
+            try {
+                IncomingUserLocationData data = objectMapper.readValue(payload, IncomingUserLocationData.class);
+                if (data.getLatitude() == null || data.getLongitude() == null) {
+                    logger.warn("⚠️ User location update missing coordinates; topic={}", topic);
+                    return;
+                }
+
+                String userId = data.getUserId();
+                if (userId == null || userId.trim().isEmpty() && topic != null && topic.startsWith("users/")) {
+                    String[] parts = topic.split("/");
+                    if (parts.length > 1) {
+                        userId = parts[1];
+                    }
+                }
+
+                String carId = data.getVehicleId();
+                long timestamp = data.getTimestamp() != null ? data.getTimestamp() : System.currentTimeMillis();
+
+                // App publishes m/s; the vehicle-location fanout contract is km/h.
+                double speedMs = data.getSpeed() != null ? data.getSpeed() : 0d;
+                if (!Double.isFinite(speedMs) || speedMs < 0) {
+                    speedMs = 0;
+                }
+                double speedKmh = speedMs * 3.6d;
+
+                if (carId == null || carId.trim().isEmpty()) {
+                    logger.info("ℹ️ User location received without vehicleId (user={}); no car location to update",
+                            userId);
+                    return;
+                }
+
+                vehicleLocationPublisherService.publishLocationUpdate(
+                        carId,
+                        "ONLINE",
+                        timestamp,
+                        data.getLatitude(),
+                        data.getLongitude(),
+                        speedKmh,
+                        data.getAccuracy(),
+                        data.getBearing()
+                );
+
+                try {
+                    vehicleRegistryService.updateVehicleStatus(Long.valueOf(carId), true, timestamp);
+                } catch (NumberFormatException ignored) {
+                    logger.debug("Vehicle id is not numeric; skipping registry status update: {}", carId);
+                }
+
+                try {
+                    navigaService.updateGps(
+                            carId,
+                            data.getLatitude(),
+                            data.getLongitude(),
+                            speedMs,
+                            data.getBearing(),
+                            data.getAccuracy(),
+                            timestamp
+                    );
+                } catch (Exception navigaError) {
+                    logger.debug("Naviga forward skipped for user location: {}", navigaError.getMessage());
+                }
+
+                logger.info("✅ Forwarded user location to vehicle fanout: user={} car={} speed={} km/h",
+                        userId, carId, speedKmh);
+            } catch (Exception e) {
+                logger.warn("⚠️ Failed to process user location update: {}", e.getMessage());
+                logger.debug("User location payload: {}", payload);
+            }
         };
     }
 

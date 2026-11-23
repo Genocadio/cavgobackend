@@ -250,7 +250,7 @@ public class NavigaService {
      * @param carId     The car ID (e.g., "17" or "CAR-17")
      * @param latitude  GPS latitude (required)
      * @param longitude GPS longitude (required)
-     * @param speed     Speed in km/h (optional)
+     * @param speed     Speed in m/s (Naviga GPS contract; optional)
      * @param heading   Direction in degrees 0-360 (optional)
      * @param accuracy  GPS accuracy in meters (optional)
      * @param timestamp Unix timestamp in milliseconds (optional)
@@ -362,11 +362,14 @@ public class NavigaService {
             normalizedCarId = carId.substring(4);
         }
 
-        // Check if car has an active trip in database before sending GPS updates
+        // Do not drop GPS batches when no Naviga trip is registered locally.
+        // The app still publishes location while a driver is online/idle, and the
+        // canonical vehicle-location fanout is fed by MqttLocationListenerService.
+        // Naviga itself will answer 404 for cars without an active trip; that is a
+        // normal, harmless response rather than a reason to discard the samples.
         if (!navigaTripRepository.existsByCarId(normalizedCarId)) {
-            logger.info("🚫 Skipping GPS batch: carId={} has no active Naviga trip. Updates queued: {}",
+            logger.debug("ℹ️ No local active Naviga trip for carId={}; forwarding batch anyway ({} points)",
                     normalizedCarId, gpsUpdateRequests.size());
-            return;
         }
 
         try {
