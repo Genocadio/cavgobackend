@@ -2,6 +2,7 @@ import type { Car, CurreLocation, Driver, Status, VehicleStatus } from "../types
 import * as carRepository from "../repositories/cars";
 import * as driverRepository from "../repositories/drivers";
 import * as assignmentRepository from "../repositories/assignments";
+import * as tripOccupancyService from "./tripOccupancyService";
 
 /**
  * Intake for data pushed from the main API (cavgomain).
@@ -213,6 +214,7 @@ export async function syncWorkersFromInternal(
         await upsertCar(car);
         await assignmentRepository.ensureDriverCarAssignment(driver.id, car.id);
       } else {
+        await tripOccupancyService.closeTripsForDriver(driver.id, "worker_push_unassigned");
         await assignmentRepository.removeAssignmentByDriverId(driver.id);
       }
 

@@ -30,6 +30,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -509,7 +510,9 @@ public class NavigaService {
 
             if (response.getStatusCode() == HttpStatus.OK || response.getStatusCode() == HttpStatus.NO_CONTENT) {
                 logger.info("✅ Successfully deleted trip from Naviga: tripId={}", tripId);
-                
+
+                publishNavigaDeletion(tripId);
+
                 // Remove trip from database registry
                 try {
                     navigaTripRepository.deleteByTripId(tripId);
@@ -517,9 +520,6 @@ public class NavigaService {
                 } catch (Exception dbError) {
                     logger.error("❌ Failed to remove trip from database: {}", dbError.getMessage());
                 }
-                
-                // Note: Not publishing trip deletion event to RabbitMQ (as per requirement)
-                logger.info("ℹ️ Trip deleted from Naviga - no RabbitMQ event published");
             } else {
                 logger.warn("⚠️ Unexpected response from Naviga DELETE API: status={}, body={}",
                         response.getStatusCode(), response.getBody());
@@ -528,6 +528,7 @@ public class NavigaService {
         } catch (HttpClientErrorException e) {
             if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
                 logger.debug("⚠️ Naviga API returned 404 Not Found - Trip doesn't exist: tripId={}", tripId);
+                publishNavigaDeletion(tripId);
                 // Still try to remove from database
                 try {
                     navigaTripRepository.deleteByTripId(tripId);
@@ -544,6 +545,21 @@ public class NavigaService {
         } catch (Exception e) {
             logger.error("❌ Unexpected error deleting trip from Naviga API: {}", e.getMessage(), e);
         }
+    }
+
+    private void publishNavigaDeletion(Long tripId) {
+        String carId = null;
+        try {
+            Optional<NavigaTripEntity> entity = navigaTripRepository.findByTripId(tripId);
+            if (entity.isPresent()) {
+                carId = entity.get().getCarId();
+            }
+        } catch (Exception e) {
+            logger.warn("⚠️ Could not resolve carId for Naviga deletion event: tripId={}, error={}",
+                    tripId, e.getMessage());
+        }
+        rabbitMQNavigaTripUpdatePublisher.publishSimpleUpdate(
+                tripId, carId, "DELETED", "naviga-trip-delete");
     }
 
     /**

@@ -11,6 +11,7 @@ import * as metricsRepository from "../repositories/metrics";
 import * as snapshotRepository from "../repositories/snapshots";
 import { updateTripMetrics } from "./tripMetricsService";
 import * as syncService from "./syncService";
+import * as tripOccupancyService from "./tripOccupancyService";
 import { pubsub, TRIGGERS } from "./pubsub";
 
 export async function handleVehicleEvent(message: Buffer): Promise<void> {
@@ -28,20 +29,27 @@ export async function handleVehicleEvent(message: Buffer): Promise<void> {
       await carRepository.createCar(car);
     }
 
-    // Handle driver assignment
+    // Handle driver assignment. Only a real change should close an active trip;
+    // a routine vehicle UPDATE must not cancel a live trip.
+    const existingAssignment = await assignmentRepository.getDriverCarAssignmentByCarId(car.id);
     if (vehicleData.driver) {
-      // Vehicle has a driver assigned
       const driverId = String(vehicleData.driver.id);
+      if (!existingAssignment?.driver?.id || existingAssignment.driver.id !== driverId) {
+        await tripOccupancyService.closeTripsForCar(car.id, "vehicle_driver_changed");
+      }
       await assignmentRepository.ensureDriverCarAssignment(driverId, car.id);
     } else {
-      // Vehicle has no driver - clear assignment for this car
+      // Vehicle has no driver - clear the trip projection before nulling the
+      // assignment, otherwise getActiveTripByCarId still sees the old trip.
+      await tripOccupancyService.closeTripsForCar(car.id, "vehicle_unassigned");
       await assignmentRepository.removeDriverFromAssignment(car.id);
     }
   } else if (event.event === "DELETE") {
     const deleteData = event.data as { vehicleId: number };
     const vehicleId = String(deleteData.vehicleId);
-    
+
     // Clear assignment first
+    await tripOccupancyService.closeTripsForCar(vehicleId, "vehicle_deleted");
     await assignmentRepository.removeDriverFromAssignment(vehicleId);
     // Then delete the vehicle
     await carRepository.deleteCar(vehicleId);
@@ -49,6 +57,11 @@ export async function handleVehicleEvent(message: Buffer): Promise<void> {
     const assignmentData = event.data as { vehicleId: number; driverId: number };
     const vehicleId = String(assignmentData.vehicleId);
     const driverId = String(assignmentData.driverId);
+
+    const existingAssignment = await assignmentRepository.getDriverCarAssignmentByCarId(vehicleId);
+    if (!existingAssignment?.driver?.id || existingAssignment.driver.id !== driverId) {
+      await tripOccupancyService.closeTripsForCar(vehicleId, "vehicle_driver_reassigned");
+    }
 
     // Ensure 1:1 assignment (this will remove old assignments)
     await assignmentRepository.ensureDriverCarAssignment(driverId, vehicleId);
@@ -70,20 +83,26 @@ export async function handleDriverEvent(message: Buffer): Promise<void> {
       await driverRepository.createDriver(driver);
     }
 
-    // Handle vehicle assignment
+    // Handle vehicle assignment. Only a real change should close an active
+    // trip; routine driver UPDATE events must leave live trips alone.
+    const existingAssignment = await assignmentRepository.getDriverCarAssignmentByDriverId(driver.id);
     if (driverData.vehicle) {
-      // Driver has a vehicle assigned
       const vehicleId = String(driverData.vehicle.id);
+      if (!existingAssignment?.car?.id || existingAssignment.car.id !== vehicleId) {
+        await tripOccupancyService.closeTripsForDriver(driver.id, "driver_vehicle_changed");
+      }
       await assignmentRepository.ensureDriverCarAssignment(driver.id, vehicleId);
     } else {
-      // Driver has no vehicle - clear assignment for this driver
+      // Driver has no vehicle - close any trips before nulling the assignment.
+      await tripOccupancyService.closeTripsForDriver(driver.id, "driver_unassigned");
       await assignmentRepository.removeAssignmentByDriverId(driver.id);
     }
   } else if (event.event === "DELETE") {
     const deleteData = event.data as { driverId: number };
     const driverId = String(deleteData.driverId);
-    
+
     // Clear assignment first
+    await tripOccupancyService.closeTripsForDriver(driverId, "driver_deleted");
     await assignmentRepository.removeAssignmentByDriverId(driverId);
     // Then delete the driver
     await driverRepository.deleteDriver(driverId);
@@ -424,8 +443,20 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
 
   // Get the trip by Naviga trip ID (converted to string)
   const tripId = String(event.trip.id);
+
+  // A Naviga delete is terminal even when the local trip row is already gone.
+  // Handle it before the "trip not found" short circuit so stale snapshots and
+  // subscriptions are still cleared.
+  if (event.trip.status === "DELETED") {
+    await tripOccupancyService.finalizeTerminalTrip("deleted", {
+      id: tripId,
+      vehicle_id: event.trip.carId,
+    });
+    return;
+  }
+
   let trip = await tripRepository.getTripById(tripId);
-  
+
   if (!trip) {
     console.warn(JSON.stringify({
       level: "WARN",
@@ -443,9 +474,6 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
     statusChanged = true;
   } else if (event.trip.status === "ACTIVE" && trip.status === "scheduled") {
     trip.status = "in_progress";
-    statusChanged = true;
-  } else if (event.trip.status === "DELETED" && trip.status !== "cancelled") {
-    trip.status = "cancelled";
     statusChanged = true;
   }
 
@@ -689,6 +717,16 @@ export async function handleTripServiceEvent(message: Buffer): Promise<void> {
   }));
 
   try {
+    // Terminal events must be applied before strict mapping. cavgotrips publishes
+    // `deleted` with a thin payload that cannot satisfy the full trip mapper.
+    const terminalEvents = new Set(["cancelled", "completed", "deleted", "cleared", "unassigned"]);
+    if (terminalEvents.has(event.event)) {
+      await tripOccupancyService.finalizeTerminalTrip(event.event, event.data as any);
+    }
+    if (event.event === "deleted" || event.event === "cleared" || event.event === "unassigned") {
+      return;
+    }
+
     // Map trip service data to local trip with validation
     let localTrip: Trip;
     try {
@@ -830,11 +868,26 @@ export async function handleTripServiceEvent(message: Buffer): Promise<void> {
           reason: "received_status_event_before_created",
         }));
       }
+    } else if (event.event === "started") {
+      localTrip.status = "in_progress";
+      if (existingTrip) {
+        await tripRepository.updateTrip(localTrip);
+      } else {
+        await tripRepository.createTrip(localTrip);
+        await snapshotRepository.createInitialSnapshot(localTrip, localTrip.carDriver.car.capacity);
+      }
+    } else if (event.event === "updated") {
+      if (existingTrip) {
+        await tripRepository.updateTrip(localTrip);
+      } else {
+        await tripRepository.createTrip(localTrip);
+        await snapshotRepository.createInitialSnapshot(localTrip, localTrip.carDriver.car.capacity);
+      }
     }
 
     // Update metrics
-    const vehicleId = String(event.data.vehicle_id);
-    const driverId = event.data.vehicle.driver ? String(event.data.vehicle.driver.id) : null;
+    const vehicleId = String(event.data.vehicle_id ?? "");
+    const driverId = event.data.vehicle?.driver ? String(event.data.vehicle.driver.id) : null;
     
     await updateTripMetrics({
       trip: localTrip,
@@ -847,26 +900,11 @@ export async function handleTripServiceEvent(message: Buffer): Promise<void> {
       completedAt: event.event === "completed" ? event.data.updated_at : undefined,
     });
 
-    // Publish GraphQL subscription update
+    // Publish GraphQL subscription update. Always refresh the active list so a
+    // terminal update cannot be mistaken for "no change" by the UI.
     const savedTrip = await tripRepository.getTripById(localTrip.id);
     if (savedTrip) {
-      const companyId = savedTrip.carDriver.car.companyId;
-      
-      // Publish update for active trips
-      if (savedTrip.status === "scheduled" || savedTrip.status === "in_progress") {
-        const activeTrips = await tripRepository.getActiveTripsByCompanyId(companyId);
-        pubsub.publish(TRIGGERS.COMPANY_TRIPS_UPDATED(companyId), {
-          activeCompanyTrips: activeTrips,
-        });
-      } else if (event.event === "cancelled" || event.event === "completed") {
-        // Trip ended - publish to remove from active list
-        const activeTrips = await tripRepository.getActiveTripsByCompanyId(companyId);
-        pubsub.publish(TRIGGERS.COMPANY_TRIPS_UPDATED(companyId), {
-          activeCompanyTrips: activeTrips,
-        });
-      }
-      
-      // Publish individual trip update
+      await tripOccupancyService.refreshCompanyActiveTrips(savedTrip.carDriver.car.companyId);
       pubsub.publish(TRIGGERS.TRIP_UPDATED(savedTrip.id), {
         trip: savedTrip,
       });

@@ -639,7 +639,15 @@ export interface TripServiceTrip {
 }
 
 export interface TripServiceEvent {
-  event: "created" | "cancelled" | "completed";
+  event:
+    | "created"
+    | "updated"
+    | "started"
+    | "cancelled"
+    | "completed"
+    | "deleted"
+    | "cleared"
+    | "unassigned";
   data: TripServiceTrip;
 }
 

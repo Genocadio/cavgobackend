@@ -262,7 +262,9 @@ export async function getAllSnapshots(): Promise<TripSnapshot[]> {
  * @param tripId The trip ID
  */
 export async function deleteSnapshot(tripId: string): Promise<void> {
-  snapshotStore.delete(String(tripId));
+  const id = String(tripId);
+  snapshotStore.delete(id);
+  await pgPool.query("DELETE FROM trip_snapshots WHERE trip_id = $1", [id]);
 }
 
 /**

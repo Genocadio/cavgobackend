@@ -97,7 +97,7 @@ public class NavigaTripUpdateEvent {
         private String carId;
 
         @JsonProperty("status")
-        private String status; // CREATED | ACTIVE | COMPLETED | CANCELLED
+        private String status; // CREATED | ACTIVE | COMPLETED | CANCELLED | DELETED
 
         @JsonProperty("createdAt")
         private Instant createdAt;

@@ -1380,9 +1380,15 @@ func (s *TripService) DeleteTrip(id int64) error {
 			return err
 		}
 
-		// Publish event to RabbitMQ fanout exchange
+		// Publish event to RabbitMQ fanout exchange. Use the relation-loaded
+		// trip when available so adminaggregate's mapper can still consume it;
+		// the thin GetByID payload has no vehicle/route data.
 		if s.rabbitMQService != nil && s.tripExchange != "" {
-			_ = s.rabbitMQService.PublishTripEventToExchange(s.tripExchange, "deleted", *trip)
+			deletedPayload := *trip
+			if tripForLog != nil {
+				deletedPayload = *tripForLog
+			}
+			_ = s.rabbitMQService.PublishTripEventToExchange(s.tripExchange, "deleted", deletedPayload)
 		}
 
 		// Broadcast SSE event for trip deletion

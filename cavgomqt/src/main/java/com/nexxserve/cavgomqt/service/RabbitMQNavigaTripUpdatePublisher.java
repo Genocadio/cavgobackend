@@ -66,7 +66,7 @@ public class RabbitMQNavigaTripUpdatePublisher {
      * 
      * @param tripId The trip ID
      * @param carId The car ID
-     * @param status The trip status (CREATED, ACTIVE, COMPLETED, CANCELLED)
+     * @param status The trip status (CREATED, ACTIVE, COMPLETED, CANCELLED, DELETED)
      * @param source The source of the update (e.g., "naviga-trip-create", "naviga-gps-batch", "naviga-trip-delete")
      */
     public void publishSimpleUpdate(Long tripId, String carId, String status, String source) {

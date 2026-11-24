@@ -84,21 +84,23 @@ export async function setupSubscriptions(handlers: MessageHandlers): Promise<voi
   const snapshotExchange = process.env.SNAPSHOT_EXCHANGE || "bookingservice.trip.snapshot";
   await ch.assertExchange(snapshotExchange, "fanout", { durable: true });
 
-  // Create queues for each exchange (fanout exchanges need queues)
-  const locationQueue = await ch.assertQueue("", { exclusive: true });
-  const vehicleEventsQueue = await ch.assertQueue("", { exclusive: true });
-  const driverEventsQueue = await ch.assertQueue("", { exclusive: true });
-  const tripEventsQueue = await ch.assertQueue("", { exclusive: true });
-  
+  // Named durable queues survive restarts. Anonymous exclusive queues silently
+  // dropped terminal trip events while adminaggregate was redeploying, which
+  // left stale active-trip projections behind.
+  const locationQueue = await ch.assertQueue("adminaggregate.location.updates.queue", { durable: true });
+  const vehicleEventsQueue = await ch.assertQueue("adminaggregate.vehicle.events.queue", { durable: true });
+  const driverEventsQueue = await ch.assertQueue("adminaggregate.driver.events.queue", { durable: true });
+  const tripEventsQueue = await ch.assertQueue("adminaggregate.trip.events.queue", { durable: true });
+
   // Create queues for Naviga exchanges
-  const navigaTripUpdatesQueue = await ch.assertQueue("", { exclusive: true });
-  const navigaLocationUpdatesQueue = await ch.assertQueue("", { exclusive: true });
-  
+  const navigaTripUpdatesQueue = await ch.assertQueue("adminaggregate.naviga.trip.updates.queue", { durable: true });
+  const navigaLocationUpdatesQueue = await ch.assertQueue("adminaggregate.naviga.location.updates.queue", { durable: true });
+
   // Create queue for Trip Service exchange
-  const tripServiceEventsQueue = await ch.assertQueue("", { exclusive: true });
+  const tripServiceEventsQueue = await ch.assertQueue("adminaggregate.tripservice.events.queue", { durable: true });
 
   // Create queue for Booking Service trip snapshots
-  const snapshotQueue = await ch.assertQueue("", { exclusive: true });
+  const snapshotQueue = await ch.assertQueue("adminaggregate.trip.snapshots.queue", { durable: true });
 
   // Bind queues to exchanges
   await ch.bindQueue(locationQueue.queue, "vehicle.location.updates.fanout", "");

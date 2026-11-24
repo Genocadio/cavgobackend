@@ -12,6 +12,7 @@ import * as tripRepository from "../repositories/trips";
 import * as metricsRepository from "../repositories/metrics";
 import * as snapshotRepository from "../repositories/snapshots";
 import { updateTripMetrics } from "./tripMetricsService";
+import * as tripOccupancyService from "./tripOccupancyService";
 import * as locationRepository from "../repositories/locations";
 
 let locationPollingTimer: NodeJS.Timeout | null = null;
@@ -479,10 +480,34 @@ export async function syncTrips(): Promise<void> {
         }
       }
     }
+
+    // Incremental sync cannot see physically deleted source rows. Close any
+    // local active trip that is absent or terminal upstream.
+    const reconciled = await reconcileTripDeletions();
+    console.log(`[TRIP SYNC] Closed ${reconciled} stale active trip(s)`);
   } catch (error) {
     console.error("[TRIP SYNC] Failed to sync trips:", error);
     throw error;
   }
+}
+
+/** Close local active trips whose source row is gone or no longer active. */
+export async function reconcileTripDeletions(): Promise<number> {
+  const sourceTrips = await mainApiClient.fetchTrips({ limit: 100 });
+  const activeSourceIds = new Set(
+    sourceTrips
+      .filter((trip) => trip.status === "SCHEDULED" || trip.status === "IN_PROGRESS")
+      .map((trip) => String(trip.id)),
+  );
+
+  const localActiveRows = await tripRepository.getActiveTripRows();
+  const staleRows = localActiveRows.filter((row) => !activeSourceIds.has(row.id));
+  await tripOccupancyService.closeTrips(
+    staleRows,
+    "cancelled",
+    "reconciled_source_missing_or_terminal",
+  );
+  return staleRows.length;
 }
 
 

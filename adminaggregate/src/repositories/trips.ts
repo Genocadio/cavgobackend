@@ -15,6 +15,15 @@ import type { Destination, Trip, TripLocation } from "../types";
 
 type TripDestinationRow = InferModel<typeof tripDestinations>;
 
+export interface ActiveTripRow {
+  id: string;
+  status: "scheduled" | "in_progress";
+  driverCarAssignmentId: number;
+  carId: string;
+  driverId: string | null;
+  companyId: string;
+}
+
 const buildDestinationRowId = (tripId: string, locationId: string): string => `${tripId}:${locationId}`;
 
 async function getExistingTripDestinationIds(tripId: string): Promise<Map<string, string>> {
@@ -1177,6 +1186,65 @@ export async function getActiveTripsByCompanyId(companyId: string): Promise<Trip
     });
 
   return hydrateTrips(rows);
+}
+
+async function fetchActiveTripRows(condition?: unknown): Promise<ActiveTripRow[]> {
+  const activeStatus = or(eq(trips.status, "scheduled"), eq(trips.status, "in_progress"));
+  const baseQuery = db
+    .select({
+      id: trips.id,
+      status: trips.status,
+      driverCarAssignmentId: trips.driverCarAssignmentId,
+      carId: driverCarAssignments.carId,
+      driverId: driverCarAssignments.driverId,
+      companyId: cars.companyId,
+    })
+    .from(trips)
+    .innerJoin(driverCarAssignments, eq(trips.driverCarAssignmentId, driverCarAssignments.id))
+    .innerJoin(cars, eq(driverCarAssignments.carId, cars.id));
+
+  const rows = condition
+    ? await baseQuery.where(and(activeStatus, condition as any))
+    : await baseQuery.where(activeStatus);
+
+  return rows.map((row) => ({
+    id: String(row.id),
+    status: row.status as "scheduled" | "in_progress",
+    driverCarAssignmentId: Number(row.driverCarAssignmentId),
+    carId: String(row.carId),
+    driverId: row.driverId == null ? null : String(row.driverId),
+    companyId: String(row.companyId),
+  }));
+}
+
+/** All local trips that still look active, including their car/company context. */
+export async function getActiveTripRows(): Promise<ActiveTripRow[]> {
+  return fetchActiveTripRows();
+}
+
+export async function getActiveTripRowsByIds(ids: string[]): Promise<ActiveTripRow[]> {
+  if (ids.length === 0) return [];
+  return fetchActiveTripRows(inArray(trips.id, ids));
+}
+
+export async function getActiveTripRowsForCar(carId: string): Promise<ActiveTripRow[]> {
+  return fetchActiveTripRows(eq(driverCarAssignments.carId, carId));
+}
+
+export async function getActiveTripRowsForDriver(driverId: string): Promise<ActiveTripRow[]> {
+  return fetchActiveTripRows(eq(driverCarAssignments.driverId, driverId));
+}
+
+/** Close local rows without requiring the full upstream trip payload. */
+export async function markTripsTerminal(
+  ids: string[],
+  status: "cancelled" | "completed",
+): Promise<void> {
+  if (ids.length === 0) return;
+  await db
+    .update(trips)
+    .set({ status, updatedAt: new Date() })
+    .where(inArray(trips.id, ids));
 }
 
 export async function getLatestTripUpdatedAt(): Promise<string | null> {
