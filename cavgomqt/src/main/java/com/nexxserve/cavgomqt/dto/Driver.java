@@ -10,6 +10,7 @@ import lombok.Setter;
 @JsonNaming(com.fasterxml.jackson.databind.PropertyNamingStrategies.SnakeCaseStrategy.class)
 public class Driver {
     // Getters and Setters
+    private Integer id;
     private String name;
     private String phone;
 

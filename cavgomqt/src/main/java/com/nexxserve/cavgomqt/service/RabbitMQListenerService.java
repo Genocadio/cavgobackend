@@ -25,6 +25,9 @@ public class RabbitMQListenerService {
     @Autowired
     private NavigaService navigaService;
 
+    @Autowired
+    private TripAssignmentReconciliationService tripAssignmentReconciliationService;
+
 
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQListenerService.class);
 
@@ -106,6 +109,13 @@ public class RabbitMQListenerService {
             String event = message.getEvent();
 
             if ("created".equalsIgnoreCase(event)) {
+                // Do not start a trip whose embedded driver/vehicle snapshot no
+                // longer matches the live assignment. Cancelling it publishes a
+                // cancelled event through the normal fanout, so clients clear it.
+                if (tripAssignmentReconciliationService.cancelIfStale(trip, "trip-created")) {
+                    logger.info("⏭️ Skipped stale trip creation: tripId={}", trip != null ? trip.getId() : "null");
+                    return;
+                }
                 handleTripStartedEvent(message, trip);
                 mqttService.publishTrip(message);
             } else if ("cancelled".equalsIgnoreCase(event)) {

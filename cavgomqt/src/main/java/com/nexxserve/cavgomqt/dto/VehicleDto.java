@@ -24,6 +24,6 @@ public class VehicleDto {
     private String status;
     private String createdAt;
     private String updatedAt;
-    private Object driver;
+    private VehicleDriverDto driver;
 
 }

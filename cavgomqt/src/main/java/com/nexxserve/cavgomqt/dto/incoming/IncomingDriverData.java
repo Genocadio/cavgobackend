@@ -12,6 +12,7 @@ import lombok.Setter;
 @Getter
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public class IncomingDriverData {
+    private Integer id;
     private String name;
     private String phone;
 

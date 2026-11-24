@@ -383,6 +383,9 @@ services:
       MQTT_USERNAME: ${MQTT_USERNAME:?MQTT_USERNAME must be set in .env}
       MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD must be set in .env}
       NAVIGA_BASE_URL: http://navigation:${PORT_NAVIGATION:-6040}
+      TRIP_SERVICE_URL: http://cavgotrips:${PORT_TRIPS:-6080}
+      TRIP_ASSIGNMENT_RECONCILE_INITIAL_DELAY_MS: 30000
+      TRIP_ASSIGNMENT_RECONCILE_INTERVAL_MS: 60000
     ports:
       - "${PORT_MQTT:-6090}:6090"
     volumes:

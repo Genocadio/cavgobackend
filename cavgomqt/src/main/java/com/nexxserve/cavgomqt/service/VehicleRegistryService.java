@@ -13,7 +13,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -65,6 +67,50 @@ public class VehicleRegistryService {
         } catch (Exception e) {
             System.err.println("❌ Error fetching vehicles: " + e.getMessage());
             return List.of();
+        }
+    }
+
+    /**
+     * Current active assignment maps from cavgomain. These are authoritative for
+     * "which driver is in which vehicle right now"; trip JSON snapshots are not.
+     */
+    public AssignmentSnapshot getCurrentAssignments() {
+        AssignmentSnapshot snapshot = new AssignmentSnapshot();
+        for (VehicleDto summary : fetchAllVehicles()) {
+            if (summary.getId() == null) {
+                continue;
+            }
+            VehicleDto vehicle = fetchVehicleById(summary.getId());
+            if (vehicle == null || vehicle.getDriver() == null || vehicle.getDriver().getId() == null) {
+                continue;
+            }
+            snapshot.driverToVehicle.put(vehicle.getDriver().getId(), Math.toIntExact(vehicle.getId()));
+            snapshot.vehicleToDriver.put(Math.toIntExact(vehicle.getId()), vehicle.getDriver().getId());
+        }
+        return snapshot;
+    }
+
+    public static class AssignmentSnapshot {
+        public final Map<Integer, Integer> driverToVehicle = new HashMap<>();
+        public final Map<Integer, Integer> vehicleToDriver = new HashMap<>();
+    }
+
+    /**
+     * The collection endpoint returns a lightweight internal DTO without driver
+     * data. The single-vehicle endpoint returns the full VehicleResponseDto that
+     * includes the current ACTIVE assignment.
+     */
+    public VehicleDto fetchVehicleById(Long vehicleId) {
+        if (vehicleId == null) {
+            return null;
+        }
+        try {
+            return restTemplate.getForObject(
+                    vehicleBackendUrl + "/internal/api/vehicles/" + vehicleId,
+                    VehicleDto.class);
+        } catch (Exception e) {
+            System.err.println("❌ Error fetching vehicle " + vehicleId + ": " + e.getMessage());
+            return null;
         }
     }
 

@@ -215,6 +215,7 @@ public class TripReceiverService {
      */
     private Driver convertDriverData(IncomingDriverData incoming) {
         Driver driver = new Driver();
+        driver.setId(incoming.getId());
         driver.setName(incoming.getName());
         driver.setPhone(incoming.getPhone());
         return driver;
