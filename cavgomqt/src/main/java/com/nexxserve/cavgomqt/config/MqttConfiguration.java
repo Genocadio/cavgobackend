@@ -6,12 +6,14 @@ import com.nexxserve.cavgomqt.service.RabbitMQBookingBundlePublisherService;
 import com.nexxserve.cavgomqt.service.RabbitMQVehicleLocationPublisherService;
 import com.nexxserve.cavgomqt.service.NavigaService;
 import com.nexxserve.cavgomqt.service.MqttLocationListenerService;
+import com.nexxserve.cavgomqt.service.DriverStateInboundHandler;
 import com.nexxserve.cavgomqt.dto.mqtt.BookingBundle;
 import com.nexxserve.cavgomqt.dto.incoming.IncomingVehicleStatusData;
 import com.nexxserve.cavgomqt.dto.incoming.IncomingUserLocationData;
 import com.nexxserve.cavgomqt.dto.VehicleLocationUpdateMessage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.Logger;
@@ -58,6 +60,10 @@ public class MqttConfiguration {
 
     @Autowired
     private MqttLocationListenerService locationListenerService;
+
+    // Lazily resolved to avoid a config -> service -> channel -> config cycle.
+    @Autowired
+    private ObjectProvider<DriverStateInboundHandler> driverStateInboundHandler;
 
     @Value("${mqtt.broker.url:tcp://localhost:1883}")
     private String brokerUrl;
@@ -198,6 +204,11 @@ public class MqttConfiguration {
         return new DirectChannel();
     }
 
+    @Bean
+    public MessageChannel driverStateAckChannel() {
+        return new DirectChannel();
+    }
+
     // === OUTBOUND CHANNELS ===
 
     @Bean
@@ -222,6 +233,11 @@ public class MqttConfiguration {
 
     @Bean
     public MessageChannel vehicleSettingsOutboundChannel() {
+        return new DirectChannel();
+    }
+
+    @Bean
+    public MessageChannel driverStateOutboundChannel() {
         return new DirectChannel();
     }
 
@@ -385,7 +401,36 @@ public class MqttConfiguration {
         return adapter;
     }
 
+    @Bean
+    public MessageProducer driverStateInbound() {
+        String adapterClientId = clientId + "-driver-state-" + System.currentTimeMillis();
+        String ackTopic = "drivers/+/state/ack";
+        String reportTopic = "drivers/+/state/report";
+        logger.info("🔔 Setting up MQTT inbound adapter (driver state):");
+        logger.info("  - Topics: {}, {}", ackTopic, reportTopic);
+        logger.info("  - Adapter Client ID: {}", adapterClientId);
+
+        MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
+                brokerUrl,
+                adapterClientId,
+                mqttClientFactory(),
+                ackTopic,
+                reportTopic);
+        adapter.setCompletionTimeout(10000);
+        adapter.setConverter(new DefaultPahoMessageConverter());
+        adapter.setQos(1);
+        adapter.setOutputChannel(driverStateAckChannel());
+        logger.info("✅ Driver-state inbound adapter configured");
+        return adapter;
+    }
+
     // === MESSAGE HANDLERS ===
+
+    @Bean
+    @ServiceActivator(inputChannel = "driverStateAckChannel")
+    public MessageHandler driverStateAckHandler() {
+        return message -> driverStateInboundHandler.getObject().handle(message);
+    }
 
     @Bean
     @ServiceActivator(inputChannel = "carStatusChannel")
@@ -705,6 +750,9 @@ public class MqttConfiguration {
                 }
 
                 String carId = data.getVehicleId();
+                // If the phone reports an old car, force the versioned driver-state
+                // channel back into emit mode for that device.
+                driverStateInboundHandler.getObject().handleUserLocation(userId, carId);
                 long timestamp = data.getTimestamp() != null ? data.getTimestamp() : System.currentTimeMillis();
 
                 // App publishes m/s; the vehicle-location fanout contract is km/h.
@@ -824,6 +872,19 @@ public class MqttConfiguration {
         messageHandler.setAsync(true);
         messageHandler.setDefaultQos(1);
         messageHandler.setDefaultRetained(true); // Retain settings so vehicle gets them on reconnect
+        return messageHandler;
+    }
+
+    @Bean
+    @ServiceActivator(inputChannel = "driverStateOutboundChannel")
+    public MessageHandler driverStateOutbound() {
+        MqttPahoMessageHandler messageHandler = new MqttPahoMessageHandler(
+                brokerUrl,
+                clientId + "-driver-state-out-" + System.currentTimeMillis(),
+                mqttClientFactory());
+        messageHandler.setAsync(true);
+        messageHandler.setDefaultQos(1);
+        messageHandler.setDefaultRetained(true);
         return messageHandler;
     }
 

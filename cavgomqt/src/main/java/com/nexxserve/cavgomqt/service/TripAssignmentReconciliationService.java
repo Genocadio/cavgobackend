@@ -14,7 +14,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -117,6 +119,21 @@ public class TripAssignmentReconciliationService {
         } catch (Exception e) {
             logger.error("❌ Failed to reconcile active trips with current vehicle assignments: {}", e.getMessage(), e);
         }
+    }
+
+    /**
+     * All currently active trips from cavgotrips. Shared with the versioned
+     * driver-state channel so both features use the same authoritative source.
+     */
+    public List<JsonNode> fetchActiveTrips() {
+        List<JsonNode> result = new ArrayList<>();
+        for (String status : ACTIVE_STATUSES) {
+            JsonNode trips = fetchTripsByStatus(status);
+            if (trips != null && trips.isArray()) {
+                trips.forEach(result::add);
+            }
+        }
+        return result;
     }
 
     private JsonNode fetchTripsByStatus(String status) {

@@ -90,6 +90,22 @@ public class VehicleRegistryService {
         return snapshot;
     }
 
+    /**
+     * Full current vehicle details keyed by the driver currently assigned to it.
+     * The collection endpoint is lightweight; the single-vehicle endpoint carries
+     * the active driver (and role/status) used by the driver-state channel.
+     */
+    public Map<Long, VehicleDto> findVehiclesByDriver() {
+        Map<Long, VehicleDto> result = new HashMap<>();
+        for (VehicleDto summary : fetchAllVehicles()) {
+            if (summary.getId() == null) continue;
+            VehicleDto vehicle = fetchVehicleById(summary.getId());
+            if (vehicle == null || vehicle.getDriver() == null || vehicle.getDriver().getId() == null) continue;
+            result.put(vehicle.getDriver().getId().longValue(), vehicle);
+        }
+        return result;
+    }
+
     public static class AssignmentSnapshot {
         public final Map<Integer, Integer> driverToVehicle = new HashMap<>();
         public final Map<Integer, Integer> vehicleToDriver = new HashMap<>();

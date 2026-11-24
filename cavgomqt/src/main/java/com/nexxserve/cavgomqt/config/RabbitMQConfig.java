@@ -33,6 +33,8 @@ public class RabbitMQConfig {
     public static final String NAVIGATION_TRIP_UPDATE_QUEUE = "navigation.trip.update.queue";
     public static final String CAVGOMQT_LOCATION_UPDATES_EXCHANGE = "cavgomqt.location.updates";
     public static final String CAVGOMQT_TRIP_UPDATES_EXCHANGE = "cavgomqt.trip.updates";
+    public static final String CAVGOMQT_DRIVER_EVENTS_QUEUE = "cavgomqt.driver-state.driver.events.queue";
+    public static final String CAVGOMQT_VEHICLE_EVENTS_QUEUE = "cavgomqt.driver-state.vehicle.events.queue";
 
     @Bean
     public FanoutExchange cavgomqtLocationUpdatesExchange() {
@@ -211,6 +213,40 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(vehicleSettingsQueue)
                 .to(vehicleSettingsExchange)
                 .with("vehicle.settings.*");
+    }
+
+    // Dedicated queues for driver-state triggers. Fanout exchanges deliver a
+    // copy to each bound queue, so adminaggregate keeps its own messages.
+    @Bean
+    public FanoutExchange driverStateDriverEventsExchange() {
+        return new FanoutExchange("driver.events", true, false);
+    }
+
+    @Bean
+    public FanoutExchange driverStateVehicleEventsExchange() {
+        return new FanoutExchange("vehicle.events", true, false);
+    }
+
+    @Bean
+    public Queue driverStateDriverEventsQueue() {
+        return QueueBuilder.durable(CAVGOMQT_DRIVER_EVENTS_QUEUE).build();
+    }
+
+    @Bean
+    public Queue driverStateVehicleEventsQueue() {
+        return QueueBuilder.durable(CAVGOMQT_VEHICLE_EVENTS_QUEUE).build();
+    }
+
+    @Bean
+    public Binding driverStateDriverEventsBinding(Queue driverStateDriverEventsQueue,
+                                                   FanoutExchange driverStateDriverEventsExchange) {
+        return BindingBuilder.bind(driverStateDriverEventsQueue).to(driverStateDriverEventsExchange);
+    }
+
+    @Bean
+    public Binding driverStateVehicleEventsBinding(Queue driverStateVehicleEventsQueue,
+                                                    FanoutExchange driverStateVehicleEventsExchange) {
+        return BindingBuilder.bind(driverStateVehicleEventsQueue).to(driverStateVehicleEventsExchange);
     }
 
     @Bean

@@ -34,6 +34,9 @@ public class MqttService {
     private MessageChannel vehicleSettingsOutboundChannel;
 
     @Autowired
+    private MessageChannel driverStateOutboundChannel;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
 
@@ -117,6 +120,23 @@ public class MqttService {
         } catch (JsonProcessingException e) {
             System.err.println("❌ Failed to serialize trip event: " + e.getMessage());
         }
+    }
+
+    /**
+     * Retained, QoS 1 driver configuration snapshot. Clients get the latest
+     * revision immediately after subscribing, then ACK it.
+     */
+    public void publishDriverState(Long driverId, String payload) {
+        if (driverId == null || payload == null) return;
+        String topic = "drivers/" + driverId + "/state";
+        driverStateOutboundChannel.send(
+                MessageBuilder.withPayload(payload)
+                        .setHeader("mqtt_topic", topic)
+                        .setHeader("mqtt_qos", 1)
+                        .setHeader("mqtt_retained", true)
+                        .build()
+        );
+        System.out.println("📡 Driver state published to " + topic + " (" + payload.length() + " bytes)");
     }
 
     public void publishTripProgress(String carId, Object progress) {

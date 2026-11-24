@@ -28,6 +28,9 @@ public class RabbitMQListenerService {
     @Autowired
     private TripAssignmentReconciliationService tripAssignmentReconciliationService;
 
+    @Autowired
+    private DriverStateService driverStateService;
+
 
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQListenerService.class);
 
@@ -125,6 +128,9 @@ public class RabbitMQListenerService {
                 logger.info("ℹ️ Forwarding trip event from Trip Service to MQTT: {}", event);
                 mqttService.publishTrip(message);
             }
+
+            // Every trip lifecycle event refreshes the versioned driver config.
+            driverStateService.refreshForTrip(trip, event);
 
         } catch (Exception e) {
             logger.error("❌ Error processing trip message from RabbitMQ: {}", e.getMessage(), e);

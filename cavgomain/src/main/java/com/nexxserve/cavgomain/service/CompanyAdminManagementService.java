@@ -3,6 +3,7 @@ package com.nexxserve.cavgomain.service;
 import com.nexxserve.cavgomain.dto.response.CompanyUserResponseDto;
 import com.nexxserve.cavgomain.entity.CompanyUser;
 import com.nexxserve.cavgomain.enums.CompanyUserRole;
+import com.nexxserve.cavgomain.messaging.EventMessagePublisher;
 import com.nexxserve.cavgomain.repository.CompanyUserRepository;
 import com.nexxserve.cavgomain.repository.VehicleAssignmentRepository;
 import com.nexxserve.cavgomain.security.NexxauthClient;
@@ -15,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -31,6 +33,7 @@ public class CompanyAdminManagementService {
     private final VehicleAssignmentRepository assignmentRepository;
     private final NexxauthClient nexxauthClient;
     private final VehicleService vehicleService;
+    private final EventMessagePublisher eventMessagePublisher;
 
     @Transactional(readOnly = true)
     public List<CompanyUserResponseDto> listStaff(Long companyId) {
@@ -86,6 +89,7 @@ public class CompanyAdminManagementService {
 
         if (user.getRole() == CompanyUserRole.DRIVER && newRole != CompanyUserRole.DRIVER) {
             vehicleService.unassignDriverFromCompany(staffId, companyId);
+            eventMessagePublisher.publishDriverEvent("DELETE", Map.of("driverId", staffId));
         }
         nexxauthClient.updateUserRoles(staffId, roles);
         user.setRole(newRole);
@@ -111,6 +115,7 @@ public class CompanyAdminManagementService {
         nexxauthClient.updateUserRoles(staffId, nonCompanyRoles(identity.roles()));
         if (user.getRole() == CompanyUserRole.DRIVER) {
             vehicleService.unassignDriverFromCompany(staffId, companyId);
+            eventMessagePublisher.publishDriverEvent("DELETE", Map.of("driverId", staffId));
         }
         user.setCompany(null);
         user.setOffice(null);
@@ -124,6 +129,12 @@ public class CompanyAdminManagementService {
             throw new IllegalArgumentException("The selected company user is not a driver");
         }
         vehicleService.unassignDriverFromCompany(staffId, companyId);
+        // Same role/status, but the vehicle assignment is gone: refresh without
+        // revoking the driver session.
+        eventMessagePublisher.publishDriverEvent("UPDATE", Map.of(
+                "driverId", staffId,
+                "role", CompanyUserRole.DRIVER.name(),
+                "status", String.valueOf(user.getStatus())));
     }
 
     private CompanyUser requireCompanyUser(Long companyId, Long staffId) {

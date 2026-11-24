@@ -16,4 +16,6 @@ public class VehicleDriverDto {
     private Integer id;
     private String name;
     private String phone;
+    private String role;
+    private String status;
 }
