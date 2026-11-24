@@ -43,6 +43,20 @@ public class DriverStateEventsListener {
                 return;
             }
 
+            // Nexxauth lifecycle events are published by cavgomain's signed
+            // webhook receiver. They must not look like a driver deletion:
+            // a fresh sign-in is also an explicit reactivation.
+            if ("DRIVER_SESSION_REVOKED".equalsIgnoreCase(event)) {
+                driverStateService.applyIdentity(
+                        driverId, null, null, "LOGGED_OUT", "AUTH_SESSION_REVOKED");
+                return;
+            }
+            if ("DRIVER_SESSION_STARTED".equalsIgnoreCase(event)) {
+                driverStateService.applyIdentity(
+                        driverId, "DRIVER", null, "ACTIVE", "AUTH_SESSION_STARTED");
+                return;
+            }
+
             String role = str(data.get("role"));
             String status = str(data.get("status"));
             if (role != null && !"DRIVER".equalsIgnoreCase(role)) {

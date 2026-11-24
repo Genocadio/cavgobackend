@@ -37,6 +37,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/main/auth/**").permitAll()  // keep open for potential future use
                         .requestMatchers(HttpMethod.POST, "/main/company-admin-access-requests/validate-company-code").permitAll()
+                        // Signature is verified inside the controller with the CavGo org key.
+                        .requestMatchers(HttpMethod.POST, "/main/webhooks/nexxauth/events").permitAll()
                         .requestMatchers("/internal/api/**").permitAll()  // internal service-to-service
                         .anyRequest().authenticated()
                 )
