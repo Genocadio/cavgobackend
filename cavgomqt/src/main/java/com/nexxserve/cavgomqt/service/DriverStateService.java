@@ -11,6 +11,7 @@ import com.nexxserve.cavgomqt.repository.DriverStateRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +37,14 @@ public class DriverStateService {
 
     private static final Logger logger = LoggerFactory.getLogger(DriverStateService.class);
     private static final long[] RETRY_BACKOFF_MS = {0L, 1_000L, 2_000L, 5_000L, 15_000L, 30_000L};
+
+    /** Abandoned devices stop reporting; their ACK rows must not pin retries forever. */
+    @Value("${driver.state.ack.ttl.ms:172800000}")
+    private long ackTtlMs = 172_800_000L;
+
+    /** Hard cap so one driver cannot accumulate unlimited stale device rows. */
+    @Value("${driver.state.ack.max-devices-per-driver:5}")
+    private int maxDevicesPerDriver = 5;
 
     @Autowired
     private DriverStateRepository stateRepository;
@@ -64,6 +73,8 @@ public class DriverStateService {
             initialDelayString = "${driver.state.reconcile.initial.delay.ms:30000}")
     public void reconcile() {
         try {
+            pruneStaleAckRows();
+
             Map<Long, VehicleDto> vehiclesByDriver = vehicleRegistryService.findVehiclesByDriver();
             List<JsonNode> activeTrips = tripAssignmentReconciliationService.fetchActiveTrips();
 
@@ -186,6 +197,50 @@ public class DriverStateService {
             ackRepository.save(ack);
         }
         publishNow(state, reason);
+    }
+
+    /**
+     * Removes device ACK rows that can no longer be considered active. Without
+     * this, a reinstalled phone or an abandoned test device would leave a row
+     * that never ACKs, and every revision would be retried forever.
+     */
+    private void pruneStaleAckRows() {
+        long now = System.currentTimeMillis();
+        long cutoff = now - Math.max(60_000L, ackTtlMs);
+        int limit = Math.max(1, maxDevicesPerDriver);
+
+        Map<Long, List<DriverStateAckEntity>> byDriver = new LinkedHashMap<>();
+        for (DriverStateAckEntity ack : ackRepository.findAll()) {
+            if (ack == null || ack.getDriverId() == null) continue;
+            byDriver.computeIfAbsent(ack.getDriverId(), ignored -> new ArrayList<>()).add(ack);
+        }
+
+        List<DriverStateAckEntity> stale = new ArrayList<>();
+        for (List<DriverStateAckEntity> devices : byDriver.values()) {
+            devices.removeIf(ack -> {
+                Long updatedAt = ack.getUpdatedAt();
+                if (updatedAt == null || updatedAt < cutoff) {
+                    stale.add(ack);
+                    return true;
+                }
+                return false;
+            });
+
+            if (devices.size() > limit) {
+                devices.sort(Comparator.comparingLong((DriverStateAckEntity ack) -> {
+                    Long updatedAt = ack.getUpdatedAt();
+                    return updatedAt == null ? 0L : updatedAt;
+                }).reversed());
+                for (DriverStateAckEntity ack : devices.subList(limit, devices.size())) {
+                    stale.add(ack);
+                }
+            }
+        }
+
+        if (!stale.isEmpty()) {
+            ackRepository.deleteAllInBatch(stale);
+            logger.info("🧹 Pruned {} stale driver-state device row(s)", stale.size());
+        }
     }
 
     private void refresh(Long driverId, String reason,
