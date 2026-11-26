@@ -40,6 +40,23 @@ public class PackageAssignmentEntity {
     @Column(name = "assigned_at", nullable = false, updatable = false)
     private Instant assignedAt;
 
+    @Column(name = "batch_id")
+    private UUID batchId;
+
+    /** Assignment is effective immediately; this records when the driver acceptance became final. */
+    @Column(name = "accepted_at")
+    private Instant acceptedAt;
+
+    /** Driver may flag the package as not received until this instant. */
+    @Column(name = "objection_deadline")
+    private Instant objectionDeadline;
+
+    @Column(name = "objected_at")
+    private Instant objectedAt;
+
+    @Column(name = "objection_reason", columnDefinition = "TEXT")
+    private String objectionReason;
+
     @Column(columnDefinition = "TEXT")
     private String notes;
 }

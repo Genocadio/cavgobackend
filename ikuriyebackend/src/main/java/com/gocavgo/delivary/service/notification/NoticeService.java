@@ -1,12 +1,15 @@
 package com.gocavgo.delivary.service.notification;
 
 import com.gocavgo.delivary.controller.graphql.NoticeResolver;
+import com.gocavgo.delivary.entity.delivery.OfficeClaimEntity;
+import com.gocavgo.delivary.entity.delivery.PackageAssignmentEntity;
 import com.gocavgo.delivary.entity.delivery.PackageCustodianEntity;
 import com.gocavgo.delivary.entity.delivery.PackageEntity;
 import com.gocavgo.delivary.entity.notification.NoticeEntity;
 import com.gocavgo.delivary.entity.notification.NoticeViewerEntity;
 import com.gocavgo.delivary.entity.transfer.TransferEntity;
 import com.gocavgo.delivary.entity.transfer.TransferPackageEntity;
+import com.gocavgo.delivary.enums.delivery.CustodianRole;
 import com.gocavgo.delivary.enums.delivery.PackageStatus;
 import com.gocavgo.delivary.enums.notification.NoticeEventType;
 import com.gocavgo.delivary.enums.notification.NoticeResourceType;
@@ -31,6 +34,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -63,6 +67,9 @@ public class NoticeService {
             Map.entry(NoticeEventType.PACKAGE_CANCELLED,           new String[]{"Package cancelled",         "Package %s has been cancelled."}),
             Map.entry(NoticeEventType.PACKAGE_ORIGIN_OFFICE,       new String[]{"At origin office",          "Package %s has arrived at the origin office."}),
             Map.entry(NoticeEventType.PACKAGE_ASSIGNED_DRIVER,     new String[]{"Driver assigned",           "A driver has been assigned to package %s."}),
+            Map.entry(NoticeEventType.PACKAGE_ASSIGNMENT_OBJECTED, new String[]{"Driver disputed assignment", "The driver reported package %s as not received."}),
+            Map.entry(NoticeEventType.PACKAGE_OFFICE_CLAIM_CREATED, new String[]{"Claimed by destination office", "Package %s was claimed by the destination office."}),
+            Map.entry(NoticeEventType.PACKAGE_OFFICE_CLAIM_DISPUTED, new String[]{"Office claim disputed", "The driver reported package %s as not delivered to the office."}),
             Map.entry(NoticeEventType.PACKAGE_DESTINATION_OFFICE,  new String[]{"At destination office",     "Package %s has arrived at the destination office."}),
             Map.entry(NoticeEventType.PACKAGE_READY_FOR_COLLECTION,new String[]{"Ready for collection",      "Package %s is ready for collection."}),
             Map.entry(NoticeEventType.PACKAGE_CUSTODIAN_ASSIGNED,  new String[]{"Custodian assigned",        "A new custodian has been assigned to package %s."}),
@@ -137,6 +144,115 @@ public class NoticeService {
         saveViewers(notice.getId(), Set.of(removedUserId));
         log.debug("notifyPackageCustodianRemoved: notice={} for user={}, package={}",
                 notice.getId(), removedUserId, pkg.getId());
+    }
+
+    /**
+     * Fires a notice to the assigning worker (and other non-driver custodians) when the
+     * driver marks a direct assignment as not received. Custody intentionally stays with
+     * the driver; this is a dispute flag, not a handoff.
+     */
+    @Transactional
+    public void notifyAssignmentObjected(PackageEntity pkg,
+                                         PackageAssignmentEntity assignment,
+                                         Long driverId,
+                                         Long assignedBy,
+                                         String reason) {
+        Set<Long> recipients = new LinkedHashSet<>();
+        if (assignedBy != null && !assignedBy.equals(driverId)) {
+            recipients.add(assignedBy);
+        }
+        custodianRepo.findByPackageId(pkg.getId()).stream()
+                .map(PackageCustodianEntity::getUserId)
+                .filter(Objects::nonNull)
+                .filter(id -> !id.equals(driverId))
+                .forEach(recipients::add);
+
+        if (recipients.isEmpty()) {
+            log.debug("notifyAssignmentObjected: no recipients for package={}", pkg.getId());
+            return;
+        }
+
+        var payload = buildAssignmentObjectionPayload(pkg, assignment, driverId, reason);
+        var notice = saveNotice(NoticeResourceType.PACKAGE, pkg.getId(),
+                NoticeEventType.PACKAGE_ASSIGNMENT_OBJECTED, driverId,
+                payload, pkg.getTrackingCode());
+        saveViewers(notice.getId(), recipients);
+        log.debug("notifyAssignmentObjected: notice={} for package={}, {} recipient(s)",
+                notice.getId(), pkg.getId(), recipients.size());
+    }
+
+    /**
+     * A destination office claimed the package directly. Notify the driver who
+     * lost custody; the claiming worker is the actor and does not get a notice.
+     */
+    @Transactional
+    public void notifyOfficeClaimCreated(PackageEntity pkg,
+                                         OfficeClaimEntity claim,
+                                         Long workerId,
+                                         Long driverId) {
+        Set<Long> recipients = new LinkedHashSet<>();
+        if (claim.getDriverId() != null && !claim.getDriverId().equals(workerId)) {
+            recipients.add(claim.getDriverId());
+        }
+        if (driverId != null && !driverId.equals(workerId)) {
+            recipients.add(driverId);
+        }
+        custodianRepo.findByPackageId(pkg.getId()).stream()
+                .filter(c -> c.getRole() == CustodianRole.DRIVER)
+                .map(PackageCustodianEntity::getUserId)
+                .filter(Objects::nonNull)
+                .filter(id -> !id.equals(workerId))
+                .forEach(recipients::add);
+
+        if (recipients.isEmpty()) {
+            log.debug("notifyOfficeClaimCreated: no recipients for package={}", pkg.getId());
+            return;
+        }
+
+        var payload = buildOfficeClaimPayload(pkg, claim, workerId, "notes", claim.getNotes());
+        var notice = saveNotice(NoticeResourceType.PACKAGE, pkg.getId(),
+                NoticeEventType.PACKAGE_OFFICE_CLAIM_CREATED, workerId,
+                payload, pkg.getTrackingCode());
+        saveViewers(notice.getId(), recipients);
+        log.debug("notifyOfficeClaimCreated: notice={} for package={}, {} recipient(s)",
+                notice.getId(), pkg.getId(), recipients.size());
+    }
+
+    /**
+     * The driver contests a direct office claim. Custody stays with the office;
+     * the claiming worker and other non-driver custodians are notified.
+     */
+    @Transactional
+    public void notifyOfficeClaimDisputed(PackageEntity pkg,
+                                          OfficeClaimEntity claim,
+                                          Long driverId,
+                                          Long workerId,
+                                          String reason) {
+        Set<Long> recipients = new LinkedHashSet<>();
+        if (claim.getClaimedBy() != null && !claim.getClaimedBy().equals(driverId)) {
+            recipients.add(claim.getClaimedBy());
+        }
+        if (workerId != null && !workerId.equals(driverId)) {
+            recipients.add(workerId);
+        }
+        custodianRepo.findByPackageId(pkg.getId()).stream()
+                .map(PackageCustodianEntity::getUserId)
+                .filter(Objects::nonNull)
+                .filter(id -> !id.equals(driverId))
+                .forEach(recipients::add);
+
+        if (recipients.isEmpty()) {
+            log.debug("notifyOfficeClaimDisputed: no recipients for package={}", pkg.getId());
+            return;
+        }
+
+        var payload = buildOfficeClaimPayload(pkg, claim, driverId, "disputeReason", reason);
+        var notice = saveNotice(NoticeResourceType.PACKAGE, pkg.getId(),
+                NoticeEventType.PACKAGE_OFFICE_CLAIM_DISPUTED, driverId,
+                payload, pkg.getTrackingCode());
+        saveViewers(notice.getId(), recipients);
+        log.debug("notifyOfficeClaimDisputed: notice={} for package={}, {} recipient(s)",
+                notice.getId(), pkg.getId(), recipients.size());
     }
 
     /**
@@ -434,6 +550,56 @@ public class NoticeService {
             ));
         } catch (JsonProcessingException e) {
             log.error("Failed to build package notice payload", e);
+            return "{}";
+        }
+    }
+
+    private String buildAssignmentObjectionPayload(PackageEntity pkg,
+                                                   PackageAssignmentEntity assignment,
+                                                   Long driverId,
+                                                   String reason) {
+        try {
+            return JSON.writeValueAsString(payloadMap(
+                    "resourceType", "PACKAGE",
+                    "resourceId", pkg.getId().toString(),
+                    "packageId", pkg.getId().toString(),
+                    "trackingCode", pkg.getTrackingCode(),
+                    "assignmentId", assignment.getId() != null ? assignment.getId().toString() : null,
+                    "driverId", driverId != null ? driverId.toString() : null,
+                    "assignedBy", assignment.getAssignedBy() != null ? assignment.getAssignedBy().toString() : null,
+                    "assignedAt", assignment.getAssignedAt() != null ? assignment.getAssignedAt().toString() : null,
+                    "objectionReason", reason,
+                    "changedAt", Instant.now().toString()
+            ));
+        } catch (JsonProcessingException e) {
+            log.error("Failed to build assignment objection notice payload", e);
+            return "{}";
+        }
+    }
+
+    private String buildOfficeClaimPayload(PackageEntity pkg,
+                                           OfficeClaimEntity claim,
+                                           Long actorId,
+                                           String detailKey,
+                                           String detail) {
+        try {
+            return JSON.writeValueAsString(payloadMap(
+                    "resourceType", "PACKAGE",
+                    "resourceId", pkg.getId().toString(),
+                    "packageId", pkg.getId().toString(),
+                    "trackingCode", pkg.getTrackingCode(),
+                    "claimId", claim.getId() != null ? claim.getId().toString() : null,
+                    "driverId", claim.getDriverId() != null ? claim.getDriverId().toString() : null,
+                    "claimedBy", claim.getClaimedBy() != null ? claim.getClaimedBy().toString() : null,
+                    "officeLocationId", claim.getOfficeLocationId() != null ? claim.getOfficeLocationId().toString() : null,
+                    "claimedAt", claim.getClaimedAt() != null ? claim.getClaimedAt().toString() : null,
+                    "disputeDeadline", claim.getDisputeDeadline() != null ? claim.getDisputeDeadline().toString() : null,
+                    detailKey, detail,
+                    "actorId", actorId != null ? actorId.toString() : null,
+                    "changedAt", Instant.now().toString()
+            ));
+        } catch (JsonProcessingException e) {
+            log.error("Failed to build office claim notice payload", e);
             return "{}";
         }
     }

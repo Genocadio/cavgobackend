@@ -416,6 +416,36 @@ public class TransferService {
     }
 
     /**
+     * Internal cancellation used when a destination office claims packages directly.
+     * The claiming worker is not the transfer owner, so this bypasses the normal
+     * owner-only check while still recording the cancellation and notifying viewers.
+     */
+    @Transactional
+    public void cancelOpenTransfersForPackages(Collection<UUID> packageIds, Long actorId) {
+        if (packageIds == null || packageIds.isEmpty()) return;
+
+        var transferIds = getOpenTransfersByPackageIds(packageIds).values().stream()
+                .flatMap(List::stream)
+                .map(TransferResponse::id)
+                .distinct()
+                .toList();
+        for (var transferId : transferIds) {
+            var transfer = transferRepo.findById(transferId).orElse(null);
+            if (transfer == null) continue;
+            if (transfer.getStatus() != TransferStatus.PENDING && transfer.getStatus() != TransferStatus.REQUESTED) {
+                continue;
+            }
+            var previousStatus = transfer.getStatus();
+            transfer.setStatus(TransferStatus.CANCELED);
+            transfer.setUpdatedAt(Instant.now());
+            transferRepo.save(transfer);
+            noticeService.notifyTransferEvent(transfer, NoticeEventType.TRANSFER_CANCELED, actorId, previousStatus);
+            log.info("cancelOpenTransfersForPackages: transfer={} cancelled by office claim actor={}",
+                    transferId, actorId);
+        }
+    }
+
+    /**
      * Automatic Time-To-Live (TTL): Expires unconfirmed transfer offers older than maxAge
      * (e.g. 2 hours) to prevent custodian deadlock.
      */

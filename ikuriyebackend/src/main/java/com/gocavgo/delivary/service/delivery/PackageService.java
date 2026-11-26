@@ -19,10 +19,13 @@ import com.gocavgo.delivary.dto.delivery.input.UpdatePackageStatusInput;
 import com.gocavgo.delivary.dto.delivery.output.AcceptOfferResponse;
 import com.gocavgo.delivary.dto.delivery.output.DeliveryCodeResult;
 import com.gocavgo.delivary.dto.delivery.output.DeliveryPackagePage;
+import com.gocavgo.delivary.dto.delivery.output.DriverAssignmentResponse;
+import com.gocavgo.delivary.dto.delivery.output.OfficeClaimResponse;
 import com.gocavgo.delivary.dto.delivery.output.PackageCreationResponse;
 import com.gocavgo.delivary.dto.delivery.output.PackageResponse;
 import com.gocavgo.delivary.dto.delivery.output.PublicTrackedPackage;
 import com.gocavgo.delivary.dto.delivery.output.TransferAcceptResult;
+import com.gocavgo.delivary.entity.delivery.OfficeClaimEntity;
 import com.gocavgo.delivary.entity.delivery.PackageAssignmentEntity;
 import com.gocavgo.delivary.entity.delivery.PackageCarrierLegEntity;
 import com.gocavgo.delivary.entity.delivery.PackageCustodianEntity;
@@ -36,6 +39,7 @@ import com.gocavgo.delivary.entity.delivery.PackagePersonEntity;
 import com.gocavgo.delivary.entity.delivery.DeliveryCodeEntity;
 import com.gocavgo.delivary.entity.trip.CavgoTripEntity;
 import com.gocavgo.delivary.entity.user.UserEntity;
+import com.gocavgo.delivary.repository.delivery.OfficeClaimJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageAssignmentJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageCarrierLegJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageCustodianJpaRepository;
@@ -115,6 +119,7 @@ public class PackageService {
     private final PackageDetailJpaRepository detailRepo;
     private final PackageMediaJpaRepository mediaRepo;
     private final PackageAssignmentJpaRepository assignmentRepo;
+    private final OfficeClaimJpaRepository officeClaimRepo;
     private final PackageCarrierLegJpaRepository carrierLegRepo;
     private final CavgoTripJpaRepository cavgoTripRepo;
     private final PackageEventJpaRepository eventRepo;
@@ -1032,11 +1037,17 @@ public class PackageService {
             noticeService.notifyPackageEvent(pkg, NoticeEventMapper.fromPackageStatus(PackageStatus.ASSIGNED_DRIVER), input.assignedBy(), previousStatus);
         }
 
+        var now = Instant.now();
         var assignment = PackageAssignmentEntity.builder()
                 .packageId(pkg.getId())
                 .driverId(input.driverId())
                 .assignedBy(input.assignedBy())
-                .assignedAt(Instant.now())
+                .assignedAt(now)
+                .batchId(input.batchId())
+                .acceptedAt(input.acceptedAt() != null ? input.acceptedAt() : now)
+                .objectionDeadline(input.objectionDeadline() != null
+                        ? input.objectionDeadline()
+                        : now.plusSeconds(DriverAssignmentFlowService.OBJECTION_WINDOW_MINUTES * 60L))
                 .notes(input.notes())
                 .build();
         assignmentRepo.save(assignment);
@@ -1048,6 +1059,56 @@ public class PackageService {
         saveCustody(pkg.getId(), fromEntity, CustodianRole.DRIVER.name(), "Driver assigned");
         saveEvent(pkg.getId(), PackageEventType.ASSIGNED, input.assignedBy(),
                 "Driver assigned: " + input.driverId());
+
+        publishPackageSnapshot(pkg);
+        return toResponse(pkg);
+    }
+
+    /**
+     * Destination-office intake: a worker takes custody directly from the driver
+     * without waiting for a driver-created transfer. The package becomes
+     * DESTINATION_OFFICE and is held under OFFICE custody so all office staff can
+     * continue the delivery leg.
+     */
+    @Transactional
+    public PackageResponse claimFromDriver(UUID packageId, Long workerId, UUID officeLocationId) {
+        var pkg = packageRepo.findById(packageId)
+                .orElseThrow(() -> new BusinessValidationException("Package not found: " + packageId));
+
+        var priorCustodian = custodianRepo.findTopByPackageIdOrderByAssignedAtDesc(packageId)
+                .orElseThrow(() -> new BusinessValidationException(
+                        "Package " + packageId + " has no current custodian"));
+        if (priorCustodian.getRole() != CustodianRole.DRIVER) {
+            throw new BusinessValidationException(
+                    "Package " + packageId + " is not currently held by a driver");
+        }
+
+        var previousStatus = pkg.getStatus();
+        if (!List.of(PackageStatus.ASSIGNED_DRIVER, PackageStatus.PICKED_UP,
+                PackageStatus.IN_TRANSIT, PackageStatus.DESTINATION_OFFICE).contains(previousStatus)) {
+            throw new BusinessValidationException(
+                    "Cannot claim a package with status: " + previousStatus);
+        }
+
+        if (previousStatus != PackageStatus.DESTINATION_OFFICE) {
+            validationService.validateTransition(previousStatus, PackageStatus.DESTINATION_OFFICE,
+                    pkg.getDeliveryType());
+            pkg.setStatus(PackageStatus.DESTINATION_OFFICE);
+        }
+        pkg.setUpdatedAt(Instant.now());
+        packageRepo.save(pkg);
+
+        if (!priorCustodian.getUserId().equals(workerId)) {
+            noticeService.notifyPackageCustodianRemoved(pkg, priorCustodian.getUserId(), workerId);
+        }
+        saveCustodian(packageId, workerId, CustodianRole.OFFICE);
+        saveCustody(packageId, priorCustodian.getRole().name(), CustodianRole.OFFICE.name(),
+                "Claimed by destination office" + (officeLocationId != null ? " " + officeLocationId : ""));
+        saveEvent(packageId, PackageEventType.DESTINATION_ARRIVED, workerId,
+                "Claimed by destination office without driver transfer");
+
+        noticeService.notifyPackageEvent(pkg, NoticeEventType.PACKAGE_DESTINATION_OFFICE, workerId, previousStatus);
+        noticeService.notifyPackageEvent(pkg, NoticeEventType.PACKAGE_CUSTODIAN_ASSIGNED, workerId, previousStatus);
 
         publishPackageSnapshot(pkg);
         return toResponse(pkg);
@@ -2067,6 +2128,14 @@ public class PackageService {
         // ── 6. Open (PENDING/REQUESTED) transfers, batched (2-3 queries) ──
         var transfersByPackage = transferService.getOpenTransfersByPackageIds(ids);
 
+        // ── 7. Direct driver assignments, batched ──
+        var assignmentsByPackage = assignmentRepo.findByPackageIdInOrderByAssignedAtDesc(ids).stream()
+                .collect(Collectors.groupingBy(PackageAssignmentEntity::getPackageId));
+
+        // ── 8. Destination-office claims, batched ──
+        var officeClaimsByPackage = officeClaimRepo.findByPackageIdInOrderByClaimedAtDesc(ids).stream()
+                .collect(Collectors.groupingBy(OfficeClaimEntity::getPackageId));
+
         var results = new ArrayList<PackageResponse>(packages.size());
         for (var pkg : packages) {
             var packageId = pkg.getId();
@@ -2100,6 +2169,14 @@ public class PackageService {
 
             var transfers = transfersByPackage.getOrDefault(packageId, List.of());
 
+            var driverAssignments = assignmentsByPackage.getOrDefault(packageId, List.of()).stream()
+                    .map(DriverAssignmentResponse::from)
+                    .toList();
+
+            var officeClaims = officeClaimsByPackage.getOrDefault(packageId, List.of()).stream()
+                    .map(OfficeClaimResponse::from)
+                    .toList();
+
             var carrierLegs = legsByPackage.getOrDefault(packageId, List.of()).stream()
                     .map(this::toCarrierLegResponse)
                     .toList();
@@ -2113,7 +2190,7 @@ public class PackageService {
 
             results.add(deliveryMapper.toFullResponse(
                     pkg, custodians, people, locations, detail, events, custody, carrierLegs,
-                    transfers, proofPhotoUrl
+                    transfers, driverAssignments, officeClaims, proofPhotoUrl
             ));
         }
         return results;

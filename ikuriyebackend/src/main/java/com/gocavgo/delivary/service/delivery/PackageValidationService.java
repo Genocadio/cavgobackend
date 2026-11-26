@@ -48,7 +48,9 @@ public class PackageValidationService {
             // may head in transit, drop at the destination office, or deliver straight to
             // the receiver (initiateDelivery → PENDING_CONFIRMATION).
             Map.entry(PackageStatus.PICKED_UP, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.DESTINATION_OFFICE, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
-            Map.entry(PackageStatus.ASSIGNED_DRIVER, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.PICKED_UP, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
+            // A destination office may claim a driver-held package directly, without
+            // waiting for the driver to create a transfer.
+            Map.entry(PackageStatus.ASSIGNED_DRIVER, Set.of(PackageStatus.IN_TRANSIT, PackageStatus.PICKED_UP, PackageStatus.DESTINATION_OFFICE, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
             Map.entry(PackageStatus.IN_TRANSIT, Set.of(PackageStatus.DESTINATION_OFFICE, PackageStatus.PENDING_CONFIRMATION, PackageStatus.CANCELLED)),
             // Office that received the package from a driver can deliver straight from
             // DESTINATION_OFFICE (or stage via READY_FOR_COLLECTION first).

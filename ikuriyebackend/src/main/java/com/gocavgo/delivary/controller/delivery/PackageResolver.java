@@ -4,20 +4,28 @@ import com.gocavgo.delivary.config.CavgomainSyncClient;
 import com.gocavgo.delivary.security.NexxauthRoles;
 import com.gocavgo.delivary.service.user.UserService;
 import com.gocavgo.delivary.enums.user.Role;
+import com.gocavgo.delivary.service.delivery.DriverAssignmentFlowService;
+import com.gocavgo.delivary.service.delivery.OfficeClaimFlowService;
 import com.gocavgo.delivary.service.delivery.PackageService;
 import com.gocavgo.delivary.enums.delivery.CustodianRole;
 import com.gocavgo.delivary.enums.delivery.PackageStatus;
 import com.gocavgo.delivary.enums.delivery.PersonRole;
 import com.gocavgo.delivary.enums.delivery.SortOrder;
 import com.gocavgo.delivary.dto.delivery.input.AssignDriverInput;
+import com.gocavgo.delivary.dto.delivery.input.AssignPackagesToDriverInput;
 import com.gocavgo.delivary.dto.delivery.input.AssignPackageCompanyInput;
 import com.gocavgo.delivary.dto.delivery.input.AssignPackageTripInput;
 import com.gocavgo.delivary.dto.delivery.input.ConfirmDeliveryInput;
 import com.gocavgo.delivary.dto.delivery.input.CreatePackageInput;
 import com.gocavgo.delivary.dto.delivery.input.InitiateDeliveryInput;
+import com.gocavgo.delivary.dto.delivery.input.ClaimOfficePackagesInput;
+import com.gocavgo.delivary.dto.delivery.input.DisputeOfficeClaimsInput;
+import com.gocavgo.delivary.dto.delivery.input.ObjectToDriverAssignmentsInput;
 import com.gocavgo.delivary.dto.delivery.input.RegenerateDeliveryCodeInput;
 import com.gocavgo.delivary.dto.delivery.input.UpdatePackageStatusInput;
 import com.gocavgo.delivary.dto.delivery.output.CatchupSyncResult;
+import com.gocavgo.delivary.dto.delivery.output.BulkDriverAssignmentResult;
+import com.gocavgo.delivary.dto.delivery.output.BulkOfficeClaimResult;
 import com.gocavgo.delivary.dto.delivery.output.DeliveryCodeResult;
 import com.gocavgo.delivary.dto.delivery.output.DeliveryPackagePage;
 import com.gocavgo.delivary.dto.delivery.output.PackageCreationResponse;
@@ -45,6 +53,8 @@ import java.util.UUID;
 public class PackageResolver {
 
     private final PackageService packageService;
+    private final DriverAssignmentFlowService driverAssignmentFlowService;
+    private final OfficeClaimFlowService officeClaimFlowService;
     private final UserService userService;
     private final CavgomainSyncClient cavgoSyncClient;
     private final com.gocavgo.delivary.service.idempotency.IdempotencyService idempotencyService;
@@ -187,6 +197,23 @@ public class PackageResolver {
         var role = NexxauthRoles.primaryRole(authentication.getAuthorities());
         var phone = role == Role.CUSTOMER ? userService.getUserById(userId).phone() : null;
         return packageService.getMyPackages(userId, phone, role, status, order != null ? order : SortOrder.ASC, page, size);
+    }
+
+    /**
+     * Driver-held packages whose destination office matches the authenticated
+     * worker's office. Workers can claim these directly without a driver transfer.
+     */
+    @QueryMapping
+    @PreAuthorize("hasAnyRole('WORKER','ADMIN','SUPER_ADMIN')")
+    public DeliveryPackagePage officeIncomingPackages(
+            @Argument UUID officeLocationId,
+            @Argument SortOrder order,
+            @Argument int page,
+            @Argument int size
+    ) {
+        var workerId = Long.parseLong(SecurityContextHolder.getContext().getAuthentication().getName());
+        return officeClaimFlowService.getIncomingPackagesForOffice(
+                workerId, officeLocationId, page, size);
     }
 
     @QueryMapping
@@ -364,6 +391,63 @@ public class PackageResolver {
                 input.tripId()
         );
         return packageService.assignDriver(resolvedInput);
+    }
+
+    /**
+     * Direct bulk office-to-driver assignment. The driver does not accept; the assignment
+     * is effective immediately with a ten-minute "not received" objection window.
+     */
+    @MutationMapping
+    @PreAuthorize("hasAnyRole('WORKER','ADMIN','SUPER_ADMIN')")
+    public BulkDriverAssignmentResult assignPackagesToDriver(@Argument @Valid AssignPackagesToDriverInput input) {
+        var assignedBy = Long.parseLong(SecurityContextHolder.getContext().getAuthentication().getName());
+        return driverAssignmentFlowService.assignPackagesToDriver(
+                input.packageIds(),
+                input.driverId(),
+                assignedBy,
+                input.tripId(),
+                input.notes()
+        );
+    }
+
+    /** Driver flags one or more direct assignments as not received inside the objection window. */
+    @MutationMapping
+    @PreAuthorize("hasRole('DRIVER')")
+    public BulkDriverAssignmentResult objectToDriverAssignments(@Argument @Valid ObjectToDriverAssignmentsInput input) {
+        var driverId = Long.parseLong(SecurityContextHolder.getContext().getAuthentication().getName());
+        return driverAssignmentFlowService.objectToAssignments(
+                input.packageIds(),
+                driverId,
+                input.reason()
+        );
+    }
+
+    /**
+     * Destination-office worker takes bulk custody directly from drivers. No
+     * driver-created transfer or acceptance step is required.
+     */
+    @MutationMapping
+    @PreAuthorize("hasAnyRole('WORKER','ADMIN','SUPER_ADMIN')")
+    public BulkOfficeClaimResult claimOfficePackagesFromDriver(@Argument @Valid ClaimOfficePackagesInput input) {
+        var workerId = Long.parseLong(SecurityContextHolder.getContext().getAuthentication().getName());
+        return officeClaimFlowService.claimPackagesFromDrivers(
+                input.packageIds(),
+                workerId,
+                input.officeLocationId(),
+                input.notes()
+        );
+    }
+
+    /** Driver reports one or more direct office claims as not delivered inside the dispute window. */
+    @MutationMapping
+    @PreAuthorize("hasRole('DRIVER')")
+    public BulkOfficeClaimResult disputeOfficeClaims(@Argument @Valid DisputeOfficeClaimsInput input) {
+        var driverId = Long.parseLong(SecurityContextHolder.getContext().getAuthentication().getName());
+        return officeClaimFlowService.disputeClaims(
+                input.packageIds(),
+                driverId,
+                input.reason()
+        );
     }
 
     @MutationMapping

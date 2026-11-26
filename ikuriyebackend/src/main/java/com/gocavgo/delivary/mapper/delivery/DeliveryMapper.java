@@ -1,5 +1,7 @@
 package com.gocavgo.delivary.mapper.delivery;
 
+import com.gocavgo.delivary.dto.delivery.output.DriverAssignmentResponse;
+import com.gocavgo.delivary.dto.delivery.output.OfficeClaimResponse;
 import com.gocavgo.delivary.dto.delivery.output.PackageResponse;
 import com.gocavgo.delivary.entity.delivery.PackageCustodianEntity;
 import com.gocavgo.delivary.entity.delivery.PackageCustodyEntity;
@@ -47,6 +49,8 @@ public interface DeliveryMapper {
     @Mapping(target = "custody", source = "custody")
     @Mapping(target = "carrierLegs", source = "carrierLegs")
     @Mapping(target = "transfers", source = "transfers")
+    @Mapping(target = "driverAssignments", source = "driverAssignments")
+    @Mapping(target = "officeClaims", source = "officeClaims")
     @Mapping(target = "proofPhotoUrl", source = "proofPhotoUrl")
     PackageResponse toFullResponse(
             PackageEntity pkg,
@@ -58,6 +62,8 @@ public interface DeliveryMapper {
             List<PackageResponse.CustodyResponse> custody,
             List<PackageResponse.CarrierLegResponse> carrierLegs,
             List<TransferResponse> transfers,
+            List<DriverAssignmentResponse> driverAssignments,
+            List<OfficeClaimResponse> officeClaims,
             String proofPhotoUrl
     );
 }

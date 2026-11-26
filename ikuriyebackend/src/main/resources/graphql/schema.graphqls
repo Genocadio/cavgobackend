@@ -227,6 +227,10 @@ type DeliveryPackage {
     custody: [PackageCustody!]!
     "Open transfers containing this package (PENDING or REQUESTED). Frontend can use transfer.ruleType to determine if a code is required."
     transfers: [Transfer!]!
+    "Direct office-to-driver assignments. These are accepted at assignment time and may be objected to for ten minutes."
+    driverAssignments: [DriverAssignment!]!
+    "Direct destination-office claims taken from a driver. The driver may dispute for ten minutes."
+    officeClaims: [OfficeClaim!]!
     "ISO-8601 timestamp when the package was marked DELIVERED. Null before delivery."
     deliveredAt: String
     "Optional proof-of-delivery photo URL. Null unless the viewer is a package participant or staff."
@@ -241,6 +245,35 @@ type DeliveryPackage {
     createdAt: String!
     "ISO-8601 timestamp of last update"
     updatedAt: String!
+}
+
+"Direct destination-office claim with a bounded not-delivered dispute window."
+type OfficeClaim {
+    id: ID!
+    packageId: ID!
+    driverId: ID!
+    claimedBy: ID!
+    officeLocationId: ID!
+    claimedAt: String!
+    disputeDeadline: String!
+    disputedAt: String
+    disputeReason: String
+    notes: String
+}
+
+"Direct office-to-driver assignment with a bounded not-received objection window."
+type DriverAssignment {
+    id: ID!
+    packageId: ID!
+    driverId: ID!
+    assignedBy: ID!
+    assignedAt: String!
+    acceptedAt: String!
+    objectionDeadline: String!
+    objectedAt: String
+    objectionReason: String
+    notes: String
+    batchId: String
 }
 
 "Optional feedback submitted by a package sender or receiver after delivery."
@@ -511,6 +544,46 @@ input AssignDriverInput {
     notes: String
     "Optional: Driver trip ID linked to the assigned package"
     tripId: ID
+}
+
+"Input: directly assign multiple packages to one driver. No driver acceptance step is required."
+input AssignPackagesToDriverInput {
+    packageIds: [ID!]!
+    driverId: ID!
+    tripId: ID
+    notes: String
+}
+
+"Input: destination-office worker claims packages directly from their drivers."
+input ClaimOfficePackagesInput {
+    packageIds: [ID!]!
+    "Optional office override; defaults to the authenticated worker's office."
+    officeLocationId: ID
+    notes: String
+}
+
+"Input: driver flags one or more office claims as not delivered."
+input DisputeOfficeClaimsInput {
+    packageIds: [ID!]!
+    reason: String
+}
+
+"Input: flag one or more direct assignments as not received."
+input ObjectToDriverAssignmentsInput {
+    packageIds: [ID!]!
+    reason: String
+}
+
+"Result of a bulk destination-office claim or driver dispute."
+type BulkOfficeClaimResult {
+    packages: [DeliveryPackage!]!
+    claims: [OfficeClaim!]!
+}
+
+"Result of a bulk direct assignment or driver objection."
+type BulkDriverAssignmentResult {
+    packages: [DeliveryPackage!]!
+    assignments: [DriverAssignment!]!
 }
 
 "Input: advance a package to a new status."
@@ -832,6 +905,17 @@ type Query {
         "Page size. Defaults to 20."
         size: Int = 20
     ): DeliveryPackagePage!
+    "Driver-held packages whose destination office matches the authenticated worker's office, ready to claim."
+    officeIncomingPackages(
+        "Optional office override; defaults to the authenticated worker's office."
+        officeLocationId: ID
+        "Sort order by last update (ASC, DESC). Defaults to DESC."
+        order: SortOrder = DESC
+        "Page number (0-based). Defaults to 0."
+        page: Int = 0
+        "Page size. Defaults to 20."
+        size: Int = 20
+    ): DeliveryPackagePage!
     "Get all packages that are available to be accepted (status = CREATED)."
     availablePackages(
         "Optional filter by status."
@@ -980,6 +1064,14 @@ type Mutation {
     acceptTransfer(input: AcceptTransferInput!): TransferAcceptResult!
     "Assign a driver to a package. Transitions FIXED_ROUTE packages to ASSIGNED_DRIVER status. Worker, Driver (self-assign or transfer), Admin, or Super Admin only."
     assignDriver(input: AssignDriverInput!): DeliveryPackage!
+    "Directly assign multiple packages to one driver. Assignment is accepted immediately; driver may object within ten minutes."
+    assignPackagesToDriver(input: AssignPackagesToDriverInput!): BulkDriverAssignmentResult!
+    "Flag one or more direct driver assignments as not received. Driver only, within the ten-minute objection window."
+    objectToDriverAssignments(input: ObjectToDriverAssignmentsInput!): BulkDriverAssignmentResult!
+    "Destination-office worker claims packages directly from drivers. No driver transfer is required."
+    claimOfficePackagesFromDriver(input: ClaimOfficePackagesInput!): BulkOfficeClaimResult!
+    "Driver flags one or more direct office claims as not delivered, within the ten-minute dispute window."
+    disputeOfficeClaims(input: DisputeOfficeClaimsInput!): BulkOfficeClaimResult!
     "Advance a package to the next status. Validates state-machine transitions; the actor must be the current custodian or trusted office staff."
     updatePackageStatus(input: UpdatePackageStatusInput!): DeliveryPackage!
     "Assign a company to a package."

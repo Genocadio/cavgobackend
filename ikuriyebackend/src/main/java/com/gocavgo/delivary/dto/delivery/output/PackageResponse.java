@@ -31,6 +31,8 @@ public record PackageResponse(
         List<EventResponse> events,
         List<CustodyResponse> custody,
         List<TransferResponse> transfers,
+        List<DriverAssignmentResponse> driverAssignments,
+        List<OfficeClaimResponse> officeClaims,
         Instant deliveredAt,
         /** Storage-backed URL; GraphQL resolver masks this for non-participants. */
         String proofPhotoUrl,
