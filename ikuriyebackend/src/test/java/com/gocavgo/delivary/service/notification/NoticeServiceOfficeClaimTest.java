@@ -17,6 +17,7 @@ import com.gocavgo.delivary.repository.notification.NoticeRepository;
 import com.gocavgo.delivary.repository.notification.NoticeViewerRepository;
 import com.gocavgo.delivary.repository.transfer.TransferPackageJpaRepository;
 import com.gocavgo.delivary.service.subscription.NoticePublisher;
+import com.gocavgo.delivary.service.user.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,6 +50,7 @@ class NoticeServiceOfficeClaimTest {
     @Mock private TransferPackageJpaRepository transferPackageRepo;
     @Mock private PackageJpaRepository packageRepo;
     @Mock private NoticePublisher noticePublisher;
+    @Mock private UserService userService;
 
     private NoticeService service;
     private final AtomicReference<NoticeEntity> savedNotice = new AtomicReference<>();
@@ -56,7 +58,7 @@ class NoticeServiceOfficeClaimTest {
     @BeforeEach
     void setUp() {
         service = new NoticeService(noticeRepo, viewerRepo, personRepo, custodianRepo,
-                transferPackageRepo, packageRepo, noticePublisher);
+                transferPackageRepo, packageRepo, noticePublisher, userService);
         when(noticeRepo.save(any())).thenAnswer(invocation -> {
             NoticeEntity notice = invocation.getArgument(0);
             notice.setId(UUID.randomUUID());

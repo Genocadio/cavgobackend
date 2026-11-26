@@ -213,7 +213,24 @@ public class PackageResolver {
     ) {
         var workerId = Long.parseLong(SecurityContextHolder.getContext().getAuthentication().getName());
         return officeClaimFlowService.getIncomingPackagesForOffice(
-                workerId, officeLocationId, page, size);
+                workerId, officeLocationId, order != null ? order : SortOrder.DESC, page, size);
+    }
+
+    /**
+     * Packages created from the authenticated worker's office. Stays visible
+     * after handoff so workers can follow everything their office dispatched.
+     */
+    @QueryMapping
+    @PreAuthorize("hasAnyRole('WORKER','ADMIN','SUPER_ADMIN')")
+    public DeliveryPackagePage officeOutgoingPackages(
+            @Argument UUID officeLocationId,
+            @Argument SortOrder order,
+            @Argument int page,
+            @Argument int size
+    ) {
+        var workerId = Long.parseLong(SecurityContextHolder.getContext().getAuthentication().getName());
+        return officeClaimFlowService.getOutgoingPackagesForOffice(
+                workerId, officeLocationId, order != null ? order : SortOrder.DESC, page, size);
     }
 
     @QueryMapping

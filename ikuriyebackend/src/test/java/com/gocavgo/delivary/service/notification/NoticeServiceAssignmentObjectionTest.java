@@ -17,6 +17,7 @@ import com.gocavgo.delivary.repository.notification.NoticeRepository;
 import com.gocavgo.delivary.repository.notification.NoticeViewerRepository;
 import com.gocavgo.delivary.repository.transfer.TransferPackageJpaRepository;
 import com.gocavgo.delivary.service.subscription.NoticePublisher;
+import com.gocavgo.delivary.service.user.UserService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -45,11 +46,12 @@ class NoticeServiceAssignmentObjectionTest {
     @Mock private TransferPackageJpaRepository transferPackageRepo;
     @Mock private PackageJpaRepository packageRepo;
     @Mock private NoticePublisher noticePublisher;
+    @Mock private UserService userService;
 
     @Test
     void objectionNoticeGoesToAssigningWorkerNotTheDriver() {
         var service = new NoticeService(noticeRepo, viewerRepo, personRepo, custodianRepo,
-                transferPackageRepo, packageRepo, noticePublisher);
+                transferPackageRepo, packageRepo, noticePublisher, userService);
         var packageId = UUID.randomUUID();
         var now = Instant.parse("2026-11-26T10:00:00Z");
         var pkg = PackageEntity.builder()

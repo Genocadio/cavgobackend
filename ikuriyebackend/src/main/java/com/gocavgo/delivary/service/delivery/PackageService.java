@@ -6,6 +6,7 @@ import com.gocavgo.delivary.exception.BusinessValidationException;
 import com.gocavgo.delivary.security.SecurityUtils;
 import com.gocavgo.delivary.security.NexxauthRoles;
 import com.gocavgo.delivary.enums.delivery.DeliveryType;
+import com.gocavgo.delivary.enums.delivery.LocationType;
 import com.gocavgo.delivary.enums.delivery.MediaType;
 import com.gocavgo.delivary.enums.delivery.PackageEventType;
 import com.gocavgo.delivary.enums.delivery.PackageOrigin;
@@ -102,6 +103,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -259,6 +261,11 @@ public class PackageService {
 
         // Notify: package created
         noticeService.notifyPackageEvent(pkg, NoticeEventMapper.fromPackageStatus(pkg.getStatus()), creatorId, null);
+        if (input.destination() != null && input.destination().officeLocationId() != null) {
+            noticeService.notifyOfficePackageEvent(pkg, NoticeEventType.PACKAGE_OFFICE_UPDATE, creatorId,
+                    input.destination().officeLocationId(), "Incoming package for your office",
+                    String.format("Package %s is addressed to your office for intake.", pkg.getTrackingCode()));
+        }
 
         var response = new PackageCreationResponse(toResponse(pkg), transferResponse);
 
@@ -1630,13 +1637,12 @@ public class PackageService {
             packageIds.addAll(custodianRepo.findCurrentCustodianPackageIdsByUserId(userId));
         } else {
             // WORKER / ADMIN / SUPER_ADMIN — show packages where the user is the
-            // current custodian, plus packages currently held by an OFFICE (a
-            // physical office is not a user; its custody row is role OFFICE). This
-            // lets the destination office see and deliver packages a driver dropped
-            // off. CREATED packages are NOT listed here — they belong in the
-            // availablePackages query instead.
+            // current custodian, plus packages held by THIS worker's office. A
+            // physical office is not a user; its custody row is role OFFICE, so
+            // filter those rows by the office location on the package to avoid
+            // leaking packages held by another office.
             packageIds.addAll(custodianRepo.findCurrentCustodianPackageIdsByUserId(userId));
-            packageIds.addAll(custodianRepo.findCurrentCustodianPackageIdsByRole(CustodianRole.OFFICE));
+            packageIds.addAll(officeCustodyPackageIdsForUser(userId));
         }
 
         // Also include packages from REQUESTED transfers where this user is
@@ -1653,6 +1659,43 @@ public class PackageService {
     @Transactional(readOnly = true)
     public DeliveryPackagePage getMyPackages(Long userId, String phone, Role role) {
         return getMyPackages(userId, phone, role, null, SortOrder.ASC, 0, 20);
+    }
+
+    /**
+     * OFFICE custody is not tied to a user id, so scope it to packages whose
+     * ORIGIN or DESTINATION office location matches the worker's assigned office.
+     * Legacy packages with no office location at all stay visible: customer-side
+     * fixed-route handoffs still land at an office without an office id.
+     */
+    private Set<UUID> officeCustodyPackageIdsForUser(Long userId) {
+        var officeCustodyIds = new LinkedHashSet<>(custodianRepo.findCurrentCustodianPackageIdsByRole(CustodianRole.OFFICE));
+        if (officeCustodyIds.isEmpty()) {
+            return officeCustodyIds;
+        }
+        var officeId = userService.getCompanyIdForUser(userId);
+        if (officeId == null) {
+            return officeCustodyIds;
+        }
+        var officeIds = List.of(officeId);
+        var locatedAtOffice = new LinkedHashSet<UUID>();
+        locatedAtOffice.addAll(locationRepo.findPackageIdsByTypeAndOfficeLocationIdIn(
+                LocationType.ORIGIN, officeIds));
+        locatedAtOffice.addAll(locationRepo.findPackageIdsByTypeAndOfficeLocationIdIn(
+                LocationType.DESTINATION, officeIds));
+
+        // Only packages with no office information at all are treated as
+        // office-agnostic. A package explicitly attached to another office is
+        // removed even when one of its two location rows has no office id.
+        var unassigned = new LinkedHashSet<>(officeCustodyIds);
+        for (var location : locationRepo.findByPackageIdIn(officeCustodyIds)) {
+            if (location.getOfficeLocationId() != null) {
+                unassigned.remove(location.getPackageId());
+            }
+        }
+        locatedAtOffice.addAll(unassigned);
+
+        officeCustodyIds.retainAll(locatedAtOffice);
+        return officeCustodyIds;
     }
 
     @Transactional(readOnly = true)
@@ -1683,14 +1726,11 @@ public class PackageService {
         }
 
         if (role == Role.WORKER || role == Role.ADMIN || role == Role.SUPER_ADMIN) {
-            packageIds.addAll(custodianRepo.findCurrentCustodianPackageIdsByRole(CustodianRole.OFFICE));
+            packageIds.addAll(officeCustodyPackageIdsForUser(userId));
         }
 
         if (role == Role.DRIVER || role == Role.WORKER || role == Role.ADMIN || role == Role.SUPER_ADMIN) {
-            var createdSince = packageRepo.findByStatusAndUpdatedAtGreaterThanEqual(PackageStatus.CREATED, since);
-            for (var pkg : createdSince) {
-                packageIds.add(pkg.getId());
-            }
+            addCreatedPackageIdsForRole(userId, role, since, packageIds);
         }
 
         if (packageIds.isEmpty()) {
@@ -1699,6 +1739,29 @@ public class PackageService {
 
         var modified = packageRepo.findByIdInAndUpdatedAtGreaterThanEqual(packageIds, since);
         return toResponses(modified);
+    }
+
+    /**
+     * Drivers need the global CREATED pool to find offers. Office staff only
+     * need CREATED packages dispatched from their own office; the dedicated
+     * officeOutgoingPackages query covers the rest of that office's lifecycle.
+     */
+    private void addCreatedPackageIdsForRole(Long userId, Role role, Instant since, Set<UUID> target) {
+        var createdSince = packageRepo.findByStatusAndUpdatedAtGreaterThanEqual(PackageStatus.CREATED, since);
+        if (role == Role.DRIVER) {
+            createdSince.stream().map(PackageEntity::getId).forEach(target::add);
+            return;
+        }
+        var officeId = userId == null ? null : userService.getCompanyIdForUser(userId);
+        if (officeId == null) {
+            return;
+        }
+        var fromOffice = new LinkedHashSet<>(locationRepo.findPackageIdsByTypeAndOfficeLocationIdIn(
+                LocationType.ORIGIN, List.of(officeId)));
+        createdSince.stream()
+                .map(PackageEntity::getId)
+                .filter(fromOffice::contains)
+                .forEach(target::add);
     }
 
     @Transactional(readOnly = true)

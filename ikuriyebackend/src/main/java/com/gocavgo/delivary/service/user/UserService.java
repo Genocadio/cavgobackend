@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -172,6 +173,32 @@ public class UserService {
         return userRepository.findAll().stream()
                 .map(user -> toUserResponse(user, resolveRoleFromNexxauth(user.getId())))
                 .toList();
+    }
+
+    /**
+     * All local user ids attached to an office location (office staff and
+     * drivers). Office notices are fanned out to these users so every worker at
+     * the destination gets the update, not just one package custodian.
+     */
+    @Transactional(readOnly = true)
+    public Set<Long> getUserIdsForOffice(UUID officeLocationId) {
+        if (officeLocationId == null) {
+            return Set.of();
+        }
+        var userIds = new LinkedHashSet<Long>();
+        workerProfileRepository.findByCompanyId(officeLocationId).stream()
+                .map(WorkerProfileEntity::getUser)
+                .filter(java.util.Objects::nonNull)
+                .map(UserEntity::getId)
+                .filter(java.util.Objects::nonNull)
+                .forEach(userIds::add);
+        driverProfileRepository.findByCompanyId(officeLocationId).stream()
+                .map(DriverProfileEntity::getUser)
+                .filter(java.util.Objects::nonNull)
+                .map(UserEntity::getId)
+                .filter(java.util.Objects::nonNull)
+                .forEach(userIds::add);
+        return userIds;
     }
 
     @Transactional

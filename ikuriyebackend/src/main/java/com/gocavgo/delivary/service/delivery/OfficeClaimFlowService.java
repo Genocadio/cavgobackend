@@ -9,6 +9,7 @@ import com.gocavgo.delivary.entity.delivery.PackageEntity;
 import com.gocavgo.delivary.enums.delivery.CustodianRole;
 import com.gocavgo.delivary.enums.delivery.LocationType;
 import com.gocavgo.delivary.enums.delivery.PackageStatus;
+import com.gocavgo.delivary.enums.delivery.SortOrder;
 import com.gocavgo.delivary.exception.BusinessValidationException;
 import com.gocavgo.delivary.repository.delivery.OfficeClaimJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageCustodianJpaRepository;
@@ -49,6 +50,21 @@ public class OfficeClaimFlowService {
             PackageStatus.DESTINATION_OFFICE
     );
 
+    /** Every non-cancelled status a worker should be able to trace at their office. */
+    private static final List<PackageStatus> VISIBLE_OFFICE_STATUSES = List.of(
+            PackageStatus.CREATED,
+            PackageStatus.ACCEPTED,
+            PackageStatus.ORIGIN_OFFICE,
+            PackageStatus.ASSIGNED_DRIVER,
+            PackageStatus.PICKED_UP,
+            PackageStatus.IN_TRANSIT,
+            PackageStatus.DESTINATION_OFFICE,
+            PackageStatus.PENDING_CONFIRMATION,
+            PackageStatus.READY_FOR_COLLECTION,
+            PackageStatus.DELIVERED,
+            PackageStatus.COMPLETED
+    );
+
     private final PackageJpaRepository packageRepo;
     private final PackageLocationJpaRepository packageLocationRepo;
     private final PackageCustodianJpaRepository custodianRepo;
@@ -60,25 +76,42 @@ public class OfficeClaimFlowService {
     private final Clock clock;
 
     /**
-     * Packages whose destination office matches the worker's office and which
-     * are still driver-held. This is the worker's "incoming" intake queue.
+     * Packages whose destination office matches the worker's office. Claiming
+     * is still restricted to driver-held statuses, but workers can see the
+     * full lifecycle of everything addressed to their office.
      */
     @Transactional(readOnly = true)
     public DeliveryPackagePage getIncomingPackagesForOffice(Long workerId, UUID officeLocationId,
                                                             int page, int size) {
+        return getIncomingPackagesForOffice(workerId, officeLocationId, SortOrder.DESC, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public DeliveryPackagePage getIncomingPackagesForOffice(Long workerId, UUID officeLocationId,
+                                                            SortOrder order, int page, int size) {
         var officeIds = resolveOfficeIds(workerId, officeLocationId);
-        var requestedSize = size > 0 ? size : 20;
-        var currentPage = Math.max(page, 0);
 
         var packageIds = packageLocationRepo.findPackageIdsByTypeAndOfficeLocationIdIn(
                 LocationType.DESTINATION, officeIds);
         var packages = packageRepo.findAllById(packageIds).stream()
-                .filter(p -> CLAIMABLE_STATUSES.contains(p.getStatus()))
-                .sorted(java.util.Comparator.comparing(
-                        PackageEntity::getUpdatedAt,
-                        java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
+                .filter(p -> VISIBLE_OFFICE_STATUSES.contains(p.getStatus()))
                 .toList();
 
+        return pagePackages(sortForOffice(packages, order), page, size);
+    }
+
+    private List<PackageEntity> sortForOffice(List<PackageEntity> packages, SortOrder order) {
+        var byUpdatedAt = java.util.Comparator.comparing(
+                PackageEntity::getUpdatedAt,
+                java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
+        return packages.stream()
+                .sorted(order == SortOrder.ASC ? byUpdatedAt : byUpdatedAt.reversed())
+                .toList();
+    }
+
+    private DeliveryPackagePage pagePackages(List<PackageEntity> packages, int page, int size) {
+        var requestedSize = size > 0 ? size : 20;
+        var currentPage = Math.max(page, 0);
         var totalCount = packages.size();
         var from = Math.min(currentPage * requestedSize, totalCount);
         var to = Math.min(from + requestedSize, totalCount);
@@ -92,6 +125,30 @@ public class OfficeClaimFlowService {
                 (int) Math.ceil(totalCount / (double) requestedSize),
                 currentPage
         );
+    }
+
+    /**
+     * Packages created from the worker's office. This stays visible after the
+     * office hands the package to a driver, so workers can follow everything
+     * their office dispatched, not only packages they currently hold.
+     */
+    @Transactional(readOnly = true)
+    public DeliveryPackagePage getOutgoingPackagesForOffice(Long workerId, UUID officeLocationId,
+                                                            int page, int size) {
+        return getOutgoingPackagesForOffice(workerId, officeLocationId, SortOrder.DESC, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public DeliveryPackagePage getOutgoingPackagesForOffice(Long workerId, UUID officeLocationId,
+                                                            SortOrder order, int page, int size) {
+        var officeIds = resolveOfficeIds(workerId, officeLocationId);
+        var packageIds = packageLocationRepo.findPackageIdsByTypeAndOfficeLocationIdIn(
+                LocationType.ORIGIN, officeIds);
+        var packages = packageRepo.findAllById(packageIds).stream()
+                .filter(p -> VISIBLE_OFFICE_STATUSES.contains(p.getStatus()))
+                .toList();
+
+        return pagePackages(sortForOffice(packages, order), page, size);
     }
 
     /**

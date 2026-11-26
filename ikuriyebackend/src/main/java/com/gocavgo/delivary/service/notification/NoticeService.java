@@ -20,6 +20,7 @@ import com.gocavgo.delivary.repository.notification.NoticeRepository;
 import com.gocavgo.delivary.repository.notification.NoticeViewerRepository;
 import com.gocavgo.delivary.repository.transfer.TransferPackageJpaRepository;
 import com.gocavgo.delivary.service.subscription.NoticePublisher;
+import com.gocavgo.delivary.service.user.UserService;
 import com.gocavgo.delivary.util.AfterCommitActions;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -53,6 +54,7 @@ public class NoticeService {
     private final TransferPackageJpaRepository transferPackageRepo;
     private final com.gocavgo.delivary.repository.delivery.PackageJpaRepository packageRepo;
     private final NoticePublisher noticePublisher;
+    private final UserService userService;
 
     // ── Title / message templates ───────────────────────────────────────
 
@@ -70,6 +72,7 @@ public class NoticeService {
             Map.entry(NoticeEventType.PACKAGE_ASSIGNMENT_OBJECTED, new String[]{"Driver disputed assignment", "The driver reported package %s as not received."}),
             Map.entry(NoticeEventType.PACKAGE_OFFICE_CLAIM_CREATED, new String[]{"Claimed by destination office", "Package %s was claimed by the destination office."}),
             Map.entry(NoticeEventType.PACKAGE_OFFICE_CLAIM_DISPUTED, new String[]{"Office claim disputed", "The driver reported package %s as not delivered to the office."}),
+            Map.entry(NoticeEventType.PACKAGE_OFFICE_UPDATE,     new String[]{"Office package update", "Package %s needs attention at your office."}),
             Map.entry(NoticeEventType.PACKAGE_DESTINATION_OFFICE,  new String[]{"At destination office",     "Package %s has arrived at the destination office."}),
             Map.entry(NoticeEventType.PACKAGE_READY_FOR_COLLECTION,new String[]{"Ready for collection",      "Package %s is ready for collection."}),
             Map.entry(NoticeEventType.PACKAGE_CUSTODIAN_ASSIGNED,  new String[]{"Custodian assigned",        "A new custodian has been assigned to package %s."}),
@@ -101,6 +104,44 @@ public class NoticeService {
         var notice = saveNotice(NoticeResourceType.PACKAGE, pkg.getId(), eventType, actorId, payload, pkg.getTrackingCode());
         saveViewers(notice.getId(), recipients);
         log.debug("notifyPackageEvent: notice={} for package={}, {} recipient(s)", notice.getId(), pkg.getId(), recipients.size());
+    }
+
+    /**
+     * Office-wide notice for a package that needs attention at a specific
+     * location. Recipients are materialized into individual viewer rows so the
+     * existing per-user notice feed and subscription deliver it to every worker
+     * attached to that office. The payload always carries the package id so the
+     * web console can open the package detail directly.
+     */
+    @Transactional
+    public void notifyOfficePackageEvent(PackageEntity pkg, NoticeEventType eventType,
+                                         Long actorId, UUID officeLocationId,
+                                         String title, String message) {
+        if (officeLocationId == null) {
+            return;
+        }
+        var officeUsers = userService.getUserIdsForOffice(officeLocationId);
+        if (officeUsers == null || officeUsers.isEmpty()) {
+            log.debug("notifyOfficePackageEvent: no recipients for office={}, package={}",
+                    officeLocationId, pkg.getId());
+            return;
+        }
+        var recipients = new LinkedHashSet<>(officeUsers);
+        if (actorId != null) {
+            recipients.remove(actorId);
+        }
+        if (recipients.isEmpty()) {
+            log.debug("notifyOfficePackageEvent: no recipients for office={}, package={}",
+                    officeLocationId, pkg.getId());
+            return;
+        }
+
+        var payload = buildOfficePackagePayload(pkg, actorId, officeLocationId);
+        var notice = saveNotice(NoticeResourceType.PACKAGE, pkg.getId(), eventType,
+                actorId, title, message, payload);
+        saveViewers(notice.getId(), recipients);
+        log.debug("notifyOfficePackageEvent: notice={} for office={}, {} recipient(s)",
+                notice.getId(), officeLocationId, recipients.size());
     }
 
     /**
@@ -179,6 +220,11 @@ public class NoticeService {
         saveViewers(notice.getId(), recipients);
         log.debug("notifyAssignmentObjected: notice={} for package={}, {} recipient(s)",
                 notice.getId(), pkg.getId(), recipients.size());
+
+        var officeId = assignedBy == null ? null : userService.getCompanyIdForUser(assignedBy);
+        notifyOfficePackageEvent(pkg, NoticeEventType.PACKAGE_OFFICE_UPDATE, driverId, officeId,
+                "Driver disputed an assignment",
+                String.format("Package %s was reported as not received by the driver.", pkg.getTrackingCode()));
     }
 
     /**
@@ -216,6 +262,10 @@ public class NoticeService {
         saveViewers(notice.getId(), recipients);
         log.debug("notifyOfficeClaimCreated: notice={} for package={}, {} recipient(s)",
                 notice.getId(), pkg.getId(), recipients.size());
+
+        notifyOfficePackageEvent(pkg, NoticeEventType.PACKAGE_OFFICE_UPDATE, workerId,
+                claim.getOfficeLocationId(), "Package claimed for your office",
+                String.format("Package %s was claimed from a driver and is ready for office intake.", pkg.getTrackingCode()));
     }
 
     /**
@@ -253,6 +303,10 @@ public class NoticeService {
         saveViewers(notice.getId(), recipients);
         log.debug("notifyOfficeClaimDisputed: notice={} for package={}, {} recipient(s)",
                 notice.getId(), pkg.getId(), recipients.size());
+
+        notifyOfficePackageEvent(pkg, NoticeEventType.PACKAGE_OFFICE_UPDATE, driverId,
+                claim.getOfficeLocationId(), "Office claim disputed",
+                String.format("The driver reported package %s as not delivered to your office.", pkg.getTrackingCode()));
     }
 
     /**
@@ -542,6 +596,7 @@ public class NoticeService {
             return JSON.writeValueAsString(payloadMap(
                     "resourceType", "PACKAGE",
                     "resourceId", pkg.getId().toString(),
+                    "packageId", pkg.getId().toString(),
                     "trackingCode", pkg.getTrackingCode(),
                     "previousStatus", previousStatus != null ? previousStatus.name() : null,
                     "newStatus", pkg.getStatus().name(),
@@ -550,6 +605,23 @@ public class NoticeService {
             ));
         } catch (JsonProcessingException e) {
             log.error("Failed to build package notice payload", e);
+            return "{}";
+        }
+    }
+
+    private String buildOfficePackagePayload(PackageEntity pkg, Long actorId, UUID officeLocationId) {
+        try {
+            return JSON.writeValueAsString(payloadMap(
+                    "resourceType", "PACKAGE",
+                    "resourceId", pkg.getId().toString(),
+                    "packageId", pkg.getId().toString(),
+                    "trackingCode", pkg.getTrackingCode(),
+                    "officeLocationId", officeLocationId.toString(),
+                    "actorId", actorId != null ? actorId.toString() : null,
+                    "changedAt", Instant.now().toString()
+            ));
+        } catch (JsonProcessingException e) {
+            log.error("Failed to build office package notice payload", e);
             return "{}";
         }
     }

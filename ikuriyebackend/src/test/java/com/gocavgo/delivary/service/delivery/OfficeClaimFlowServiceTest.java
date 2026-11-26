@@ -10,6 +10,7 @@ import com.gocavgo.delivary.enums.delivery.DeliveryType;
 import com.gocavgo.delivary.enums.delivery.LocationType;
 import com.gocavgo.delivary.enums.delivery.PackageOrigin;
 import com.gocavgo.delivary.enums.delivery.PackageStatus;
+import com.gocavgo.delivary.enums.delivery.SortOrder;
 import com.gocavgo.delivary.exception.BusinessValidationException;
 import com.gocavgo.delivary.repository.delivery.OfficeClaimJpaRepository;
 import com.gocavgo.delivary.repository.delivery.PackageCustodianJpaRepository;
@@ -96,6 +97,99 @@ class OfficeClaimFlowServiceTest {
         assertEquals(2, page.items().size());
         assertEquals(2, page.totalCount());
         assertEquals(0, page.currentPage());
+    }
+
+    @Test
+    void incomingQueueShowsFullOfficeLifecycleButKeepsCancelledPackagesHidden() {
+        var inTransit = pkg("11111111-1111-1111-1111-111111111111");
+        var delivered = pkg("22222222-2222-2222-2222-222222222222");
+        delivered.setStatus(PackageStatus.DELIVERED);
+        var cancelled = pkg("33333333-3333-3333-3333-333333333333");
+        cancelled.setStatus(PackageStatus.CANCELLED);
+        when(userService.getCompanyIdForUser(WORKER_ID)).thenReturn(OFFICE_ID);
+        when(packageLocationRepo.findPackageIdsByTypeAndOfficeLocationIdIn(
+                LocationType.DESTINATION, List.of(OFFICE_ID)))
+                .thenReturn(List.of(inTransit.getId(), delivered.getId(), cancelled.getId()));
+        when(packageRepo.findAllById(any())).thenReturn(List.of(inTransit, delivered, cancelled));
+        when(packageService.getPackageById(any())).thenAnswer(invocation -> mock(PackageResponse.class));
+
+        var page = service.getIncomingPackagesForOffice(WORKER_ID, null, 0, 20);
+
+        assertEquals(2, page.items().size());
+        assertEquals(2, page.totalCount());
+    }
+
+    @Test
+    void outgoingQueueFindsPackagesCreatedFromTheWorkersOfficeAcrossActiveStatuses() {
+        var created = pkg("11111111-1111-1111-1111-111111111111");
+        created.setStatus(PackageStatus.CREATED);
+        var inTransit = pkg("22222222-2222-2222-2222-222222222222");
+        var delivered = pkg("33333333-3333-3333-3333-333333333333");
+        delivered.setStatus(PackageStatus.DELIVERED);
+        var cancelled = pkg("44444444-4444-4444-4444-444444444444");
+        cancelled.setStatus(PackageStatus.CANCELLED);
+        when(userService.getCompanyIdForUser(WORKER_ID)).thenReturn(OFFICE_ID);
+        when(packageLocationRepo.findPackageIdsByTypeAndOfficeLocationIdIn(
+                LocationType.ORIGIN, List.of(OFFICE_ID)))
+                .thenReturn(List.of(created.getId(), inTransit.getId(), delivered.getId(), cancelled.getId()));
+        when(packageRepo.findAllById(any())).thenReturn(List.of(created, inTransit, delivered, cancelled));
+        when(packageService.getPackageById(any())).thenAnswer(invocation -> mock(PackageResponse.class));
+
+        var page = service.getOutgoingPackagesForOffice(WORKER_ID, null, 0, 20);
+
+        assertEquals(3, page.items().size());
+        assertEquals(3, page.totalCount());
+        verify(packageLocationRepo).findPackageIdsByTypeAndOfficeLocationIdIn(
+                LocationType.ORIGIN, List.of(OFFICE_ID));
+    }
+
+    @Test
+    void officeQueuesHonorSortOrder() {
+        var older = pkg("11111111-1111-1111-1111-111111111111");
+        older.setUpdatedAt(NOW.minusSeconds(600));
+        var newer = pkg("22222222-2222-2222-2222-222222222222");
+        newer.setUpdatedAt(NOW.minusSeconds(60));
+        when(userService.getCompanyIdForUser(WORKER_ID)).thenReturn(OFFICE_ID);
+        when(packageLocationRepo.findPackageIdsByTypeAndOfficeLocationIdIn(
+                LocationType.DESTINATION, List.of(OFFICE_ID)))
+                .thenReturn(List.of(older.getId(), newer.getId()));
+        when(packageRepo.findAllById(any())).thenReturn(List.of(older, newer));
+        when(packageService.getPackageById(any())).thenAnswer(invocation -> {
+            var response = mock(PackageResponse.class);
+            when(response.id()).thenReturn(invocation.getArgument(0));
+            return response;
+        });
+
+        var ascending = service.getIncomingPackagesForOffice(WORKER_ID, null, SortOrder.ASC, 0, 20);
+        var descending = service.getIncomingPackagesForOffice(WORKER_ID, null, SortOrder.DESC, 0, 20);
+
+        assertEquals(List.of(older.getId(), newer.getId()),
+                ascending.items().stream().map(PackageResponse::id).toList());
+        assertEquals(List.of(newer.getId(), older.getId()),
+                descending.items().stream().map(PackageResponse::id).toList());
+    }
+
+    @Test
+    void outgoingQueuePaginatesWithTotalCounts() {
+        var first = pkg("11111111-1111-1111-1111-111111111111");
+        first.setUpdatedAt(NOW.minusSeconds(300));
+        var second = pkg("22222222-2222-2222-2222-222222222222");
+        second.setUpdatedAt(NOW.minusSeconds(200));
+        var third = pkg("33333333-3333-3333-3333-333333333333");
+        third.setUpdatedAt(NOW.minusSeconds(100));
+        when(userService.getCompanyIdForUser(WORKER_ID)).thenReturn(OFFICE_ID);
+        when(packageLocationRepo.findPackageIdsByTypeAndOfficeLocationIdIn(
+                LocationType.ORIGIN, List.of(OFFICE_ID)))
+                .thenReturn(List.of(first.getId(), second.getId(), third.getId()));
+        when(packageRepo.findAllById(any())).thenReturn(List.of(first, second, third));
+        when(packageService.getPackageById(any())).thenAnswer(invocation -> mock(PackageResponse.class));
+
+        var page = service.getOutgoingPackagesForOffice(WORKER_ID, null, SortOrder.DESC, 1, 2);
+
+        assertEquals(1, page.items().size());
+        assertEquals(3, page.totalCount());
+        assertEquals(2, page.totalPages());
+        assertEquals(1, page.currentPage());
     }
 
     @Test

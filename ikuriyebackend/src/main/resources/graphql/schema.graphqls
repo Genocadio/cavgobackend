@@ -905,8 +905,19 @@ type Query {
         "Page size. Defaults to 20."
         size: Int = 20
     ): DeliveryPackagePage!
-    "Driver-held packages whose destination office matches the authenticated worker's office, ready to claim."
+    "Packages whose destination office matches the authenticated worker's office. Only driver-held ones are claimable."
     officeIncomingPackages(
+        "Optional office override; defaults to the authenticated worker's office."
+        officeLocationId: ID
+        "Sort order by last update (ASC, DESC). Defaults to DESC."
+        order: SortOrder = DESC
+        "Page number (0-based). Defaults to 0."
+        page: Int = 0
+        "Page size. Defaults to 20."
+        size: Int = 20
+    ): DeliveryPackagePage!
+    "Packages created from the authenticated worker's office, including ones already handed to a driver."
+    officeOutgoingPackages(
         "Optional office override; defaults to the authenticated worker's office."
         officeLocationId: ID
         "Sort order by last update (ASC, DESC). Defaults to DESC."
