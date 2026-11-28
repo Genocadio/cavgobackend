@@ -24,7 +24,9 @@ public class RabbitMQConfig {
     public static final String TRIP_SERVICE_TRIPS_UPDATES_EXCHANGE = "tripservice.trips.updates";
     public static final String BOOKINGS_BUNDLE_QUEUE = "bookingbundles.queue";
     public static final String BOOKINGS_BUNDLE_REPLY_QUEUE = "bookingbundles.reply.queue";
-    public static final String VEHICLE_LOCATION_UPDATES_QUEUE = "vehicle.location.updates";
+    // Only the fanout exchange is declared here. The real consuming queue
+    // "vehicle.location.updates.queue" belongs to cavgomain; the legacy queue
+    // "vehicle.location.updates" had no consumer and accumulated messages.
     public static final String VEHICLE_LOCATION_UPDATES_EXCHANGE = "vehicle.location.updates.fanout";
     public static final String VEHICLE_SETTINGS_QUEUE = "vehicle.settings.queue";
     public static final String VEHICLE_SETTINGS_EXCHANGE = "vehicle.settings.exchange";
@@ -126,18 +128,6 @@ public class RabbitMQConfig {
     @Bean
     public FanoutExchange vehicleLocationUpdatesFanoutExchange() {
         return new FanoutExchange(VEHICLE_LOCATION_UPDATES_EXCHANGE);
-    }
-
-    @Bean
-    public Queue vehicleLocationUpdatesQueue() {
-        // Queue already exists without DLQ in RabbitMQ (created by another service)
-        // Just declare it as durable without additional arguments to avoid mismatch
-        return QueueBuilder.durable(VEHICLE_LOCATION_UPDATES_QUEUE).build();
-    }
-
-    @Bean
-    public Binding vehicleLocationUpdatesBinding(Queue vehicleLocationUpdatesQueue, FanoutExchange vehicleLocationUpdatesFanoutExchange) {
-        return BindingBuilder.bind(vehicleLocationUpdatesQueue).to(vehicleLocationUpdatesFanoutExchange);
     }
 
     // Removed local trips fanout (trips.fanout) as it's no longer used

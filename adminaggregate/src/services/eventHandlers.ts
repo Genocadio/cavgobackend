@@ -1,4 +1,4 @@
-import type { VehicleEvent, DriverEvent, LocationUpdate, VehicleResponseDto, CompanyUserResponseDto, CurreLocation, TripEventMessage, RemoteTrip, NavigaTripUpdateEvent, NavigaLocationUpdateEvent, TripServiceEvent, TripSnapshot, Trip } from "../types";
+import type { VehicleEvent, DriverEvent, LocationUpdate, VehicleResponseDto, CompanyUserResponseDto, CurreLocation, TripEventMessage, RemoteTrip, NavigaTripUpdateEvent, NavigaLocationUpdateEvent, NavigaLocationDto, TripServiceEvent, TripSnapshot, Trip } from "../types";
 import { mapVehicleResponseDtoToCar } from "../mappers/vehicleMapper";
 import { mapCompanyUserResponseDtoToDriver } from "../mappers/driverMapper";
 import { mapRemoteTripToLocalTrip, mapTripServiceTripToLocalTrip } from "../mappers/tripMapper";
@@ -13,6 +13,17 @@ import { updateTripMetrics } from "./tripMetricsService";
 import * as syncService from "./syncService";
 import * as tripOccupancyService from "./tripOccupancyService";
 import { pubsub, TRIGGERS } from "./pubsub";
+
+/** Missing/NaN/Infinity means "not reported" — never a measured zero. */
+function finiteOrNull(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** Naviga GPS samples are m/s; cars.current_location stores km/h. */
+function kmhOrNull(value: number | null | undefined): number | null {
+  const metresPerSecond = finiteOrNull(value);
+  return metresPerSecond == null ? null : metresPerSecond * 3.6;
+}
 
 export async function handleVehicleEvent(message: Buffer): Promise<void> {
   const event: VehicleEvent = JSON.parse(message.toString());
@@ -125,8 +136,8 @@ export async function handleLocationUpdate(message: Buffer): Promise<void> {
       lat: update.current_latitude,
       lng: update.current_longitude,
     },
-    speed: update.current_speed ?? 0,
-    bearing: update.bearing ?? 0,
+    speed: finiteOrNull(update.current_speed),
+    bearing: finiteOrNull(update.bearing),
     timestamp: update.timestamp,
   };
   
@@ -141,9 +152,9 @@ export async function handleLocationUpdate(message: Buffer): Promise<void> {
     driverId: assignment?.driver?.id || null,
     latitude: update.current_latitude,
     longitude: update.current_longitude,
-    speed: update.current_speed ?? 0,
-    bearing: update.bearing ?? null,
-    accuracy: update.accuracy ?? null,
+    speed: finiteOrNull(update.current_speed),
+    bearing: finiteOrNull(update.bearing),
+    accuracy: finiteOrNull(update.accuracy),
     timestamp: update.timestamp,
   });
 }
@@ -500,7 +511,19 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
     }));
     
     for (const wp of event.trip.waypointProgresses) {
-      // Match by index: waypointIndex is 1-based, destination.index is 0-based
+      // waypointIndex 0 is the origin (published when includeOrigin=true), not a
+      // destination. Destinations are 1-based; destination.index is 0-based.
+      if (wp.waypointIndex <= 0) {
+        console.log(JSON.stringify({
+          level: "DEBUG",
+          event: "NAVIGA_ORIGIN_PROGRESS_SKIPPED",
+          tripId: tripId,
+          waypointIndex: wp.waypointIndex,
+          waypointId: wp.waypointId,
+          reason: "origin_is_not_a_destination",
+        }));
+        continue;
+      }
       const destination = trip.destinations.find(d => d.index === wp.waypointIndex - 1);
       
       if (destination) {
@@ -580,10 +603,8 @@ export async function handleNavigaTripUpdate(message: Buffer): Promise<void> {
         lng: event.trip.currentLocation.longitude,
       },
       // Naviga publishes m/s; cars.current_location stores km/h.
-      speed: typeof event.trip.currentLocation.speed === "number"
-        ? event.trip.currentLocation.speed * 3.6
-        : 0,
-      bearing: event.trip.currentLocation.heading ?? 0,
+      speed: kmhOrNull(event.trip.currentLocation.speed),
+      bearing: finiteOrNull(event.trip.currentLocation.heading),
       timestamp: new Date(event.trip.currentLocation.timestamp).getTime(),
     };
     
@@ -641,8 +662,24 @@ export async function handleNavigaLocationUpdate(message: Buffer): Promise<void>
   const assignment = await assignmentRepository.getDriverCarAssignmentByCarId(event.carId);
   const driverId = assignment?.driver?.id || null;
 
-  // Process all locations in the batch
+  // Process all locations in the batch and track the newest sample by
+  // timestamp. Replayed/out-of-order batches must not let an older trailing
+  // element overwrite a fresher current location.
+  let latestLocation: NavigaLocationDto | null = null;
+  let latestTimestampMs = Number.NEGATIVE_INFINITY;
+
   for (const location of event.locations) {
+    const timestampMs = new Date(location.timestamp).getTime();
+    if (!Number.isFinite(timestampMs)) {
+      console.warn(JSON.stringify({
+        level: "WARN",
+        event: "NAVIGA_LOCATION_INVALID_TIMESTAMP",
+        carId: event.carId,
+        timestamp: location.timestamp,
+      }));
+      continue;
+    }
+
     try {
       // Save location to car_locations table
       await carLocationRepository.createCarLocation({
@@ -651,10 +688,10 @@ export async function handleNavigaLocationUpdate(message: Buffer): Promise<void>
         latitude: location.latitude,
         longitude: location.longitude,
         // This fanout carries raw GPS samples in m/s; stored speed is km/h.
-        speed: typeof location.speed === "number" ? location.speed * 3.6 : 0,
-        bearing: location.heading,
-        accuracy: location.accuracy,
-        timestamp: new Date(location.timestamp).getTime(),
+        speed: kmhOrNull(location.speed),
+        bearing: finiteOrNull(location.heading),
+        accuracy: finiteOrNull(location.accuracy),
+        timestamp: timestampMs,
       });
     } catch (error) {
       console.error(JSON.stringify({
@@ -665,40 +702,42 @@ export async function handleNavigaLocationUpdate(message: Buffer): Promise<void>
         error: error instanceof Error ? error.message : String(error),
       }));
     }
+
+    if (timestampMs > latestTimestampMs) {
+      latestTimestampMs = timestampMs;
+      latestLocation = location;
+    }
   }
 
-  // Update car's current location with the latest location in the batch
-  if (event.locations.length > 0) {
-    const latestLocation = event.locations[event.locations.length - 1];
-    if (latestLocation) {
-      const currentLocation: CurreLocation = {
-        location: {
-          lat: latestLocation.latitude,
-          lng: latestLocation.longitude,
-        },
-        speed: typeof latestLocation.speed === "number" ? latestLocation.speed * 3.6 : 0,
-        bearing: latestLocation.heading ?? 0,
-        timestamp: new Date(latestLocation.timestamp).getTime(),
-      };
-      
-      try {
-        await carRepository.updateCarLocation(event.carId, currentLocation);
-        
-        console.log(JSON.stringify({
-          level: "INFO",
-          event: "NAVIGA_LOCATION_UPDATE_PROCESSED",
-          carId: event.carId,
-          locationsSaved: event.locations.length,
-          latestTimestamp: latestLocation.timestamp,
-        }));
-      } catch (error) {
-        console.error(JSON.stringify({
-          level: "ERROR",
-          event: "CAR_LOCATION_UPDATE_FAILED",
-          carId: event.carId,
-          error: error instanceof Error ? error.message : String(error),
-        }));
-      }
+  // Update car's current location with the newest sample in the batch
+  if (latestLocation) {
+    const currentLocation: CurreLocation = {
+      location: {
+        lat: latestLocation.latitude,
+        lng: latestLocation.longitude,
+      },
+      speed: kmhOrNull(latestLocation.speed),
+      bearing: finiteOrNull(latestLocation.heading),
+      timestamp: latestTimestampMs,
+    };
+
+    try {
+      await carRepository.updateCarLocation(event.carId, currentLocation);
+
+      console.log(JSON.stringify({
+        level: "INFO",
+        event: "NAVIGA_LOCATION_UPDATE_PROCESSED",
+        carId: event.carId,
+        locationsSaved: event.locations.length,
+        latestTimestamp: latestLocation.timestamp,
+      }));
+    } catch (error) {
+      console.error(JSON.stringify({
+        level: "ERROR",
+        event: "CAR_LOCATION_UPDATE_FAILED",
+        carId: event.carId,
+        error: error instanceof Error ? error.message : String(error),
+      }));
     }
   }
 }

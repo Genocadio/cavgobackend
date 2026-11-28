@@ -72,6 +72,11 @@ function parseTimestamp(value: string | null | undefined): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
+/** Missing or non-finite GPS values stay unknown instead of becoming a real zero. */
+function finiteOrNull(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function toCurrentLocation(location: InternalVehicleLocation | null | undefined): CurreLocation | null {
   if (!location || location.latitude == null || location.longitude == null) {
     return null;
@@ -79,8 +84,8 @@ function toCurrentLocation(location: InternalVehicleLocation | null | undefined)
   const timestamp = parseTimestamp(location.timestamp) ?? Date.now();
   return {
     location: { lat: location.latitude, lng: location.longitude },
-    speed: location.speed ?? 0,
-    bearing: location.bearing ?? 0,
+    speed: finiteOrNull(location.speed),
+    bearing: finiteOrNull(location.bearing),
     timestamp,
   };
 }

@@ -85,18 +85,21 @@ export async function main(): Promise<void> {
   syncService.startDataPolling();
 
   // 2. Setup RabbitMQ subscriptions
+  // Pass the handlers at connect time too: if the broker is down at startup,
+  // the service retains them and keeps retrying until subscriptions are up.
+  const messageHandlers: rabbitmq.MessageHandlers = {
+    onVehicleEvent: eventHandlers.handleVehicleEvent,
+    onDriverEvent: eventHandlers.handleDriverEvent,
+    onLocationUpdate: eventHandlers.handleLocationUpdate,
+    onTripEvent: eventHandlers.handleTripEvent,
+    onNavigaTripUpdate: eventHandlers.handleNavigaTripUpdate,
+    onNavigaLocationUpdate: eventHandlers.handleNavigaLocationUpdate,
+    onTripServiceEvent: eventHandlers.handleTripServiceEvent,
+    onTripSnapshotUpdate: eventHandlers.handleTripSnapshotUpdate,
+  };
   try {
-    await rabbitmq.connectRabbitMQ();
-    await rabbitmq.setupSubscriptions({
-      onVehicleEvent: eventHandlers.handleVehicleEvent,
-      onDriverEvent: eventHandlers.handleDriverEvent,
-      onLocationUpdate: eventHandlers.handleLocationUpdate,
-      onTripEvent: eventHandlers.handleTripEvent,
-      onNavigaTripUpdate: eventHandlers.handleNavigaTripUpdate,
-      onNavigaLocationUpdate: eventHandlers.handleNavigaLocationUpdate,
-      onTripServiceEvent: eventHandlers.handleTripServiceEvent,
-      onTripSnapshotUpdate: eventHandlers.handleTripSnapshotUpdate,
-    });
+    await rabbitmq.connectRabbitMQ(messageHandlers);
+    await rabbitmq.setupSubscriptions(messageHandlers);
   } catch (error) {
     console.error("Failed to setup RabbitMQ subscriptions:", error);
     // Continue anyway - API will still work

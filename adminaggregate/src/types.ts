@@ -58,8 +58,9 @@ export interface LatLang {
 
 export interface CurreLocation {
     location: LatLang;
-    speed: number;
-    bearing: number;
+    // A missing/invalid GPS sample must stay unknown; 0 is a real speed.
+    speed: number | null;
+    bearing: number | null;
     timestamp: number;
 }
 
@@ -534,7 +535,7 @@ export interface NavigaCurrentLocationDto {
   carId: string;
   latitude: number;
   longitude: number;
-  speed: number;
+  speed: number | null; // m/s, null when the device did not report it
   heading: number | null;
   timestamp: string; // ISO 8601
 }
@@ -560,7 +561,7 @@ export interface NavigaLocationDto {
   carId: string;
   latitude: number;
   longitude: number;
-  speed: number;
+  speed: number | null; // m/s, null when the device did not report it
   heading: number | null;
   accuracy: number | null;
   timestamp: string; // ISO 8601

@@ -233,7 +233,7 @@ export const carLocations = pgTable("car_locations", {
   driverId: text("driver_id").references(() => drivers.id),
   latitude: doublePrecision("latitude").notNull(),
   longitude: doublePrecision("longitude").notNull(),
-  speed: doublePrecision("speed").notNull(),
+  speed: doublePrecision("speed"),
   bearing: doublePrecision("bearing"),
   accuracy: doublePrecision("accuracy"),
   timestamp: timestamp("timestamp", { withTimezone: true }).notNull(),

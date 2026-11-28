@@ -31,8 +31,8 @@ const mapCar = (row: CarRow): Car => ({
           lat: row.currentLocationLatitude,
           lng: row.currentLocationLongitude,
         },
-        speed: row.currentLocationSpeed ?? 0,
-        bearing: row.currentLocationBearing ?? 0,
+        speed: row.currentLocationSpeed,
+        bearing: row.currentLocationBearing,
         timestamp: row.currentLocationTimestamp.getTime(),
       }
     : null,

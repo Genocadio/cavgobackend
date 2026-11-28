@@ -1062,9 +1062,11 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 		updates["current_longitude"] = evt.Trip.CurrentLocation.Longitude
 	}
 
-	// Waypoint progress mapping (origin not included; first element is first waypoint, last is destination)
+	// Waypoint progress mapping. Navigation publishes a 1-based waypointIndex
+	// into the original waypoint array (index 0 is the origin when
+	// includeOrigin=true); our DB waypoint `order` is also 1-based for
+	// non-origin stops. Older publishers omitted the index entirely.
 	if len(evt.Trip.WaypointProgresses) > 0 {
-		lastIdx := len(evt.Trip.WaypointProgresses) - 1
 		// Build order->waypoint map from existing trip
 		byOrder := make(map[int]*models.TripWaypoint, len(trip.Waypoints))
 		for i := range trip.Waypoints {
@@ -1072,129 +1074,162 @@ func (s *TripService) UpdateTripFromNavigaEvent(evt models.NavigaTripUpdateEvent
 			byOrder[wp.Order] = wp
 		}
 
-		// Update destination remaining values to trip-level
-		destProg := evt.Trip.WaypointProgresses[lastIdx]
-		rd := destProg.RemainingDistance
-		rt := destProg.RemainingTime
-		rdPtr := rd
-		rtInt := int64(rt)
-		updates["remaining_distance_to_destination"] = rdPtr
-		updates["remaining_time_to_destination"] = rtInt
-
-		log.Printf("[NavigaUpdate] Parsed trip=%d mapped_status=%s dest_state=%s remaining_distance=%.2f remaining_time=%.0f", tripID, mappedStatus, destProg.State, destProg.RemainingDistance, destProg.RemainingTime)
-
-		// Find the first non-passed waypoint to mark as is_next
-		var nextWaypointOrder int = -1
-		for idx, prog := range evt.Trip.WaypointProgresses {
-			if idx == lastIdx {
-				continue // skip destination
-			}
-			if prog.State != "DONE" && prog.State != "ARRIVED" {
-				nextWaypointOrder = idx + 1
+		// Use the event's index directly when present. Fall back to the 1-based
+		// batch position only for legacy events with no usable index. When some
+		// progresses carry an index, a zero index is the origin and is skipped.
+		hasIndexedProgress := false
+		for _, prog := range evt.Trip.WaypointProgresses {
+			if prog.WaypointIndex > 0 {
+				hasIndexedProgress = true
 				break
 			}
 		}
-
-		// Apply waypoint updates for all non-destination waypoints (index -> order = index+1)
+		orders := make([]int, len(evt.Trip.WaypointProgresses))
+		destIdx := -1
 		for idx, prog := range evt.Trip.WaypointProgresses {
-			if idx == lastIdx {
-				continue // destination handled separately
+			if prog.WaypointIndex > 0 {
+				orders[idx] = prog.WaypointIndex
+				destIdx = idx
+				continue
 			}
-			order := idx + 1 // first progress maps to first waypoint (order=1)
-			if wp, ok := byOrder[order]; ok {
-				// Skip updating waypoints that are already marked as passed
-				if wp.IsPassed {
-					continue
-				}
-
-				wupd := map[string]interface{}{
-					"updated_at":         time.Now(),
-					"remaining_distance": prog.RemainingDistance,
-					"remaining_time":     int64(prog.RemainingTime),
-				}
-// Passed logic: mark DONE or ARRIVED as passed
-			if (prog.State == "DONE" || prog.State == "ARRIVED") && prog.RemainingDistance <= passedRemainingMaxMeters {
-				wupd["is_passed"] = true
-				wupd["is_next"] = false // ensure not marked as next if passed
-				// Use arrivedAt if valid, otherwise use event timestamp
-				if prog.ArrivedAt != nil && !prog.ArrivedAt.IsZero() {
-					wupd["passed_timestamp"] = prog.ArrivedAt.Unix()
-				} else {
-					wupd["passed_timestamp"] = evt.Timestamp.Unix()
-				}
-			} else if prog.State == "APPROACHING" {
-					// APPROACHING waypoints are not passed
-					wupd["is_passed"] = false
-					// Mark as next only if this is the first non-passed waypoint
-					wupd["is_next"] = (order == nextWaypointOrder)
-				}
-				if err := s.tripRepo.UpdateWaypointProgress(wp.ID, wupd); err != nil {
-					log.Printf("[NavigaUpdate] Failed to update waypoint %d (order=%d): %v", wp.ID, order, err)
-				}
+			if hasIndexedProgress {
+				log.Printf("[NavigaUpdate] Skipping origin waypoint progress trip=%d position=%d waypointIndex=%d; origin is not a trip waypoint", tripID, idx, prog.WaypointIndex)
+				continue
 			}
+			// Legacy event without waypointIndex: positional 1-based fallback.
+			orders[idx] = idx + 1
+			destIdx = idx
 		}
 
-		// Handle destination waypoint (last one)
-		destOrder := lastIdx + 1
-		if destWp, ok := byOrder[destOrder]; ok {
-			// Only update destination if not already passed
-			if !destWp.IsPassed {
-				destUpd := map[string]interface{}{
-					"updated_at":         time.Now(),
-					"remaining_distance": destProg.RemainingDistance,
-					"remaining_time":     int64(destProg.RemainingTime),
+		if destIdx < 0 {
+			log.Printf("[NavigaUpdate] Trip=%d has only origin waypoint progresses; skipping waypoint mapping", tripID)
+		} else {
+			// The last non-origin progress is the destination. Destination
+			// remaining distance/time are written from it even if already passed.
+			destProg := evt.Trip.WaypointProgresses[destIdx]
+			rd := destProg.RemainingDistance
+			rt := destProg.RemainingTime
+			rdPtr := rd
+			rtInt := int64(rt)
+			updates["remaining_distance_to_destination"] = rdPtr
+			updates["remaining_time_to_destination"] = rtInt
+
+			log.Printf("[NavigaUpdate] Parsed trip=%d mapped_status=%s dest_state=%s remaining_distance=%.2f remaining_time=%.0f", tripID, mappedStatus, destProg.State, destProg.RemainingDistance, destProg.RemainingTime)
+
+			// Find the first non-passed waypoint to mark as is_next
+			var nextWaypointOrder int = -1
+			for idx, prog := range evt.Trip.WaypointProgresses {
+				if idx == destIdx || orders[idx] == 0 {
+					continue // skip destination and origin progress
 				}
-				// ARRIVED state marks the destination as reached (guard against bogus
-				// far-away GPS events: only when the reported remaining distance is sane)
-				if destProg.State == "ARRIVED" && destProg.RemainingDistance <= passedRemainingMaxMeters {
-					destUpd["is_passed"] = true
-					destUpd["is_next"] = false
-					// Use arrivedAt if valid, otherwise use event timestamp
-					if destProg.ArrivedAt != nil && !destProg.ArrivedAt.IsZero() {
-						destUpd["passed_timestamp"] = destProg.ArrivedAt.Unix()
-					} else {
-						destUpd["passed_timestamp"] = evt.Timestamp.Unix()
+				if prog.State != "DONE" && prog.State != "ARRIVED" {
+					nextWaypointOrder = orders[idx]
+					break
+				}
+			}
+
+			// Apply waypoint updates to intermediates. DB order is the 1-based
+			// waypointIndex reported by Navigation (idx+1 only for legacy events).
+			for idx, prog := range evt.Trip.WaypointProgresses {
+				if idx == destIdx || orders[idx] == 0 {
+					continue // destination handled separately
+				}
+				order := orders[idx]
+				if wp, ok := byOrder[order]; ok {
+					// Skip updating waypoints that are already marked as passed
+					if wp.IsPassed {
+						continue
 					}
-				} else if destProg.State == "APPROACHING" {
-					// Destination is approaching (next stop after all intermediates)
-					destUpd["is_passed"] = false
-					destUpd["is_next"] = (destOrder == nextWaypointOrder)
-				}
-				if err := s.tripRepo.UpdateWaypointProgress(destWp.ID, destUpd); err != nil {
-					log.Printf("[NavigaUpdate] Failed to update destination waypoint %d: %v", destWp.ID, err)
-				}
-			}
-		}
 
-		// If destination reached, complete trip and mark all intermediates as passed
-		if destProg.State == "ARRIVED" || evt.Trip.Status == "COMPLETED" {
-			updates["status"] = "COMPLETED"
-			// Use arrivedAt if valid, otherwise try completedAt, otherwise use event timestamp
-			if destProg.ArrivedAt != nil && !destProg.ArrivedAt.IsZero() {
-				updates["completion_time"] = destProg.ArrivedAt.Unix()
-			} else if evt.Trip.CompletedAt != nil && !evt.Trip.CompletedAt.IsZero() {
-				updates["completion_time"] = evt.Trip.CompletedAt.Unix()
-			} else {
-				updates["completion_time"] = evt.Timestamp.Unix()
-			}
-			// Mark all remaining non-passed waypoints as passed when trip completes
-			for _, wp := range byOrder {
-				if !wp.IsPassed {
 					wupd := map[string]interface{}{
-						"is_passed":  true,
-						"is_next":    false,
-						"updated_at": time.Now(),
+						"updated_at":         time.Now(),
+						"remaining_distance": prog.RemainingDistance,
+						"remaining_time":     int64(prog.RemainingTime),
 					}
-					// Use arrivedAt if valid, otherwise use event timestamp
-					if destProg.ArrivedAt != nil && !destProg.ArrivedAt.IsZero() {
-						wupd["passed_timestamp"] = destProg.ArrivedAt.Unix()
-					} else {
-						wupd["passed_timestamp"] = evt.Timestamp.Unix()
+					// Passed logic: mark DONE or ARRIVED as passed
+					if (prog.State == "DONE" || prog.State == "ARRIVED") && prog.RemainingDistance <= passedRemainingMaxMeters {
+						wupd["is_passed"] = true
+						wupd["is_next"] = false // ensure not marked as next if passed
+						// Use arrivedAt if valid, otherwise use event timestamp
+						if prog.ArrivedAt != nil && !prog.ArrivedAt.IsZero() {
+							wupd["passed_timestamp"] = prog.ArrivedAt.Unix()
+						} else {
+							wupd["passed_timestamp"] = evt.Timestamp.Unix()
+						}
+					} else if prog.State == "APPROACHING" {
+						// APPROACHING waypoints are not passed
+						wupd["is_passed"] = false
+						// Mark as next only if this is the first non-passed waypoint
+						wupd["is_next"] = (order == nextWaypointOrder)
 					}
-					_ = s.tripRepo.UpdateWaypointProgress(wp.ID, wupd)
+					if err := s.tripRepo.UpdateWaypointProgress(wp.ID, wupd); err != nil {
+						log.Printf("[NavigaUpdate] Failed to update waypoint %d (order=%d): %v", wp.ID, order, err)
+					}
 				}
 			}
-		}
+
+			// Handle destination waypoint (last non-origin progress)
+			destOrder := orders[destIdx]
+			if destWp, ok := byOrder[destOrder]; ok {
+				// Only update destination if not already passed
+				if !destWp.IsPassed {
+					destUpd := map[string]interface{}{
+						"updated_at":         time.Now(),
+						"remaining_distance": destProg.RemainingDistance,
+						"remaining_time":     int64(destProg.RemainingTime),
+					}
+					// ARRIVED state marks the destination as reached (guard against bogus
+					// far-away GPS events: only when the reported remaining distance is sane)
+					if destProg.State == "ARRIVED" && destProg.RemainingDistance <= passedRemainingMaxMeters {
+						destUpd["is_passed"] = true
+						destUpd["is_next"] = false
+						// Use arrivedAt if valid, otherwise use event timestamp
+						if destProg.ArrivedAt != nil && !destProg.ArrivedAt.IsZero() {
+							destUpd["passed_timestamp"] = destProg.ArrivedAt.Unix()
+						} else {
+							destUpd["passed_timestamp"] = evt.Timestamp.Unix()
+						}
+					} else if destProg.State == "APPROACHING" {
+						// Destination is approaching (next stop after all intermediates)
+						destUpd["is_passed"] = false
+						destUpd["is_next"] = (destOrder == nextWaypointOrder)
+					}
+					if err := s.tripRepo.UpdateWaypointProgress(destWp.ID, destUpd); err != nil {
+						log.Printf("[NavigaUpdate] Failed to update destination waypoint %d: %v", destWp.ID, err)
+					}
+				}
+			}
+
+			// If destination reached, complete trip and mark all intermediates as passed
+			if destProg.State == "ARRIVED" || evt.Trip.Status == "COMPLETED" {
+				updates["status"] = "COMPLETED"
+				// Use arrivedAt if valid, otherwise try completedAt, otherwise use event timestamp
+				if destProg.ArrivedAt != nil && !destProg.ArrivedAt.IsZero() {
+					updates["completion_time"] = destProg.ArrivedAt.Unix()
+				} else if evt.Trip.CompletedAt != nil && !evt.Trip.CompletedAt.IsZero() {
+					updates["completion_time"] = evt.Trip.CompletedAt.Unix()
+				} else {
+					updates["completion_time"] = evt.Timestamp.Unix()
+				}
+				// Mark all remaining non-passed waypoints as passed when trip completes
+				for _, wp := range byOrder {
+					if !wp.IsPassed {
+						wupd := map[string]interface{}{
+							"is_passed":  true,
+							"is_next":    false,
+							"updated_at": time.Now(),
+						}
+						// Use arrivedAt if valid, otherwise use event timestamp
+						if destProg.ArrivedAt != nil && !destProg.ArrivedAt.IsZero() {
+							wupd["passed_timestamp"] = destProg.ArrivedAt.Unix()
+						} else {
+							wupd["passed_timestamp"] = evt.Timestamp.Unix()
+						}
+						_ = s.tripRepo.UpdateWaypointProgress(wp.ID, wupd)
+					}
+				}
+			}
+		} // end of valid (non-origin-only) progresses
 	}
 
 	if err := s.tripRepo.UpdateProgress(tripID, updates); err != nil {

@@ -89,8 +89,9 @@ const typeDefs = gql`
 
   type CurrentLocation {
     location: LatLang!
-    speed: Float!
-    bearing: Float!
+    # null means "not reported", which is different from a measured zero.
+    speed: Float
+    bearing: Float
     timestamp: Float!
   }
 

@@ -6,7 +6,7 @@ export interface CarLocationData {
   driverId: string | null;
   latitude: number;
   longitude: number;
-  speed: number;
+  speed: number | null;
   bearing: number | null;
   accuracy: number | null;
   timestamp: number;

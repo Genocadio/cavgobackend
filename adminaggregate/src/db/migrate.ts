@@ -300,7 +300,7 @@ export async function migrate(): Promise<void> {
         driver_id TEXT REFERENCES drivers(id),
         latitude DOUBLE PRECISION NOT NULL,
         longitude DOUBLE PRECISION NOT NULL,
-        speed DOUBLE PRECISION NOT NULL,
+        speed DOUBLE PRECISION,
         bearing DOUBLE PRECISION NOT NULL,
         accuracy DOUBLE PRECISION NOT NULL,
         timestamp TIMESTAMPTZ NOT NULL
@@ -363,8 +363,18 @@ export async function migrate(): Promise<void> {
 
     // Alter existing tables for backward-compatible schema evolution
     await client.query(`
-      DO $$ 
+      DO $$
       BEGIN
+        -- Make speed nullable: a missing GPS reading is not a measured 0 km/h.
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'car_locations'
+          AND column_name = 'speed'
+          AND is_nullable = 'NO'
+        ) THEN
+          ALTER TABLE car_locations ALTER COLUMN speed DROP NOT NULL;
+        END IF;
+
         -- Make bearing nullable if it's currently NOT NULL
         IF EXISTS (
           SELECT 1 FROM information_schema.columns 

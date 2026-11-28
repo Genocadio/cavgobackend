@@ -177,7 +177,14 @@ public class MqttLocationListenerService {
                                     gpsUpdate.getTimestamp()
                                 ));
                             }
-                            
+
+                            // Consumers use the last batch element as the newest sample.
+                            // Publish oldest-first (stable sort) so an out-of-order
+                            // replay cannot make them overwrite a fresher location.
+                            locationDtos.sort((a, b) -> Long.compare(
+                                    timestampMillis(a.getTimestamp()),
+                                    timestampMillis(b.getTimestamp())));
+
                             NavigaLocationUpdateEvent locationEvent = new NavigaLocationUpdateEvent(
                                 batch.getVehicleId(),
                                 locationDtos,
@@ -221,6 +228,18 @@ public class MqttLocationListenerService {
 
         logger.info("✅ Finished processing location batch");
         logger.info("═══════════════════════════════════════════════════════════════");
+    }
+
+    /** ISO-8601 timestamp to epoch millis; unparseable values sort first. */
+    private static long timestampMillis(String timestamp) {
+        if (timestamp == null) {
+            return Long.MIN_VALUE;
+        }
+        try {
+            return java.time.Instant.parse(timestamp).toEpochMilli();
+        } catch (java.time.format.DateTimeParseException e) {
+            return Long.MIN_VALUE;
+        }
     }
 
     /**
